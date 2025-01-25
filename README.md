@@ -1,162 +1,202 @@
-# Amazon Deals ASIN 爬虫
 
-这是一个用于爬取 Amazon Deals 页面商品 ASIN 的自动化工具。
+# Amazon Deals & Products API
 
-## 功能特点
+[English](#english) | [中文](#chinese)
 
-- 自动爬取 Amazon Deals 页面的商品 ASIN
-- 支持多种输出格式（TXT、CSV、JSON）
-- 智能滚动和动态加载处理
-- 自动处理连接问题和重试机制
-- 默认使用无头模式运行
-- 可配置的超时和目标数量
-- 详细的进度和统计信息
+## English
 
-## 环境要求
+### Project Overview
+A comprehensive platform for fetching Amazon deals and product information, featuring web crawling and PA-API integration capabilities using FastAPI framework.
 
-- Python 3.6+
-- Chrome 浏览器
-- 以下 Python 包：
-  ```
-  selenium
-  webdriver_manager
-  ```
+### Features
+- Crawl Amazon deals pages for product ASINs
+- Fetch detailed product information via PA-API
+- RESTful API endpoints for all functionalities
+- Background task processing
+- Multiple output formats support (JSON, CSV, TXT)
+- Health monitoring endpoint
 
-## 安装
+### Project Structure
+```
+.
+├── README.md                  # Project documentation
+├── amazon_crawler_api.py      # Main API implementation
+├── amazon_bestseller.py       # Web crawler core logic
+├── amazon_product_api.py      # PA-API integration
+├── models/                    # Data models
+│   ├── __init__.py
+│   ├── crawler.py            # Crawler related models
+│   └── product.py            # Product related models
+└── crawler_results/          # Crawler output directory
+```
 
-1. 克隆仓库：
-   ```bash
-   git clone <repository-url>
-   cd amazon-deals-crawler
-   ```
+### API Endpoints
+- **Crawler Endpoints**
+  - `POST /api/crawl` - Start a new crawler task
+  - `GET /api/status/{task_id}` - Check task status
+  - `GET /api/download/{task_id}` - Download crawler results
 
-2. 安装依赖：
-   ```bash
-   pip install selenium webdriver-manager
-   ```
+- **Product Endpoints**
+  - `POST /api/products` - Get product information
+  - `POST /api/products/save` - Save product information to file
 
-3. 确保已安装 Chrome 浏览器
+- **System Endpoint**
+  - `GET /api/health` - Health check
 
-## 使用方法
+### Environment Variables
+```
+AMAZON_ACCESS_KEY=your_access_key
+AMAZON_SECRET_KEY=your_secret_key
+AMAZON_PARTNER_TAG=your_partner_tag
+```
 
-### 基本用法
-
+### Installation
 ```bash
-python amazon_bestseller.py
+# Install dependencies
+pnpm install
+
+# Run the application
+python amazon_crawler_api.py
 ```
 
-### 命令行参数
+### API Documentation
+Access the interactive API documentation at:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| --max-items | 要爬取的商品数量 | 500 | --max-items 1000 |
-| --output | 输出文件路径 | asin_list.txt | --output results.csv |
-| --format | 输出格式(txt/csv/json) | txt | --format json |
-| --no-headless | 禁用无头模式 | False | --no-headless |
-| --timeout | 无新商品超时时间(秒) | 30 | --timeout 60 |
+---
 
-### 使用示例
+## Chinese
 
-1. 爬取1000个商品并保存为JSON格式：
-   ```bash
-   python amazon_bestseller.py --max-items 1000 --format json
-   ```
+### 项目概述
+一个用于获取Amazon优惠和商品信息的综合平台，使用FastAPI框架实现网页爬虫和PA-API集成功能。
 
-2. 禁用无头模式运行（显示浏览器界面）：
-   ```bash
-   python amazon_bestseller.py --no-headless --output results/deals.csv --format csv
-   ```
+### 功能特点
+- 爬取Amazon优惠页面获取商品ASIN
+- 通过PA-API获取详细商品信息
+- 所有功能均提供RESTful API接口
+- 后台任务处理
+- 支持多种输出格式（JSON、CSV、TXT）
+- 健康监控接口
 
-3. 自定义超时时间：
-   ```bash
-   python amazon_bestseller.py --timeout 60 --max-items 200
-   ```
-
-## 输出格式
-
-### TXT 格式
+### 项目结构
 ```
-B07XXXXX1
-B07XXXXX2
-B07XXXXX3
+.
+├── README.md                  # 项目文档
+├── amazon_crawler_api.py      # 主API实现
+├── amazon_bestseller.py       # 爬虫核心逻辑
+├── amazon_product_api.py      # PA-API集成
+├── models/                    # 数据模型
+│   ├── __init__.py
+│   ├── crawler.py            # 爬虫相关模型
+│   └── product.py            # 商品相关模型
+└── crawler_results/          # 爬虫结果输出目录
 ```
 
-### CSV 格式
-```csv
-ASIN,Index
-B07XXXXX1,1
-B07XXXXX2,2
-B07XXXXX3,3
+### API接口
+- **爬虫相关接口**
+  - `POST /api/crawl` - 启动新的爬虫任务
+  - `GET /api/status/{task_id}` - 检查任务状态
+  - `GET /api/download/{task_id}` - 下载爬虫结果
+
+- **商品相关接口**
+  - `POST /api/products` - 获取商品信息
+  - `POST /api/products/save` - 保存商品信息到文件
+
+- **系统接口**
+  - `GET /api/health` - 健康检查
+
+### 环境变量
+```
+AMAZON_ACCESS_KEY=你的访问密钥
+AMAZON_SECRET_KEY=你的秘密密钥
+AMAZON_PARTNER_TAG=你的合作伙伴标签
 ```
 
-### JSON 格式
-```json
-{
-  "metadata": {
-    "total_count": 500,
-    "timestamp": "2025-01-25 16:38:21",
-    "source": "amazon_deals"
-  },
-  "asins": [
-    "B07XXXXX1",
-    "B07XXXXX2",
-    "B07XXXXX3"
-  ]
-}
+### 安装部署
+```bash
+# 安装依赖
+pnpm install
+
+# 运行应用
+python amazon_crawler_api.py
 ```
 
-## 代码结构
+### API文档
+访问交互式API文档：
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
-### 主要函数
+### 开发规范
+1. 代码风格遵循PEP 8规范
+2. 每个函数和类都需要添加文档字符串
+3. 使用类型注解
+4. 代码提交前进行格式化和测试
+5. 保持代码模块化和可维护性
 
-- `parse_arguments()`: 命令行参数解析
-- `save_results()`: 结果保存，支持多种格式
-- `setup_driver()`: 配置 Selenium WebDriver
-- `scroll_page()`: 智能滚动页面
-- `handle_connection_problem()`: 处理连接问题
-- `extract_asin_from_url()`: 从URL提取ASIN
-- `crawl_deals()`: 主爬虫逻辑
+### 注意事项
+1. 确保环境变量正确配置
+2. 爬虫使用时注意遵守目标网站的robots.txt规则
+3. 定期检查PA-API的配额使用情况
+4. 建议在生产环境中使用代理池
+```
 
-## 性能优化
+此外，建议在项目根目录下创建以下文件：
 
-1. 禁用图片加载加快页面加载
-2. 智能滚动算法避免无效滚动
-3. 自动重试机制处理连接问题
-4. 动态等待时间减少不必要的延迟
+1. `.env.example` 文件示例：
+```plaintext:.env.example
+AMAZON_ACCESS_KEY=your_access_key
+AMAZON_SECRET_KEY=your_secret_key
+AMAZON_PARTNER_TAG=your_partner_tag
+```
 
-## 注意事项
+2. `.gitignore` 文件：
+```plaintext:.gitignore
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
 
-1. 需要稳定的网络连接
-2. 可能需要配置代理以避免 IP 限制
-3. 建议不要设置过大的爬取数量
-4. 遵守 Amazon 的使用条款和爬虫规则
+# Virtual Environment
+venv/
+ENV/
 
-## 常见问题
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-1. 如果遇到连接问题，脚本会自动重试
-2. 无头模式可能在某些环境下不稳定
-3. 输出目录不存在会自动创建
+# Project specific
+crawler_results/
+.env
+```
 
-## 更新日志
-
-### v1.0.0 (2025-01-25)
-- 初始版本发布
-- 支持基本的ASIN爬取功能
-- 添加命令行参数支持
-- 支持多种输出格式
-
-## 待优化项
-
-1. 添加代理支持
-2. 实现断点续传
-3. 添加更多的数据验证
-4. 优化内存使用
-5. 添加并发支持
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request 来帮助改进这个项目。
-
-## 许可证
-
-MIT License 
+3. `requirements.txt` 文件：
+```plaintext:requirements.txt
+fastapi==0.104.1
+uvicorn==0.24.0
+selenium==4.15.2
+webdriver-manager==4.0.1
+python-dotenv==1.0.0
+pydantic==2.5.1
+requests==2.31.0
+beautifulsoup4==4.12.2
+```

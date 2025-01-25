@@ -1,0 +1,15 @@
+fastapi==0.115.7
+uvicorn==0.34.0
+selenium==4.28.1
+webdriver-manager==4.0.2
+python-dotenv==1.0.1
+pydantic==2.10.6
+requests==2.32.3
+beautifulsoup4==4.12.3
+python-amazon-paapi==5.0.1
+python-multipart==0.0.20
+certifi >= 14.05.14
+six >= 1.10
+python_dateutil >= 2.5.3
+setuptools >= 21.0.0
+urllib3 >= 1.15.1
