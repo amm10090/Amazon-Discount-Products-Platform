@@ -33,3 +33,4 @@ dist/
 build/
 *.egg-info/ 
 .cursorignore
+asin_list.txt
