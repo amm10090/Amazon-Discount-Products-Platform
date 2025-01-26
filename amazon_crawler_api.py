@@ -11,6 +11,10 @@ from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
 from models.product import ProductInfo
 from pydantic import BaseModel
 from amazon_product_api import AmazonProductAPI
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -200,5 +204,30 @@ async def health_check():
         "timestamp": datetime.now().isoformat()
     }
 
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """获取缓存统计信息"""
+    try:
+        api = get_product_api()
+        return api.cache_manager.get_cache_stats()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取缓存统计信息失败: {str(e)}"
+        )
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """清理过期缓存"""
+    try:
+        api = get_product_api()
+        api.cache_manager.clear_expired()
+        return {"status": "success", "message": "过期缓存已清理"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清理缓存失败: {str(e)}"
+        )
+
 if __name__ == "__main__":
-    uvicorn.run("amazon_crawler_api:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run("amazon_crawler_api:app", host="localhost", port=8000, reload=True) 

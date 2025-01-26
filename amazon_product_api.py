@@ -8,9 +8,10 @@ import hashlib
 from datetime import datetime
 import urllib.parse
 from models.product import ProductInfo, ProductOffer
+from models.cache_manager import CacheManager
 
 class AmazonProductAPI:
-    def __init__(self, access_key: str, secret_key: str, partner_tag: str, marketplace: str = "www.amazon.com"):
+    def __init__(self, access_key: str, secret_key: str, partner_tag: str, marketplace: str = "www.amazon.com", cache_dir: str = "cache"):
         """
         初始化Amazon Product API客户端
         
@@ -19,6 +20,7 @@ class AmazonProductAPI:
             secret_key: Amazon PA-API密钥
             partner_tag: Amazon Associates合作伙伴标签
             marketplace: 目标市场（默认为美国）
+            cache_dir: 缓存目录路径
         """
         self.access_key = access_key
         self.secret_key = secret_key
@@ -27,6 +29,7 @@ class AmazonProductAPI:
         self.host = "webservices.amazon.com"
         self.region = "us-east-1"
         self.service = "ProductAdvertisingAPI"
+        self.cache_manager = CacheManager(cache_dir)
         
     def _sign(self, key: bytes, msg: str) -> bytes:
         """计算HMAC-SHA256签名"""
@@ -100,7 +103,7 @@ class AmazonProductAPI:
 
     def get_products_by_asins(self, asins: List[str]) -> List[ProductInfo]:
         """
-        通过ASIN列表获取商品信息
+        通过ASIN列表获取商品信息，支持缓存
         
         Args:
             asins: ASIN列表（最多10个）
@@ -114,11 +117,28 @@ class AmazonProductAPI:
         # 确保ASIN数量不超过10个
         if len(asins) > 10:
             raise ValueError("一次最多只能查询10个ASIN")
+        
+        products = []
+        uncached_asins = []
+        
+        # 首先检查缓存
+        for asin in asins:
+            cached_data = self.cache_manager.get(asin)
+            if cached_data:
+                # 从缓存创建ProductInfo对象
+                product = ProductInfo(**cached_data)
+                products.append(product)
+            else:
+                uncached_asins.append(asin)
+                
+        # 如果所有商品都在缓存中，直接返回
+        if not uncached_asins:
+            return products
             
         try:
             # 准备请求数据
             payload = {
-                "ItemIds": asins,
+                "ItemIds": uncached_asins,
                 "Resources": [
                     # Offers资源
                     "Offers.Listings.Availability.MaxOrderQuantity",
@@ -201,37 +221,34 @@ class AmazonProductAPI:
             response_data = response.json()
             print(f"响应数据: {json.dumps(response_data, indent=2)}")  # 打印完整响应用于调试
             
-            products = []
-            
-            if 'ItemsResult' not in response_data or 'Items' not in response_data['ItemsResult']:
-                return products
-                
-            for item in response_data['ItemsResult']['Items']:
-                # 提取优惠信息
-                offers = self._extract_offer_from_item(item)
-                
-                # 获取商品图片
-                main_image = None
-                if 'Images' in item and 'Primary' in item['Images']:
-                    main_image = item['Images']['Primary'].get('Large', {}).get('URL')
-                
-                # 获取品牌信息
-                brand = None
-                if ('ItemInfo' in item and 'ByLineInfo' in item['ItemInfo'] and 
-                    'Brand' in item['ItemInfo']['ByLineInfo']):
-                    brand = item['ItemInfo']['ByLineInfo']['Brand'].get('DisplayValue')
-                
-                # 创建商品信息对象
-                product = ProductInfo(
-                    asin=item['ASIN'],
-                    title=item.get('ItemInfo', {}).get('Title', {}).get('DisplayValue', ''),
-                    url=item.get('DetailPageURL', ''),
-                    brand=brand,
-                    main_image=main_image,
-                    offers=offers
-                )
-                
-                products.append(product)
+            if 'ItemsResult' in response_data and 'Items' in response_data['ItemsResult']:
+                for item in response_data['ItemsResult']['Items']:
+                    # 提取商品信息
+                    offers = self._extract_offer_from_item(item)
+                    main_image = None
+                    if 'Images' in item and 'Primary' in item['Images']:
+                        main_image = item['Images']['Primary'].get('Large', {}).get('URL')
+                    
+                    brand = None
+                    if ('ItemInfo' in item and 'ByLineInfo' in item['ItemInfo'] and 
+                        'Brand' in item['ItemInfo']['ByLineInfo']):
+                        brand = item['ItemInfo']['ByLineInfo']['Brand'].get('DisplayValue')
+                    
+                    # 创建商品信息对象
+                    product = ProductInfo(
+                        asin=item['ASIN'],
+                        title=item.get('ItemInfo', {}).get('Title', {}).get('DisplayValue', ''),
+                        url=item.get('DetailPageURL', ''),
+                        brand=brand,
+                        main_image=main_image,
+                        offers=offers,
+                        timestamp=datetime.utcnow()
+                    )
+                    
+                    # 缓存商品信息
+                    self.cache_manager.set(item['ASIN'], product.dict())
+                    
+                    products.append(product)
             
             return products
             
@@ -239,10 +256,10 @@ class AmazonProductAPI:
             print(f"请求错误: {str(e)}")
             if hasattr(e.response, 'text'):
                 print(f"错误详情: {e.response.text}")
-            return []
+            return products  # 返回已从缓存获取的商品
         except Exception as e:
             print(f"获取商品信息时出错: {str(e)}")
-            return []
+            return products  # 返回已从缓存获取的商品
 
     def save_products_info(self, products: List[ProductInfo], output_file: str):
         """
@@ -274,6 +291,10 @@ class AmazonProductAPI:
             
         except Exception as e:
             print(f"保存商品信息时出错: {str(e)}")
+
+    def clear_expired_cache(self):
+        """清理过期的缓存"""
+        self.cache_manager.clear_expired()
 
 def main():
     """示例用法"""

@@ -35,3 +35,5 @@ build/
 .cursorignore
 asin_list.txt
 crawler_results
+amazon_products.db
+cache
