@@ -122,6 +122,9 @@ class ProductService:
         current_time = datetime.utcnow()
         
         for product_info in products:
+            # 获取第一个优惠（通常是最佳优惠）
+            best_offer = product_info.offers[0] if product_info.offers else None
+            
             # 查找现有产品
             product = db.query(Product).filter(Product.asin == product_info.asin).first()
             
@@ -133,9 +136,36 @@ class ProductService:
                     url=product_info.url,
                     brand=product_info.brand,
                     main_image=product_info.main_image,
+                    
+                    # 价格信息
+                    current_price=best_offer.price if best_offer else None,
+                    original_price=best_offer.price + best_offer.savings if best_offer and best_offer.savings else None,
+                    currency=best_offer.currency if best_offer else None,
+                    savings_amount=best_offer.savings if best_offer else None,
+                    savings_percentage=best_offer.savings_percentage if best_offer else None,
+                    
+                    # Prime信息
+                    is_prime=best_offer.is_prime if best_offer else None,
+                    is_prime_exclusive=False,  # 需要从API响应中提取
+                    
+                    # 商品状态
+                    condition=best_offer.condition if best_offer else None,
+                    availability=best_offer.availability if best_offer else None,
+                    merchant_name=best_offer.merchant_name if best_offer else None,
+                    is_buybox_winner=best_offer.is_buybox_winner if best_offer else None,
+                    
+                    # 其他信息
+                    deal_type=best_offer.deal_type if best_offer else None,
+                    features=[],  # 需要从API响应中提取
+                    
+                    # 时间信息
                     created_at=current_time,
                     updated_at=current_time,
-                    timestamp=current_time
+                    timestamp=current_time,
+                    
+                    # 元数据
+                    source="pa-api",
+                    raw_data=product_info.dict()
                 )
                 db.add(product)
             else:
@@ -144,8 +174,29 @@ class ProductService:
                 product.url = product_info.url
                 product.brand = product_info.brand
                 product.main_image = product_info.main_image
+                
+                # 更新价格信息
+                if best_offer:
+                    product.current_price = best_offer.price
+                    product.original_price = best_offer.price + best_offer.savings if best_offer.savings else None
+                    product.currency = best_offer.currency
+                    product.savings_amount = best_offer.savings
+                    product.savings_percentage = best_offer.savings_percentage
+                    
+                    # 更新Prime信息
+                    product.is_prime = best_offer.is_prime
+                    
+                    # 更新商品状态
+                    product.condition = best_offer.condition
+                    product.availability = best_offer.availability
+                    product.merchant_name = best_offer.merchant_name
+                    product.is_buybox_winner = best_offer.is_buybox_winner
+                    product.deal_type = best_offer.deal_type
+                
+                # 更新时间和元数据
                 product.updated_at = current_time
                 product.timestamp = current_time
+                product.raw_data = product_info.dict()
             
             # 删除旧的优惠信息
             db.query(Offer).filter(Offer.product_id == product.asin).delete()
@@ -192,25 +243,25 @@ class ProductService:
         获取产品列表，支持分页、筛选和排序
         """
         # 构建基础查询
-        query = db.query(Product).join(Offer)
+        query = db.query(Product)
         
         # 应用筛选条件
         if min_price is not None:
-            query = query.filter(Offer.price >= min_price)
+            query = query.filter(Product.current_price >= min_price)
         if max_price is not None:
-            query = query.filter(Offer.price <= max_price)
+            query = query.filter(Product.current_price <= max_price)
         if min_discount is not None:
-            query = query.filter(Offer.savings_percentage >= min_discount)
+            query = query.filter(Product.savings_percentage >= min_discount)
         if is_prime_only:
-            query = query.filter(Offer.is_prime == True)
+            query = query.filter(Product.is_prime == True)
             
         # 应用排序
         if sort_by:
             order_func = desc if sort_order == "desc" else asc
             if sort_by == "price":
-                query = query.order_by(order_func(Offer.price))
+                query = query.order_by(order_func(Product.current_price))
             elif sort_by == "discount":
-                query = query.order_by(order_func(Offer.savings_percentage))
+                query = query.order_by(order_func(Product.savings_percentage))
             elif sort_by == "timestamp":
                 query = query.order_by(order_func(Product.timestamp))
                 
