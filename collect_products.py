@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def collect_products(
-    max_items: int = 100,
+    max_items: int = None,
     batch_size: int = 10,
     timeout: int = 30,
     headless: bool = True
@@ -21,11 +21,15 @@ def collect_products(
     采集Amazon产品数据并存储到数据库
     
     Args:
-        max_items: 要采集的最大商品数量
+        max_items: 要采集的最大商品数量，如果为None则从环境变量读取
         batch_size: 每批处理的ASIN数量（PA-API限制最多10个）
         timeout: 爬虫超时时间（秒）
         headless: 是否使用无头模式运行爬虫
     """
+    # 从环境变量获取max_items
+    if max_items is None:
+        max_items = int(os.getenv("MAX_ITEMS", 100))
+        
     print("\n" + "="*50)
     print(f"[{datetime.now()}] 开始数据采集任务")
     print(f"目标数量: {max_items}")
@@ -113,7 +117,6 @@ def collect_products(
 if __name__ == "__main__":
     # 开始采集任务
     collect_products(
-        max_items=100,  # 采集100个商品
         batch_size=10,  # 每次查询10个ASIN
         timeout=30,     # 爬虫超时时间30秒
         headless=True   # 使用无头模式
