@@ -1,17 +1,30 @@
+# API框架
 fastapi==0.115.7
 uvicorn==0.34.0
+
+# 数据库
+sqlalchemy==2.0.37
+aiosqlite==0.20.0
+
+# 爬虫相关
 selenium==4.28.1
 webdriver-manager==4.0.2
-python-dotenv==1.0.1
-pydantic==2.10.6
-requests==2.32.3
 beautifulsoup4==4.12.3
-python-amazon-paapi==5.0.1
-python-multipart==0.0.20
-sqlalchemy==1.4.41
-certifi >= 14.05.14
-six >= 1.10
-python_dateutil >= 2.5.3
-setuptools >= 21.0.0
-urllib3 >= 1.15.1
-alembic>=1.7.0  # 数据库迁移工具
+
+# PA-API相关
+requests==2.32.3
+python-dotenv==1.0.1
+
+# 数据处理
+pandas==2.2.3
+numpy==2.2.2
+
+# 前端界面
+streamlit==1.41.1
+plotly==5.24.1
+openpyxl==3.1.5
+
+# 工具库
+python-dateutil==2.9.0
+tqdm==4.67.1
+loguru==0.7.3
