@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, Depends
 from typing import Dict, List, Optional
 from datetime import datetime
 import asyncio
@@ -12,9 +12,16 @@ from models.product import ProductInfo
 from pydantic import BaseModel
 from amazon_product_api import AmazonProductAPI
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+from models.database import SessionLocal, init_db
+from models.product_service import ProductService
+from enum import Enum
 
 # 加载环境变量
 load_dotenv()
+
+# 初始化数据库
+init_db()
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -30,6 +37,29 @@ tasks_status: Dict[str, Dict] = {}
 class ProductRequest(BaseModel):
     asins: List[str]
     marketplace: Optional[str] = "www.amazon.com"
+
+# 排序字段枚举
+class SortField(str, Enum):
+    price = "price"
+    discount = "discount"
+    timestamp = "timestamp"
+
+# 排序方向枚举
+class SortOrder(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+# 数据库会话依赖
+def get_db():
+    """获取数据库会话"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass  # 忽略关闭时的错误
 
 # 初始化AmazonProductAPI
 def get_product_api(marketplace: str = "www.amazon.com") -> AmazonProductAPI:
@@ -229,5 +259,100 @@ async def clear_cache():
             detail=f"清理缓存失败: {str(e)}"
         )
 
+@app.get("/api/products/list", response_model=List[ProductInfo])
+async def list_products(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    sort_by: Optional[SortField] = Query(None, description="排序字段"),
+    sort_order: SortOrder = Query(SortOrder.desc, description="排序方向"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品")
+):
+    """
+    获取产品列表，支持分页、价格范围、折扣率筛选和排序
+    """
+    try:
+        products = ProductService.list_products(
+            db,
+            page=page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_prime_only=is_prime_only
+        )
+        return products
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取产品列表失败: {str(e)}"
+        )
+
+@app.get("/api/products/{asin}", response_model=ProductInfo)
+async def get_product(
+    asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
+    db: Session = Depends(get_db)
+):
+    """
+    根据ASIN获取单个产品详情
+    """
+    try:
+        product = ProductService.get_product_by_asin(db, asin)
+        if not product:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到ASIN为 {asin} 的产品"
+            )
+        return product
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取产品信息失败: {str(e)}"
+        )
+
+@app.get("/api/products/stats")
+async def get_products_stats(db: Session = Depends(get_db)):
+    """
+    获取产品数据统计信息
+    """
+    try:
+        stats = ProductService.get_stats(db)
+        return {
+            "total_products": stats["total_products"],
+            "avg_price": stats["avg_price"],
+            "avg_discount": stats["avg_discount"],
+            "prime_products": stats["prime_products"],
+            "last_update": stats["last_update"],
+            "price_range": {
+                "min": stats["min_price"],
+                "max": stats["max_price"]
+            },
+            "discount_range": {
+                "min": stats["min_discount"],
+                "max": stats["max_discount"]
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取统计信息失败: {str(e)}"
+        )
+
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时的事件处理"""
+    # 确保数据库表已创建
+    init_db()
+    print("数据库初始化完成")
+
 if __name__ == "__main__":
-    uvicorn.run("amazon_crawler_api:app", host="localhost", port=8000, reload=True) 
+    print("请使用以下命令启动服务：")
+    print("开发模式（支持热更新）: python dev.py")
+    print("生产模式: uvicorn amazon_crawler_api:app --host localhost --port 8000") 

@@ -9,6 +9,10 @@ A comprehensive platform for fetching Amazon deals and product information, feat
 
 ### Features
 - Crawl Amazon deals pages for product ASINs
+  - Support for maintaining product display order
+  - Smart handling of color variants (avoiding duplicate ASINs)
+  - Intelligent scrolling and pagination
+  - Configurable timeout and item limits
 - Fetch detailed product information via PA-API
 - RESTful API endpoints for all functionalities
 - Background task processing
@@ -32,6 +36,22 @@ A comprehensive platform for fetching Amazon deals and product information, feat
 │   └── cache_manager.py      # Cache manager
 ├── cache/                    # Cache directory
 └── crawler_results/          # Crawler output directory
+```
+
+### Crawler Usage
+```bash
+# Basic usage
+python amazon_bestseller.py
+
+# With parameters
+python amazon_bestseller.py --max-items 100 --timeout 60 --no-headless --format json
+
+# Parameters:
+--max-items     Number of items to crawl (default: 50)
+--timeout       Timeout for no new items (default: 30 seconds)
+--no-headless   Disable headless mode
+--format        Output format (txt/csv/json)
+--output        Output file path
 ```
 
 ### API Endpoints
@@ -94,14 +114,39 @@ The system implements an intelligent caching mechanism to optimize API calls and
 # Install dependencies
 pnpm install
 
-# Run the application
-python amazon_crawler_api.py
+# Development mode (with hot-reload)
+python dev.py
+
+# Production mode
+uvicorn amazon_crawler_api:app --host 0.0.0.0 --port 8000
 ```
 
 ### API Documentation
 Access the interactive API documentation at:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+### Development
+The project supports hot-reload during development:
+
+1. Start in development mode:
+```bash
+python dev.py
+```
+
+2. Features in development mode:
+- Hot-reload enabled
+- Auto-restart on code changes
+- Debug logging
+- Monitored directories: `.` and `models/`
+
+3. Environment configuration:
+```bash
+# Development settings in .env
+API_HOST=127.0.0.1  # Development server host
+API_PORT=8000       # Development server port
+DEBUG_MODE=True     # Enable debug mode
+```
 
 ---
 
@@ -112,14 +157,52 @@ Access the interactive API documentation at:
 
 ### 功能特点
 - 爬取Amazon优惠页面获取商品ASIN
+  - 支持保持商品显示顺序
+  - 智能处理颜色变体（避免重复ASIN）
+  - 智能滚动和分页加载
+  - 可配置超时和商品数量限制
 - 通过PA-API获取详细商品信息
 - 所有功能均提供RESTful API接口
 - 后台任务处理
 - 支持多种输出格式（JSON、CSV、TXT）
 - 健康监控接口
-- 支持Amazon PA-API产品数据获取
-- 实现智能缓存机制，提高性能和稳定性
-- 支持商品折扣和优惠信息爬取
+
+### 爬虫使用方法
+```bash
+# 基本用法
+python amazon_bestseller.py
+
+# 带参数使用
+python amazon_bestseller.py --max-items 100 --timeout 60 --no-headless --format json
+
+# 参数说明：
+--max-items     要爬取的商品数量（默认：50）
+--timeout       无新商品超时时间（默认：30秒）
+--no-headless   禁用无头模式
+--format        输出格式（txt/csv/json）
+--output        输出文件路径
+```
+
+### 爬虫功能说明
+1. 商品去重机制
+   - 使用主ASIN作为唯一标识
+   - 智能处理颜色变体，避免重复计数
+   - 保持商品在页面中的显示顺序
+
+2. 智能滚动
+   - 自适应页面高度
+   - 动态加载检测
+   - 自动处理"加载更多"按钮
+
+3. 输出格式
+   - TXT格式：每行一个ASIN
+   - CSV格式：包含序号和ASIN
+   - JSON格式：包含元数据和ASIN列表
+
+4. 错误处理
+   - 自动重试机制
+   - 连接问题智能处理
+   - 详细的日志输出
 
 ### 项目结构
 ```
@@ -205,8 +288,11 @@ CACHE_TTL_DEFAULT=86400    # 默认缓存时间（24小时）
 # 安装依赖
 pnpm install
 
-# 运行应用
-python amazon_crawler_api.py
+# 开发模式（支持热更新）
+python dev.py
+
+# 生产模式
+uvicorn amazon_crawler_api:app --host 0.0.0.0 --port 8000
 ```
 
 ### API文档

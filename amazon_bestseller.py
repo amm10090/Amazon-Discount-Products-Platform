@@ -16,7 +16,7 @@ import csv
 def parse_arguments():
     """添加命令行参数支持"""
     parser = argparse.ArgumentParser(description='Amazon Deals ASIN爬虫')
-    parser.add_argument('--max-items', type=int, default=500, help='要爬取的商品数量')
+    parser.add_argument('--max-items', type=int, default=50, help='要爬取的商品数量')
     parser.add_argument('--output', type=str, default='asin_list.txt', help='输出文件路径')
     parser.add_argument('--format', type=str, choices=['txt', 'csv', 'json'], default='txt', help='输出文件格式')
     parser.add_argument('--no-headless', action='store_true', help='禁用无头模式')
@@ -31,7 +31,7 @@ def save_results(asins, filename, format='txt'):
     
     if format == 'txt':
         with open(filename, 'w', encoding='utf-8') as f:
-            for asin in sorted(asins):
+            for asin in asins:  # 直接使用列表顺序
                 f.write(f"{asin}\n")
         print(f"结果已保存到: {filename} (TXT格式)")
     
@@ -39,7 +39,7 @@ def save_results(asins, filename, format='txt'):
         with open(filename, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['ASIN', 'Index'])  # 写入表头
-            for idx, asin in enumerate(sorted(asins), 1):
+            for idx, asin in enumerate(asins, 1):  # 保持原始顺序
                 writer.writerow([asin, idx])
         print(f"结果已保存到: {filename} (CSV格式)")
     
@@ -51,7 +51,7 @@ def save_results(asins, filename, format='txt'):
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
                     'source': 'amazon_deals'
                 },
-                'asins': sorted(list(asins))
+                'asins': list(asins)  # 保持原始顺序
             }, f, indent=2, ensure_ascii=False)
         print(f"结果已保存到: {filename} (JSON格式)")
 
@@ -158,7 +158,8 @@ def scroll_page(driver, scroll_count):
 
 def crawl_deals(max_items=100, timeout=30, headless=False):
     driver = setup_driver(headless=headless)
-    all_asins = set()
+    all_asins = []  # 改用列表存储，保持顺序
+    seen_asins = set()  # 用于去重检查
     page_height = 0
     no_new_items_count = 0
     connection_retry_count = 0
@@ -177,21 +178,17 @@ def crawl_deals(max_items=100, timeout=30, headless=False):
         driver.get('https://www.amazon.com/deals')
         time.sleep(3)
         
-        # 初始化页面
+        # 初始化页面 - 定位viewport容器
         print(f"[{time.strftime('%H:%M:%S')}] 初始化页面...")
         wait = WebDriverWait(driver, 5)
-        for selector in [
-            'div[data-testid="grid-deals-container"]',
-            'div[class*="dealContainer"]',
-            'div[class*="DealGridItem"]',
-            'div[class*="DealCard"]'
-        ]:
-            try:
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
-                print(f"[{time.strftime('%H:%M:%S')}] 成功找到商品容器: {selector}")
-                break
-            except TimeoutException:
-                continue
+        try:
+            viewport_container = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-viewport-type="window"]'))
+            )
+            print(f"[{time.strftime('%H:%M:%S')}] 成功找到viewport容器")
+        except TimeoutException:
+            print(f"[{time.strftime('%H:%M:%S')}] ⚠️ 未找到viewport容器，请检查页面结构")
+            return all_asins
         
         scroll_count = 0
         last_success_time = time.time()
@@ -218,7 +215,7 @@ def crawl_deals(max_items=100, timeout=30, headless=False):
             
             # 检查并点击"View more deals"按钮
             try:
-                view_more_button = driver.find_element(By.CSS_SELECTOR, 'button[data-testid="load-more-view-more-button"]')
+                view_more_button = viewport_container.find_element(By.CSS_SELECTOR, 'button[data-testid="load-more-view-more-button"]')
                 if view_more_button and view_more_button.is_displayed():
                     print(f"[{time.strftime('%H:%M:%S')}] 发现'View more deals'按钮，正在点击...")
                     driver.execute_script("arguments[0].scrollIntoView(true);", view_more_button)
@@ -236,25 +233,34 @@ def crawl_deals(max_items=100, timeout=30, headless=False):
                 time.sleep(1)
                 continue
             
-            # 获取商品ASIN
+            # 获取商品ASIN - 只从viewport容器内获取
             previous_count = len(all_asins)
-            product_elements = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/dp/"]')
-            
-            for element in product_elements:
-                if len(all_asins) >= max_items:
-                    print(f"\n[{time.strftime('%H:%M:%S')}] ✓ 已达到目标数量: {max_items}")
-                    return all_asins
+            try:
+                # 首先找到所有产品卡片容器，按照页面顺序
+                product_cards = viewport_container.find_elements(
+                    By.CSS_SELECTOR, 
+                    'div[data-testid^="B"][class*="GridItem-module__container"]'
+                )
+                
+                for card in product_cards:
+                    if len(all_asins) >= max_items:
+                        print(f"\n[{time.strftime('%H:%M:%S')}] ✓ 已达到目标数量: {max_items}")
+                        return all_asins
                     
-                try:
-                    href = element.get_attribute('href')
-                    if href:
-                        asin = extract_asin_from_url(href)
-                        if asin and asin not in all_asins:
-                            all_asins.add(asin)
+                    try:
+                        # 获取产品卡片的data-testid属性（主ASIN）
+                        main_asin = card.get_attribute('data-testid')
+                        if main_asin and main_asin not in seen_asins:  # 使用seen_asins进行去重检查
+                            seen_asins.add(main_asin)  # 添加到去重集合
+                            all_asins.append(main_asin)  # 按顺序添加到列表
                             if len(all_asins) % 10 == 0:
                                 print(f"[{time.strftime('%H:%M:%S')}] 进度: {len(all_asins)}/{max_items} ({(len(all_asins)/max_items*100):.1f}%)")
-                except Exception:
-                    continue
+                    except Exception as e:
+                        print(f"[{time.strftime('%H:%M:%S')}] ⚠️ 获取ASIN失败: {str(e)}")
+                        continue
+            except Exception as e:
+                print(f"[{time.strftime('%H:%M:%S')}] ⚠️ 获取商品元素失败: {str(e)}")
+                continue
             
             new_items = len(all_asins) - previous_count
             if new_items > 0:
