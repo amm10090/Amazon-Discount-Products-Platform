@@ -80,6 +80,10 @@ class Offer(Base):
     savings = Column(Float)
     savings_percentage = Column(Integer)
     
+    # 优惠券信息
+    coupon_type = Column(String(50))      # 优惠券类型（percentage/fixed）
+    coupon_value = Column(Float)          # 优惠券值（百分比或固定金额）
+    
     # 商品状态
     condition = Column(String(50))
     availability = Column(String(200))

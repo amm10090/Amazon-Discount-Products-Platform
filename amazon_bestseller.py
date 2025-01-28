@@ -12,6 +12,9 @@ import re
 import argparse
 from pathlib import Path
 import csv
+import asyncio
+from typing import List, Set
+import aiofiles
 
 def parse_arguments():
     """添加命令行参数支持"""
@@ -157,7 +160,23 @@ def scroll_page(driver, scroll_count):
         print(f"[{time.strftime('%H:%M:%S')}] 滚动出错: {str(e)}")
         return False
 
-def crawl_deals(max_items=100, timeout=30, headless=False):
+async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[str]:
+    """
+    异步爬取Amazon Deals页面的商品ASIN
+    
+    Args:
+        max_items: 最大爬取商品数量
+        timeout: 无新商品超时时间（秒）
+        headless: 是否使用无头模式
+        
+    Returns:
+        List[str]: ASIN列表
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: _sync_crawl_deals(max_items, timeout, headless))
+
+def _sync_crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[str]:
+    """同步爬取实现"""
     driver = setup_driver(headless=headless)
     all_asins = []  # 改用列表存储，保持顺序
     seen_asins = set()  # 用于去重检查
@@ -287,16 +306,56 @@ def crawl_deals(max_items=100, timeout=30, headless=False):
     
     return all_asins
 
-if __name__ == "__main__":
+async def save_results(asins: List[str], filename: str, format: str = 'txt') -> None:
+    """异步保存结果到文件"""
+    # 确保输出目录存在
+    output_path = Path(filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if format == 'txt':
+        async with aiofiles.open(filename, 'w', encoding='utf-8') as f:
+            for asin in asins:
+                await f.write(f"{asin}\n")
+        print(f"结果已保存到: {filename} (TXT格式)")
+    
+    elif format == 'csv':
+        async with aiofiles.open(filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            await f.write('ASIN,Index\n')  # 写入表头
+            for idx, asin in enumerate(asins, 1):
+                await f.write(f"{asin},{idx}\n")
+        print(f"结果已保存到: {filename} (CSV格式)")
+    
+    elif format == 'json':
+        data = {
+            'metadata': {
+                'total_count': len(asins),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'source': 'amazon_deals'
+            },
+            'asins': list(asins)
+        }
+        async with aiofiles.open(filename, 'w', encoding='utf-8') as f:
+            await f.write(json.dumps(data, indent=2, ensure_ascii=False))
+        print(f"结果已保存到: {filename} (JSON格式)")
+
+async def main():
+    """异步主函数"""
     # 解析命令行参数
-    args = parse_arguments()
+    parser = argparse.ArgumentParser(description='Amazon Deals ASIN爬虫')
+    parser.add_argument('--max-items', type=int, default=50, help='要爬取的商品数量')
+    parser.add_argument('--output', type=str, default='asin_list.txt', help='输出文件路径')
+    parser.add_argument('--format', type=str, choices=['txt', 'csv', 'json'], default='txt', help='输出文件格式')
+    parser.add_argument('--no-headless', action='store_true', help='禁用无头模式')
+    parser.add_argument('--timeout', type=int, default=30, help='无新商品超时时间(秒)')
+    args = parser.parse_args()
     
     # 开始爬取
     print(f"开始爬取Amazon Deals页面...")
-    asins = crawl_deals(
+    asins = await crawl_deals(
         max_items=args.max_items,
         timeout=args.timeout,
-        headless=not args.no_headless  # 反转no-headless参数
+        headless=not args.no_headless
     )
     
     # 确保输出文件扩展名与格式匹配
@@ -305,6 +364,9 @@ if __name__ == "__main__":
         output_file = f"{output_file.rsplit('.', 1)[0]}.{args.format}"
     
     # 保存结果
-    save_results(asins, output_file, args.format)
+    await save_results(asins, output_file, args.format)
     
     print(f"\n任务完成！共找到 {len(asins)} 个唯一ASIN")
+
+if __name__ == "__main__":
+    asyncio.run(main())

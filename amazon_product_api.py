@@ -1,8 +1,9 @@
 from typing import List, Dict
 import os
+import asyncio
 from datetime import datetime
 import json
-import requests
+import aiohttp
 import hmac
 import hashlib
 from datetime import datetime
@@ -30,6 +31,18 @@ class AmazonProductAPI:
         self.region = "us-east-1"
         self.service = "ProductAdvertisingAPI"
         self.cache_manager = CacheManager(cache_dir)
+        self._session = None
+        
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        self._session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器退出"""
+        if self._session:
+            await self._session.close()
+            self._session = None
         
     def _sign(self, key: bytes, msg: str) -> bytes:
         """计算HMAC-SHA256签名"""
@@ -101,9 +114,9 @@ class AmazonProductAPI:
             
         return offers
 
-    def get_products_by_asins(self, asins: List[str]) -> List[ProductInfo]:
+    async def get_products_by_asins(self, asins: List[str]) -> List[ProductInfo]:
         """
-        通过ASIN列表获取商品信息，支持缓存
+        通过ASIN列表异步获取商品信息，支持缓存
         
         Args:
             asins: ASIN列表（最多10个）
@@ -206,20 +219,15 @@ class AmazonProductAPI:
             # 生成授权头
             headers['Authorization'] = self._get_authorization_header(amz_date, date_stamp, canonical_request)
             
-            # 发送请求
+            # 发送异步请求
             url = f'https://{self.host}{canonical_uri}'
-            response = requests.post(url, headers=headers, data=payload_json)
             
-            # 打印请求和响应信息用于调试
-            print(f"请求URL: {url}")
-            print(f"请求头: {headers}")
-            print(f"请求体: {payload_json}")
-            
-            response.raise_for_status()
-            
-            # 解析响应
-            response_data = response.json()
-            print(f"响应数据: {json.dumps(response_data, indent=2)}")  # 打印完整响应用于调试
+            if not self._session:
+                self._session = aiohttp.ClientSession()
+                
+            async with self._session.post(url, headers=headers, data=payload_json) as response:
+                response.raise_for_status()
+                response_data = await response.json()
             
             if 'ItemsResult' in response_data and 'Items' in response_data['ItemsResult']:
                 for item in response_data['ItemsResult']['Items']:
@@ -247,94 +255,45 @@ class AmazonProductAPI:
                     
                     # 缓存商品信息
                     self.cache_manager.set(item['ASIN'], product.dict())
-                    
                     products.append(product)
-            
-            return products
-            
-        except requests.exceptions.RequestException as e:
-            print(f"请求错误: {str(e)}")
-            if hasattr(e.response, 'text'):
-                print(f"错误详情: {e.response.text}")
-            return products  # 返回已从缓存获取的商品
+                    
         except Exception as e:
             print(f"获取商品信息时出错: {str(e)}")
-            return products  # 返回已从缓存获取的商品
+            raise
+            
+        return products
 
-    def save_products_info(self, products: List[ProductInfo], output_file: str):
-        """
-        保存商品信息到文件
-        
-        Args:
-            products: 商品信息列表
-            output_file: 输出文件路径
-        """
+    async def save_products_info(self, products: List[ProductInfo], output_file: str):
+        """异步保存商品信息到文件"""
         try:
-            # 将商品信息转换为字典列表
-            products_data = [product.dict() for product in products]
-            
-            # 确保输出目录存在
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            
-            # 保存为JSON文件
             with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'metadata': {
-                        'total_count': len(products),
-                        'timestamp': datetime.now().isoformat(),
-                        'source': 'paapi5-direct'
-                    },
-                    'products': products_data
-                }, f, indent=2, ensure_ascii=False)
-                
-            print(f"商品信息已保存到: {output_file}")
-            
+                json.dump([p.dict() for p in products], f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存商品信息时出错: {str(e)}")
+            raise
 
     def clear_expired_cache(self):
-        """清理过期的缓存"""
+        """清理过期缓存"""
         self.cache_manager.clear_expired()
 
-def main():
-    """示例用法"""
-    # 从环境变量获取API凭证
+async def main():
+    """异步主函数示例"""
+    # 从环境变量获取凭证
     access_key = os.getenv("AMAZON_ACCESS_KEY")
     secret_key = os.getenv("AMAZON_SECRET_KEY")
     partner_tag = os.getenv("AMAZON_PARTNER_TAG")
     
     if not all([access_key, secret_key, partner_tag]):
-        print("请设置必要的环境变量：AMAZON_ACCESS_KEY, AMAZON_SECRET_KEY, AMAZON_PARTNER_TAG")
+        print("请设置必要的环境变量")
         return
-    
-    # 创建API客户端
-    api = AmazonProductAPI(
-        access_key=access_key,
-        secret_key=secret_key,
-        partner_tag=partner_tag
-    )
-    
-    # 测试ASIN列表
-    test_asins = ["B0199980K4", "B000HZD168"]
-    
-    # 获取商品信息
-    products = api.get_products_by_asins(test_asins)
-    
-    # 保存结果
-    if products:
-        api.save_products_info(products, "product_results/product_info.json")
         
-        # 打印简要信息
-        print("\n获取到的商品信息:")
-        for product in products:
-            print(f"\nASIN: {product.asin}")
-            print(f"标题: {product.title}")
-            if product.offers:
-                print(f"最低价格: {product.offers[0].price} {product.offers[0].currency}")
-                if product.offers[0].savings:
-                    print(f"节省: {product.offers[0].savings} ({product.offers[0].savings_percentage}%)")
-    else:
-        print("未获取到商品信息")
+    # 测试ASIN列表
+    test_asins = ["B01NBKTPTS", "B00X4WHP5E", "B00FLYWNYQ"]
+    
+    async with AmazonProductAPI(access_key, secret_key, partner_tag) as api:
+        products = await api.get_products_by_asins(test_asins)
+        await api.save_products_info(products, "test_products.json")
+        print(f"成功获取并保存了 {len(products)} 个商品信息")
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main()) 

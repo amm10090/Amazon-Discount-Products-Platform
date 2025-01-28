@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime
 import colorama
 from colorama import Fore, Back, Style
+import asyncio
+import aiofiles
 
 # 初始化colorama
 colorama.init()
@@ -239,18 +241,23 @@ def handle_connection_problem(driver) -> bool:
         pass
     return False
 
-def crawl_coupon_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[Dict]:
+async def crawl_coupon_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[Dict]:
     """
-    抓取带优惠券的商品信息
+    异步爬取Amazon优惠券商品数据
     
     Args:
-        max_items: 最大抓取商品数量
+        max_items: 最大爬取商品数量
         timeout: 无新商品超时时间（秒）
         headless: 是否使用无头模式
         
     Returns:
         List[Dict]: 包含商品ASIN和优惠券信息的列表
     """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: _sync_crawl_coupon_deals(max_items, timeout, headless))
+
+def _sync_crawl_coupon_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[Dict]:
+    """同步爬取实现"""
     driver = setup_driver(headless=headless)
     results = []
     seen_asins = set()
@@ -400,56 +407,50 @@ def crawl_coupon_deals(max_items: int = 100, timeout: int = 30, headless: bool =
         
     return results
 
-def save_coupon_results(results: List[Dict], filename: str, format: str = 'json') -> None:
-    """
-    保存优惠券商品结果
-    
-    Args:
-        results: 抓取结果列表
-        filename: 输出文件名
-        format: 输出格式（json/csv/txt）
-    """
+async def save_coupon_results(results: List[Dict], filename: str, format: str = 'json') -> None:
+    """异步保存优惠券商品结果"""
     output_path = Path(filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     if format == 'json':
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump({
-                'metadata': {
-                    'total_count': len(results),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'source': 'amazon_coupon_deals'
-                },
-                'items': results
-            }, f, indent=2, ensure_ascii=False)
+        data = {
+            'metadata': {
+                'total_count': len(results),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'source': 'amazon_coupon_deals'
+            },
+            'items': results
+        }
+        async with aiofiles.open(filename, 'w', encoding='utf-8') as f:
+            await f.write(json.dumps(data, indent=2, ensure_ascii=False))
             
     elif format == 'csv':
-        with open(filename, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['ASIN', 'Coupon Type', 'Coupon Value', 'Coupon Text', 'Timestamp'])
+        async with aiofiles.open(filename, 'w', newline='', encoding='utf-8') as f:
+            await f.write('ASIN,Coupon Type,Coupon Value,Coupon Text,Timestamp\n')
             for item in results:
-                writer.writerow([
-                    item['asin'],
-                    item['coupon']['type'],
-                    item['coupon']['value'],
-                    item['coupon']['raw_text'],
-                    item['timestamp']
-                ])
+                await f.write(f"{item['asin']},{item['coupon']['type']},{item['coupon']['value']},{item['coupon']['raw_text']},{item['timestamp']}\n")
                 
     elif format == 'txt':
-        with open(filename, 'w', encoding='utf-8') as f:
+        async with aiofiles.open(filename, 'w', encoding='utf-8') as f:
             for item in results:
-                f.write(f"{item['asin']}\t{item['coupon']['raw_text']}\n")
+                await f.write(f"{item['asin']}\t{item['coupon']['raw_text']}\n")
                 
     log_success("结果已保存到: " + filename + " (" + format.upper() + "格式)")
 
-if __name__ == "__main__":
+async def main():
+    """异步主函数"""
     # 解析命令行参数
-    args = parse_arguments()
+    parser = argparse.ArgumentParser(description='Amazon优惠券商品爬虫')
+    parser.add_argument('--max-items', type=int, default=100, help='要爬取的商品数量')
+    parser.add_argument('--output', type=str, default='coupon_deals.json', help='输出文件路径')
+    parser.add_argument('--format', type=str, choices=['txt', 'csv', 'json'], default='json', help='输出文件格式')
+    parser.add_argument('--no-headless', action='store_true', help='禁用无头模式')
+    parser.add_argument('--timeout', type=int, default=30, help='无新商品超时时间(秒)')
+    args = parser.parse_args()
     
-    # 开始抓取
-    log_info("开始抓取Amazon优惠券商品...")
-    results = crawl_coupon_deals(
+    # 开始爬取
+    log_info("开始爬取Amazon优惠券商品...")
+    results = await crawl_coupon_deals(
         max_items=args.max_items,
         timeout=args.timeout,
         headless=not args.no_headless
@@ -461,6 +462,9 @@ if __name__ == "__main__":
         output_file = f"{output_file.rsplit('.', 1)[0]}.{args.format}"
     
     # 保存结果
-    save_coupon_results(results, output_file, args.format)
+    await save_coupon_results(results, output_file, args.format)
     
-    log_success("\n任务完成！共抓取 " + str(len(results)) + " 个优惠券商品") 
+    log_success("\n任务完成！共抓取 " + str(len(results)) + " 个优惠券商品")
+
+if __name__ == "__main__":
+    asyncio.run(main()) 

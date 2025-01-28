@@ -114,9 +114,14 @@ class ProductService:
         return ProductService.create_product(db, product_info, source)
     
     @staticmethod
-    def bulk_create_or_update_products(db: Session, products: List[ProductInfo]) -> List[ProductInfo]:
+    def bulk_create_or_update_products(db: Session, products: List[ProductInfo], include_coupon: bool = False) -> List[ProductInfo]:
         """
         批量创建或更新产品信息
+        
+        Args:
+            db: 数据库会话
+            products: 产品信息列表
+            include_coupon: 是否包含优惠券信息
         """
         saved_products = []
         current_time = datetime.utcnow()
@@ -146,7 +151,7 @@ class ProductService:
                     
                     # Prime信息
                     is_prime=best_offer.is_prime if best_offer else None,
-                    is_prime_exclusive=False,  # 需要从API响应中提取
+                    is_prime_exclusive=False,
                     
                     # 商品状态
                     condition=best_offer.condition if best_offer else None,
@@ -156,7 +161,7 @@ class ProductService:
                     
                     # 其他信息
                     deal_type=best_offer.deal_type if best_offer else None,
-                    features=[],  # 需要从API响应中提取
+                    features=[],
                     
                     # 时间信息
                     created_at=current_time,
@@ -218,6 +223,13 @@ class ProductService:
                     created_at=current_time,
                     updated_at=current_time
                 )
+                
+                # 如果包含优惠券信息，添加优惠券相关字段
+                if include_coupon and hasattr(offer_info, 'coupon_info'):
+                    coupon_info = offer_info.coupon_info
+                    offer.coupon_type = coupon_info.get('type')  # percentage 或 fixed
+                    offer.coupon_value = float(coupon_info.get('value', 0))  # 优惠券值
+                
                 db.add(offer)
             
             saved_products.append(product_info)
