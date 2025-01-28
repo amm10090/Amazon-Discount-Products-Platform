@@ -293,30 +293,6 @@ async def list_products(
             detail=f"获取产品列表失败: {str(e)}"
         )
 
-@app.get("/api/products/{asin}", response_model=ProductInfo)
-async def get_product(
-    asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
-    db: Session = Depends(get_db)
-):
-    """
-    根据ASIN获取单个产品详情
-    """
-    try:
-        product = ProductService.get_product_by_asin(db, asin)
-        if not product:
-            raise HTTPException(
-                status_code=404,
-                detail=f"未找到ASIN为 {asin} 的产品"
-            )
-        return product
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取产品信息失败: {str(e)}"
-        )
-
 @app.get("/api/products/stats")
 async def get_products_stats(db: Session = Depends(get_db)):
     """
@@ -344,6 +320,33 @@ async def get_products_stats(db: Session = Depends(get_db)):
             status_code=500,
             detail=f"获取统计信息失败: {str(e)}"
         )
+
+
+@app.get("/api/products/{asin}", response_model=ProductInfo)
+async def get_product(
+    asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
+    db: Session = Depends(get_db)
+):
+    """
+    根据ASIN获取单个产品详情
+    """
+    try:
+        product = ProductService.get_product_by_asin(db, asin)
+        if not product:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到ASIN为 {asin} 的产品"
+            )
+        return product
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取产品信息失败: {str(e)}"
+        )
+
+
 
 @app.on_event("startup")
 async def startup_event():

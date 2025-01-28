@@ -10,6 +10,7 @@ aiosqlite==0.20.0
 selenium==4.28.1
 webdriver-manager==4.0.2
 beautifulsoup4==4.12.3
+colorama>=0.4.6
 
 # PA-API相关
 requests==2.32.3

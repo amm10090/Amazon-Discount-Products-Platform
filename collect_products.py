@@ -119,5 +119,5 @@ if __name__ == "__main__":
     collect_products(
         batch_size=10,  # 每次查询10个ASIN
         timeout=30,     # 爬虫超时时间30秒
-        headless=True   # 使用无头模式
+        headless=False   # 使用无头模式
     ) 

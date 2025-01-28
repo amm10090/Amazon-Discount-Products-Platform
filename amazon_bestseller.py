@@ -88,6 +88,7 @@ def setup_driver(headless=True):
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     options.add_experimental_option('useAutomationExtension', False)
     
+    # 使用 ChromeDriverManager 自动下载和管理驱动
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     
