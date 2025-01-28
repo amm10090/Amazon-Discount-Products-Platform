@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -29,6 +29,7 @@ class ProductInfo(BaseModel):
     main_image: Optional[str] = None
     offers: List[ProductOffer] = []
     timestamp: datetime
+    coupon_info: Optional[Dict] = None
     
     class Config:
         json_encoders = {

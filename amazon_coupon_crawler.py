@@ -18,9 +18,19 @@ import colorama
 from colorama import Fore, Back, Style
 import asyncio
 import aiofiles
+import os
 
 # 初始化colorama
 colorama.init()
+
+# 日志级别常量
+LOG_LEVEL_ERROR = 0
+LOG_LEVEL_WARNING = 1
+LOG_LEVEL_INFO = 2
+LOG_LEVEL_DEBUG = 3
+
+# 从环境变量获取日志级别，默认为 INFO
+DEBUG_LEVEL = int(os.getenv('DEBUG_LEVEL', LOG_LEVEL_INFO))
 
 # 日志格式常量
 LOG_INFO = f"{Fore.GREEN}[INFO]{Style.RESET_ALL}"
@@ -29,41 +39,43 @@ LOG_WARNING = f"{Fore.YELLOW}[WARN]{Style.RESET_ALL}"
 LOG_ERROR = f"{Fore.RED}[ERROR]{Style.RESET_ALL}"
 LOG_SUCCESS = f"{Fore.GREEN}[✓]{Style.RESET_ALL}"
 
+def should_log(level: int) -> bool:
+    """检查是否应该输出指定级别的日志"""
+    return DEBUG_LEVEL >= level
+
 def log_info(message: str) -> None:
     """输出信息日志"""
-    print(f"{LOG_INFO} {message}")
+    if should_log(LOG_LEVEL_INFO):
+        print(f"{LOG_INFO} {message}")
 
 def log_debug(message: str) -> None:
     """输出调试日志"""
-    print(f"{LOG_DEBUG} {message}")
+    if should_log(LOG_LEVEL_DEBUG):
+        print(f"{LOG_DEBUG} {message}")
 
 def log_warning(message: str) -> None:
     """输出警告日志"""
-    print(f"{LOG_WARNING} {message}")
+    if should_log(LOG_LEVEL_WARNING):
+        print(f"{LOG_WARNING} {message}")
 
 def log_error(message: str) -> None:
     """输出错误日志"""
-    print(f"{LOG_ERROR} {message}")
+    if should_log(LOG_LEVEL_ERROR):
+        print(f"{LOG_ERROR} {message}")
 
 def log_success(message: str) -> None:
     """输出成功日志"""
-    print(f"{LOG_SUCCESS} {message}")
+    if should_log(LOG_LEVEL_INFO):
+        print(f"{LOG_SUCCESS} {message}")
 
-def format_progress_bar(current: int, total: int, width: int = 30) -> str:
-    """生成进度条
-    
-    Args:
-        current: 当前进度
-        total: 总数
-        width: 进度条宽度
-        
-    Returns:
-        str: 格式化的进度条字符串
-    """
-    percentage = current / total
-    filled = int(width * percentage)
-    bar = '█' * filled + '░' * (width - filled)
-    return f"{Fore.CYAN}[{bar}] {current}/{total} ({percentage*100:.1f}%){Style.RESET_ALL}"
+def log_progress(current: int, total: int, prefix: str = '') -> None:
+    """输出进度信息"""
+    if should_log(LOG_LEVEL_INFO):
+        percentage = (current / total) * 100
+        bar_length = 30
+        filled_length = int(bar_length * current / total)
+        bar = '█' * filled_length + '░' * (bar_length - filled_length)
+        print(f"\r{prefix}进度: [{bar}] {current}/{total} ({percentage:.1f}%)", end='', flush=True)
 
 def parse_arguments():
     """添加命令行参数支持"""
@@ -131,7 +143,7 @@ def extract_coupon_info(card_element) -> Optional[Dict]:
         card_element: Selenium WebElement对象，表示商品卡片元素
         
     Returns:
-        Dict 包含优惠券类型、值和原始文本的字典，如果没有优惠券则返回None
+        Dict: 包含优惠券类型和值的字典，如果没有优惠券则返回None
     """
     try:
         # 首先检查卡片是否包含优惠券标记
@@ -139,41 +151,42 @@ def extract_coupon_info(card_element) -> Optional[Dict]:
         if not coupon_badge:
             return None
             
-        log_info("调试 - 发现优惠券卡片")
+        log_debug("发现优惠券卡片")
         
         # 获取优惠券文本
         coupon_text = coupon_badge.text.strip()
         if not coupon_text:
             return None
             
-        log_success("成功找到优惠券: " + coupon_text)
+        log_success(f"成功找到优惠券: {coupon_text}")
         
-        # 获取完整的优惠券文本
-        full_text = coupon_badge.find_element(By.XPATH, "./parent::div").text.strip()
-        
-        # 移除"节省"字样并清理文本
-        clean_text = coupon_text.replace("节省", "").strip()
-        
-        # 解析优惠券类型和值
-        if "%" in clean_text:
-            coupon_type = "percentage"
-            value = float(clean_text.replace("%", "").strip())
-        else:
-            coupon_type = "fixed"
-            # 处理美元金额，移除"US$"或"$"
-            value = float(clean_text.replace("US$", "").replace("$", "").strip())
+        # 提取优惠券值和类型
+        # 处理百分比优惠券 (例如: "节省 20%")
+        if "%" in coupon_text:
+            match = re.search(r'(\d+)%', coupon_text)
+            if match:
+                value = float(match.group(1))
+                return {
+                    "type": "percentage",
+                    "value": value
+                }
+        # 处理固定金额优惠券 (例如: "节省 US$30")
+        elif "US$" in coupon_text:
+            match = re.search(r'US\$(\d+)', coupon_text)
+            if match:
+                value = float(match.group(1))
+                return {
+                    "type": "fixed",
+                    "value": value
+                }
             
-        return {
-            "type": coupon_type,
-            "value": value,
-            "raw_text": full_text,
-            "discount_text": coupon_text
-        }
-                    
+        log_warning(f"无法解析优惠券格式: {coupon_text}")
+        return None
+        
     except Exception as e:
-        log_error("提取优惠券信息时出错: " + str(e))
-        log_error("原始文本: " + (coupon_text if 'coupon_text' in locals() else 'N/A'))
-    return None
+        log_error(f"提取优惠券信息时出错: {str(e)}")
+        log_error(f"原始文本: {coupon_text if 'coupon_text' in locals() else 'N/A'}")
+        return None
 
 def scroll_page(driver, scroll_count: int) -> bool:
     """
@@ -241,208 +254,180 @@ def handle_connection_problem(driver) -> bool:
         pass
     return False
 
-async def crawl_coupon_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[Dict]:
-    """
-    异步爬取Amazon优惠券商品数据
-    
-    Args:
-        max_items: 最大爬取商品数量
-        timeout: 无新商品超时时间（秒）
-        headless: 是否使用无头模式
-        
-    Returns:
-        List[Dict]: 包含商品ASIN和优惠券信息的列表
-    """
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: _sync_crawl_coupon_deals(max_items, timeout, headless))
-
-def _sync_crawl_coupon_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[Dict]:
-    """同步爬取实现"""
-    driver = setup_driver(headless=headless)
-    results = []
-    seen_asins = set()
-    connection_retry_count = 0
-    start_time = time.time()
-    
+async def crawl_coupon_deals(
+    max_items: int,
+    timeout: int,
+    headless: bool
+) -> List[Dict]:
+    """爬取优惠券商品数据"""
     try:
-        log_info("\n" + "="*50)
-        log_info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 开始抓取优惠券商品")
-        log_info(f"目标数量: {max_items} 个商品")
-        log_info(f"超时时间: {timeout} 秒")
-        log_info(f"无头模式: {'是' if headless else '否'}")
-        log_info("="*50 + "\n")
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始爬取优惠券商品...")
+        print(f"目标数量: {max_items} 个商品")
+        print(f"超时时间: {timeout} 秒")
+        print(f"无头模式: {'是' if headless else '否'}\n")
         
-        # 访问优惠券商品页面
-        driver.get('https://www.amazon.com/deals?bubble-id=deals-collection-coupons')
-        time.sleep(5)  # 增加等待时间，确保页面完全加载
+        driver = setup_driver(headless)
+        products = []
+        last_products_count = 0
+        no_new_items_time = 0
         
-        # 初始化页面 - 定位viewport容器
-        wait = WebDriverWait(driver, 10)
         try:
-            viewport_container = wait.until(
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在访问Amazon Deals页面...")
+            driver.get('https://www.amazon.com/deals?bubble-id=deals-collection-coupons')
+            
+            viewport = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((
                     By.CSS_SELECTOR, 
                     'div[data-testid="virtuoso-item-list"]'
                 ))
             )
             log_success("成功找到viewport容器")
-        except TimeoutException:
-            log_warning("未找到viewport容器，尝试继续...")
-            viewport_container = driver
-        
-        # 等待商品卡片加载
-        try:
-            wait.until(
-                EC.presence_of_element_located((
-                    By.CSS_SELECTOR,
-                    'div[data-testid^="B"][class*="GridItem-module__container"]'
-                ))
-            )
-            log_success("成功找到商品卡片")
-        except TimeoutException:
-            log_warning("未找到商品卡片，请检查选择器")
-        
-        scroll_count = 0
-        last_success_time = time.time()
-        no_new_items_count = 0
-        
-        while len(results) < max_items:
-            scroll_count += 1
-            log_info("\n" + "="*50)
-            log_info(f"[{time.strftime('%H:%M:%S')}] === 第 {scroll_count} 次滚动 ===")
             
-            # 检查是否长时间没有新商品
-            if time.time() - last_success_time > timeout:
-                log_warning(f"{timeout}秒内没有新商品，结束抓取")
-                break
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 开始获取商品信息...")
+            scroll_count = 0
             
-            # 检查连接问题
-            if handle_connection_problem(driver):
-                connection_retry_count += 1
-                if connection_retry_count >= 5:
-                    log_warning("连接问题持续存在，退出抓取")
-                    break
-                continue
-            
-            # 获取商品卡片
-            try:
-                product_cards = viewport_container.find_elements(
-                    By.CSS_SELECTOR,
-                    'div[data-testid^="B"][class*="GridItem-module__container"]'
-                )
+            while len(products) < max_items:
+                scroll_count += 1
                 
-                log_info("找到 " + str(len(product_cards)) + " 个商品卡片")
+                # 获取当前页面商品
+                new_products = process_visible_products(driver)
+                if new_products:
+                    products.extend(new_products)
+                    log_progress(len(products), max_items)
                 
-                if not product_cards:
-                    no_new_items_count += 1
-                    if no_new_items_count >= 5:
-                        log_warning("连续5次未找到商品卡片，退出抓取")
-                        break
-                    continue
+                # 检查是否有新商品
+                if len(products) == last_products_count:
+                    no_new_items_time += 1
+                    if no_new_items_time >= 3:  # 连续3次没有新商品，等待更长时间
+                        log_warning(f"连续{no_new_items_time}次未发现新商品，等待加载...")
+                        time.sleep(2)  # 增加等待时间
+                        
+                        # 尝试触发更多加载
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        time.sleep(1)
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 100);")
+                        
+                        if no_new_items_time >= timeout:  # 超时退出
+                            log_warning(f"超过{timeout}秒未发现新商品，结束爬取")
+                            break
                 else:
-                    no_new_items_count = 0
+                    no_new_items_time = 0  # 重置计数器
+                    
+                last_products_count = len(products)
                 
-                previous_count = len(results)
-                
-                for card in product_cards:
-                    if len(results) >= max_items:
-                        break
-                        
-                    try:
-                        # 获取ASIN
-                        asin = card.get_attribute('data-testid')
-                        
-                        # 如果已经处理过该ASIN，跳过
-                        if not asin or asin in seen_asins:
-                            continue
-                            
-                        # 获取优惠券信息
-                        coupon_info = extract_coupon_info(card)
-                        
-                        if coupon_info:
-                            seen_asins.add(asin)
-                            results.append({
-                                "asin": asin,
-                                "coupon": coupon_info,
-                                "timestamp": datetime.now().isoformat()
-                            })
-                            
-                            if len(results) % 5 == 0:  # 每5个商品显示一次进度
-                                log_info(format_progress_bar(len(results), max_items))
-                                
-                    except Exception as e:
-                        log_error("处理商品卡片时出错: " + str(e))
-                        continue
-                
-                new_items = len(results) - previous_count
-                if new_items > 0:
-                    log_info("本次滚动新增: " + str(new_items) + " 个商品")
-                    last_success_time = time.time()
-                
-            except Exception as e:
-                log_error("获取商品元素失败: " + str(e))
-                continue
-            
-            # 滚动页面加载更多
-            if not scroll_page(driver, scroll_count):
+                # 滚动页面
+                if not scroll_page(driver, scroll_count):
+                    log_error("滚动页面失败")
+                    break
+                    
+                # 处理可能的连接问题
+                if handle_connection_problem(driver):
+                    continue
+                    
+                # 等待新内容加载
                 time.sleep(1)
-                continue
-                
-            time.sleep(random.uniform(1.5, 2.5))  # 增加随机等待时间
+            
+            print(f"\n\n[{datetime.now().strftime('%H:%M:%S')}] 商品获取完成")
+            print(f"共获取 {len(products)} 个商品\n")
+            
+            return products[:max_items]
+            
+        finally:
+            driver.quit()
             
     except Exception as e:
-        log_error("❌ 抓取过程出错: " + str(e))
-    finally:
-        driver.quit()
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 错误: {str(e)}")
+        return []
+
+def process_visible_products(driver) -> List[Dict]:
+    """处理当前可见的商品信息"""
+    products = []
+    cards = driver.find_elements(
+        By.CSS_SELECTOR,
+        'div[data-testid^="B"][class*="GridItem-module__container"]'
+    )
+    
+    for card in cards:
+        try:
+            product = extract_product_info(card)
+            if product:
+                products.append(product)
+        except Exception as e:
+            continue
+            
+    return products
+
+def extract_product_info(card) -> Optional[Dict]:
+    """提取商品信息"""
+    try:
+        # 获取商品链接和ASIN
+        link_element = card.find_element(By.CSS_SELECTOR, 'a[href*="/dp/"]')
+        url = link_element.get_attribute('href')
+        asin = card.get_attribute('data-testid')
         
-    # 统计信息
-    end_time = time.time()
-    duration = end_time - start_time
-    log_info("\n" + "="*50)
-    log_info("抓取任务统计信息:")
-    log_info(f"总耗时: {duration:.1f} 秒")
-    log_info(f"成功获取: {len(results)} 个商品")
-    log_info(f"平均速度: {len(results)/duration:.1f} 个/秒")
-    log_info("="*50)
+        # 获取优惠券信息
+        coupon = extract_coupon_info(card)
+        if not coupon:
+            return None
+            
+        return {
+            'asin': asin,
+            'url': url,
+            'coupon': coupon
+        }
         
-    return results
+    except Exception:
+        return None
 
 async def save_coupon_results(results: List[Dict], filename: str, format: str = 'json') -> None:
-    """异步保存优惠券商品结果"""
-    output_path = Path(filename)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    """异步保存优惠券商品结果
+    
+    Args:
+        results: 优惠券商品结果列表
+        filename: 文件名
+        format: 输出格式 (json/csv/txt)
+    """
+    # 确保基础目录存在
+    base_dir = Path("data/coupon_deals")
+    base_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 生成带时间戳的文件名
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"coupon_deals_{timestamp}.{format}"
+    output_path = base_dir / filename
     
     if format == 'json':
         data = {
             'metadata': {
                 'total_count': len(results),
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'timestamp': datetime.now().isoformat(),
                 'source': 'amazon_coupon_deals'
             },
             'items': results
         }
-        async with aiofiles.open(filename, 'w', encoding='utf-8') as f:
+        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
             await f.write(json.dumps(data, indent=2, ensure_ascii=False))
             
     elif format == 'csv':
-        async with aiofiles.open(filename, 'w', newline='', encoding='utf-8') as f:
-            await f.write('ASIN,Coupon Type,Coupon Value,Coupon Text,Timestamp\n')
+        async with aiofiles.open(output_path, 'w', newline='', encoding='utf-8') as f:
+            await f.write('ASIN,Coupon Type,Coupon Value,Timestamp\n')
             for item in results:
-                await f.write(f"{item['asin']},{item['coupon']['type']},{item['coupon']['value']},{item['coupon']['raw_text']},{item['timestamp']}\n")
+                coupon = item['coupon']
+                await f.write(f"{item['asin']},{coupon['type']},{coupon['value']},{item['timestamp']}\n")
                 
     elif format == 'txt':
-        async with aiofiles.open(filename, 'w', encoding='utf-8') as f:
+        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
             for item in results:
-                await f.write(f"{item['asin']}\t{item['coupon']['raw_text']}\n")
+                coupon = item['coupon']
+                await f.write(f"{item['asin']}\t{coupon['type']}\t{coupon['value']}\n")
                 
-    log_success("结果已保存到: " + filename + " (" + format.upper() + "格式)")
+    log_success(f"结果已保存到: {output_path} ({format.upper()}格式)")
 
 async def main():
     """异步主函数"""
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='Amazon优惠券商品爬虫')
     parser.add_argument('--max-items', type=int, default=100, help='要爬取的商品数量')
-    parser.add_argument('--output', type=str, default='coupon_deals.json', help='输出文件路径')
     parser.add_argument('--format', type=str, choices=['txt', 'csv', 'json'], default='json', help='输出文件格式')
     parser.add_argument('--no-headless', action='store_true', help='禁用无头模式')
     parser.add_argument('--timeout', type=int, default=30, help='无新商品超时时间(秒)')
@@ -456,15 +441,12 @@ async def main():
         headless=not args.no_headless
     )
     
-    # 确保输出文件扩展名与格式匹配
-    output_file = args.output
-    if not output_file.endswith(f'.{args.format}'):
-        output_file = f"{output_file.rsplit('.', 1)[0]}.{args.format}"
-    
-    # 保存结果
-    await save_coupon_results(results, output_file, args.format)
-    
-    log_success("\n任务完成！共抓取 " + str(len(results)) + " 个优惠券商品")
+    if results:
+        # 保存结果
+        await save_coupon_results(results, "coupon_deals", args.format)
+        log_success(f"\n任务完成！共抓取 {len(results)} 个优惠券商品")
+    else:
+        log_warning("未获取到任何优惠券商品数据")
 
 if __name__ == "__main__":
     asyncio.run(main()) 

@@ -159,7 +159,15 @@ async def crawl_coupon_products(
             if products:
                 # 将优惠券信息添加到产品数据中
                 for product, result in zip(products, batch_results):
-                    product['coupon_info'] = result['coupon']
+                    if 'coupon' in result and result['coupon']:
+                        coupon_info = result['coupon']
+                        # 验证优惠券信息格式
+                        if isinstance(coupon_info, dict) and 'type' in coupon_info and 'value' in coupon_info:
+                            # 使用setattr设置coupon_info属性
+                            setattr(product, 'coupon_info', {
+                                'type': coupon_info['type'],  # percentage 或 fixed
+                                'value': float(coupon_info['value'])  # 优惠券值
+                            })
                 
                 # 存储到数据库
                 with SessionLocal() as db:
@@ -198,7 +206,7 @@ async def collect_products(
     # 从环境变量获取max_items
     if max_items is None:
         max_items = int(os.getenv("MAX_ITEMS", 100))
-    
+        
     log_info("\n" + "="*50)
     log_info("开始数据采集任务")
     log_info(f"目标数量: 每类 {max_items} 个商品")
