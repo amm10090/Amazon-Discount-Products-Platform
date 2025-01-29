@@ -39,3 +39,5 @@ amazon_products.db
 cache
 coupon_deals.json
 .cursorrules
+jobs.db
+scheduler.db

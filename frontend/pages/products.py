@@ -165,7 +165,7 @@ if products:
                     st.image(
                         product["main_image"],
                         caption=product.get("asin"),
-                        use_column_width=True
+                        use_container_width=True
                     )
                 else:
                     st.markdown("🖼️ " + get_text("no_image"))
@@ -181,24 +181,70 @@ if products:
                 price_col, discount_col, prime_col = st.columns(3)
                 
                 with price_col:
-                    st.markdown(
-                        f'<p class="price-tag">${product.get("price", "0.00")}</p>',
-                        unsafe_allow_html=True
-                    )
+                    try:
+                        # 获取商品价格信息
+                        offers = product.get("offers", [])
+                        if offers and isinstance(offers, list) and len(offers) > 0:
+                            price = float(offers[0].get("price", 0))
+                            savings = float(offers[0].get("savings", 0))
+                            original_price = price + savings
+                            currency = offers[0].get("currency", "USD")
+                            
+                            if price > 0:
+                                # 显示原价（带删除线）和当前价格
+                                st.markdown(
+                                    f'<p class="price-tag">'
+                                    f'<span style="text-decoration: line-through; color: #666;">${original_price:.2f}</span><br/>'
+                                    f'<span style="color: #B12704; font-size: 1.2em;">${price:.2f}</span> {currency}'
+                                    f'</p>',
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.markdown(
+                                    f'<p class="price-tag">{get_text("price_unavailable")}</p>',
+                                    unsafe_allow_html=True
+                                )
+                        else:
+                            st.markdown(
+                                f'<p class="price-tag">{get_text("price_unavailable")}</p>',
+                                unsafe_allow_html=True
+                            )
+                    except (ValueError, TypeError):
+                        st.markdown(
+                            f'<p class="price-tag">{get_text("price_unavailable")}</p>',
+                            unsafe_allow_html=True
+                        )
                 
                 with discount_col:
-                    if product.get("savings_percentage"):
-                        st.markdown(
-                            f'<p class="discount-tag">{get_text("save_money")} {product["savings_percentage"]}%</p>',
-                            unsafe_allow_html=True
-                        )
+                    try:
+                        # 获取折扣信息
+                        offers = product.get("offers", [])
+                        if offers and isinstance(offers, list) and len(offers) > 0:
+                            savings_percentage = float(offers[0].get("savings_percentage", 0))
+                            savings = float(offers[0].get("savings", 0))
+                            if savings_percentage > 0:
+                                st.markdown(
+                                    f'<p class="discount-tag">'
+                                    f'{get_text("save_money")} ${savings:.2f} ({savings_percentage:.0f}%)'
+                                    f'</p>',
+                                    unsafe_allow_html=True
+                                )
+                    except (ValueError, TypeError):
+                        pass
                 
                 with prime_col:
-                    if product.get("is_prime"):
-                        st.markdown(
-                            '<p class="prime-tag">✓ Prime</p>',
-                            unsafe_allow_html=True
-                        )
+                    try:
+                        # 获取Prime信息
+                        offers = product.get("offers", [])
+                        if offers and isinstance(offers, list) and len(offers) > 0:
+                            is_prime = offers[0].get("is_prime", False)
+                            if is_prime:
+                                st.markdown(
+                                    '<p class="prime-tag">✓ Prime</p>',
+                                    unsafe_allow_html=True
+                                )
+                    except (ValueError, TypeError):
+                        pass
                 
                 # 商品链接
                 if product.get("url"):

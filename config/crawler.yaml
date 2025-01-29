@@ -1,0 +1,46 @@
+# Amazon商品数据采集配置文件
+# 
+# 配置说明：
+# 1. crawler_types: 爬虫类型配置
+#    - 单个爬虫：crawler_types: bestseller 或 coupon
+#    - 多个爬虫：使用列表形式，如下所示
+#    - 所有爬虫：crawler_types: all
+#
+# 2. 性能参数：
+#    - max_items: 控制每类爬取的商品数量
+#    - batch_size: PA-API批量请求大小，最大值为10
+#    - timeout: 爬虫超时时间，单位秒
+#    - headless: 无头模式，生产环境建议true
+#
+# 使用示例：
+# python collect_products.py --config config/crawler.yaml
+
+# 爬虫类型配置 (选择以下配置之一)
+# 方式1：运行单个爬虫
+crawler_types: bestseller    # 或 coupon 或 all
+
+# 方式2：运行多个爬虫（取消注释下面的配置）
+# crawler_types: 
+#   - bestseller
+#   - coupon
+
+# 数据采集参数
+max_items: 100   # 每类商品的最大采集数量
+batch_size: 10   # API批量请求大小(1-10)
+timeout: 30      # 爬虫超时时间(秒)
+
+# 浏览器配置
+headless: true   # true=无界面模式，false=显示浏览器窗口
+
+# 其他配置示例：
+#
+# 示例1：仅运行畅销商品爬虫
+# crawler_types: bestseller
+# max_items: 100
+# batch_size: 10
+#
+# 示例2：运行所有爬虫（调试模式）
+# crawler_types: all
+# max_items: 10
+# batch_size: 5
+# headless: false  # 显示浏览器窗口方便调试 

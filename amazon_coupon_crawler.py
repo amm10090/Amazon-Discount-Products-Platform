@@ -254,6 +254,66 @@ def handle_connection_problem(driver) -> bool:
         pass
     return False
 
+def check_no_results(driver) -> bool:
+    """
+    检查页面是否显示"没有找到匹配商品"的提示
+    
+    Args:
+        driver: Selenium WebDriver对象
+        
+    Returns:
+        bool: 如果页面显示无结果则返回True，否则返回False
+    """
+    try:
+        # 检查是否存在无结果提示 - 使用多个选择器
+        selectors = [
+            "//div[contains(text(), \"We couldn't find a match\")]",
+            "//div[contains(text(), '没有找到匹配')]",
+            "//div[contains(@class, 'EmptyGrid-module')]",
+            "//div[contains(@class, 'empty-grid')]"
+        ]
+        
+        for selector in selectors:
+            elements = driver.find_elements(By.XPATH, selector)
+            if elements and any(elem.is_displayed() for elem in elements):
+                log_warning(f"检测到无结果提示: {selector}")
+                return True
+        
+        # 检查是否存在商品网格
+        grid_selectors = [
+            'div[data-testid="virtuoso-item-list"]',
+            'div[class*="Grid-module"]',
+            'div[class*="gridItemPad"]'
+        ]
+        
+        for selector in grid_selectors:
+            grid_container = driver.find_elements(By.CSS_SELECTOR, selector)
+            if grid_container and any(elem.is_displayed() for elem in grid_container):
+                # 检查网格内是否有商品
+                items = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid^="B"]')
+                if not items:
+                    log_warning("商品网格存在但没有商品项")
+                    return True
+                return False
+        
+        log_warning("未找到商品展示区域")
+        return True
+        
+    except Exception as e:
+        log_error(f"检查页面结果时出错: {str(e)}")
+        # 出错时不要直接返回True，继续检查其他可能的情况
+        try:
+            # 使用更简单的方法再次检查
+            no_results = driver.find_element(By.CSS_SELECTOR, '.a-section-empty')
+            if no_results and no_results.is_displayed():
+                log_warning("检测到空结果提示")
+                return True
+        except:
+            pass
+        
+        # 如果所有检查都失败，返回False以允许程序继续
+        return False
+
 async def crawl_coupon_deals(
     max_items: int,
     timeout: int,
@@ -275,13 +335,25 @@ async def crawl_coupon_deals(
             print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在访问Amazon Deals页面...")
             driver.get('https://www.amazon.com/deals?bubble-id=deals-collection-coupons')
             
-            viewport = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((
-                    By.CSS_SELECTOR, 
-                    'div[data-testid="virtuoso-item-list"]'
-                ))
-            )
-            log_success("成功找到viewport容器")
+            # 等待页面加载
+            time.sleep(5)
+            
+            # 检查页面是否有商品
+            if check_no_results(driver):
+                log_warning("当前页面没有可用的优惠券商品，退出爬取")
+                return []
+                
+            try:
+                viewport = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((
+                        By.CSS_SELECTOR, 
+                        'div[data-testid="virtuoso-item-list"]'
+                    ))
+                )
+                log_success("成功找到viewport容器")
+            except TimeoutException:
+                log_warning("无法找到商品展示区域，退出爬取")
+                return []
             
             print(f"[{datetime.now().strftime('%H:%M:%S')}] 开始获取商品信息...")
             scroll_count = 0

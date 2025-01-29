@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from models.database import SessionLocal, init_db
 from models.product_service import ProductService
 from enum import Enum
+from models.scheduler import SchedulerManager
+from models.scheduler_models import JobConfig, JobStatus, SchedulerStatus, JobHistory
+import pytz
 
 # 加载环境变量
 load_dotenv()
@@ -37,6 +40,10 @@ tasks_status: Dict[str, Dict] = {}
 class ProductRequest(BaseModel):
     asins: List[str]
     marketplace: Optional[str] = "www.amazon.com"
+
+# 时区更新请求模型
+class TimezoneUpdate(BaseModel):
+    timezone: str
 
 # 排序字段枚举
 class SortField(str, Enum):
@@ -346,7 +353,128 @@ async def get_product(
             detail=f"获取产品信息失败: {str(e)}"
         )
 
+# 调度器相关端点
+@app.post("/api/scheduler/jobs")
+async def add_job(job_config: JobConfig):
+    """添加新的定时任务"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.add_job(job_config.dict())
+        return {"status": "success", "message": "任务添加成功"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+@app.get("/api/scheduler/jobs", response_model=List[JobStatus])
+async def list_jobs():
+    """获取所有定时任务"""
+    try:
+        scheduler_manager = SchedulerManager()
+        return scheduler_manager.get_jobs()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/scheduler/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """删除定时任务"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.remove_job(job_id)
+        return {"status": "success", "message": "任务删除成功"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/scheduler/jobs/{job_id}/pause")
+async def pause_job(job_id: str):
+    """暂停定时任务"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.pause_job(job_id)
+        return {"status": "success", "message": "任务已暂停"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/scheduler/jobs/{job_id}/resume")
+async def resume_job(job_id: str):
+    """恢复定时任务"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.resume_job(job_id)
+        return {"status": "success", "message": "任务已恢复"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/scheduler/jobs/{job_id}/history", response_model=List[JobHistory])
+async def get_job_history(job_id: str):
+    """获取任务执行历史"""
+    try:
+        scheduler_manager = SchedulerManager()
+        return scheduler_manager.get_job_history(job_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/scheduler/status", response_model=SchedulerStatus)
+async def get_scheduler_status():
+    """获取调度器状态"""
+    try:
+        scheduler_manager = SchedulerManager()
+        return scheduler_manager.get_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/scheduler/start")
+async def start_scheduler():
+    """启动调度器"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.start()
+        return {"status": "success", "message": "调度器已启动"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/scheduler/stop")
+async def stop_scheduler():
+    """停止调度器"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.stop()
+        return {"status": "success", "message": "调度器已停止"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/scheduler/reload")
+async def reload_scheduler():
+    """重新加载调度器"""
+    try:
+        scheduler_manager = SchedulerManager()
+        scheduler_manager.reload()
+        return {"status": "success", "message": "调度器已重新加载"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/scheduler/timezone")
+async def update_timezone(timezone_update: TimezoneUpdate):
+    """更新调度器时区
+    
+    Args:
+        timezone_update: 包含新时区的请求体
+        
+    Returns:
+        Dict: 更新结果
+    """
+    try:
+        # 验证时区是否有效
+        pytz.timezone(timezone_update.timezone)
+        
+        # 更新调度器时区
+        scheduler_manager = SchedulerManager()
+        if scheduler_manager.set_timezone(timezone_update.timezone):
+            return {"message": "Timezone updated successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update timezone")
+    except pytz.exceptions.UnknownTimeZoneError:
+        raise HTTPException(status_code=400, detail="Invalid timezone")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
 async def startup_event():

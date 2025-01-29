@@ -86,7 +86,88 @@ TRANSLATIONS = {
         # 错误信息
         "loading_failed": "加载数据失败",
         "no_products": "暂无商品数据，请先运行爬虫任务采集数据。",
-        "no_matching_products": "暂无符合条件的商品数据"
+        "no_matching_products": "暂无符合条件的商品数据",
+        
+        # 调度器相关
+        "scheduler_title": "定时任务管理",
+        "add_new_job": "添加新任务",
+        "job_id": "任务ID",
+        "job_id_help": "任务的唯一标识符，例如：bestseller_daily",
+        "job_type": "任务类型",
+        "job_type_help": "cron: 按时间点执行，interval: 按时间间隔执行",
+        "crawler_type": "爬虫类型",
+        "crawler_type_help": "选择要执行的爬虫类型",
+        "hour": "小时",
+        "hour_help": "cron任务的小时设置，例如：*/4 表示每4小时执行一次",
+        "minute": "分钟",
+        "minute_help": "cron任务的分钟设置，例如：30 表示在30分时执行",
+        "interval_hours": "间隔（小时）",
+        "interval_minutes": "间隔（分钟）",
+        "add_job": "添加任务",
+        "job_added": "任务添加成功！",
+        "add_job_failed": "添加任务失败",
+        
+        "existing_jobs": "现有任务",
+        "no_jobs": "暂无定时任务",
+        "schedule": "执行计划",
+        "interval": "执行间隔",
+        "next_run": "下次执行时间",
+        "resume": "恢复",
+        "pause": "暂停",
+        "delete": "删除",
+        "job_resumed": "任务已恢复",
+        "job_paused": "任务已暂停",
+        "job_deleted": "任务已删除",
+        
+        "show_history": "显示执行历史",
+        "no_history": "暂无执行历史",
+        
+        "scheduler_status": "调度器状态",
+        "running_jobs": "运行中任务",
+        "total_jobs": "总任务数",
+        "timezone": "时区",
+        "stop_scheduler": "停止调度器",
+        "start_scheduler": "启动调度器",
+        "reload_scheduler": "重新加载",
+        "scheduler_stopped": "调度器已停止",
+        "scheduler_started": "调度器已启动",
+        "scheduler_reloaded": "调度器已重新加载",
+        
+        # 任务状态
+        "status_running": "运行中",
+        "status_completed": "已完成",
+        "status_failed": "失败",
+        "status_paused": "已暂停",
+        
+        # 爬虫类型
+        "crawler_bestseller": "畅销商品",
+        "crawler_coupon": "优惠券商品",
+        "crawler_all": "全部商品",
+        
+        # 调度器相关
+        "start_time": "开始时间",
+        "end_time": "结束时间",
+        "items_collected": "采集数量",
+        "error": "错误信息",
+        "save": "保存",
+        "seconds": "秒",
+        "price_low_to_high": "价格从低到高",
+        "price_high_to_low": "价格从高到低",
+        "discount_low_to_high": "折扣从低到高",
+        "discount_high_to_low": "折扣从高到低",
+        "time_old_to_new": "时间从早到晚",
+        "time_new_to_old": "时间从晚到早",
+        
+        # 时区设置
+        "timezone_settings": "时区设置",
+        "select_timezone": "选择时区",
+        "timezone_help": "选择显示时间的时区，所有时间将按照所选时区显示",
+        "update_timezone": "更新时区",
+        "timezone_updated": "时区更新成功！",
+        "update_timezone_failed": "更新时区失败",
+        "current_timezone": "当前时区",
+        
+        "price_unavailable": "暂无价格",
     },
     
     "en": {
@@ -172,6 +253,87 @@ TRANSLATIONS = {
         # Error Messages
         "loading_failed": "Failed to load data",
         "no_products": "No product data available. Please run the crawler first.",
-        "no_matching_products": "No products match the filter conditions"
+        "no_matching_products": "No products match the filter conditions",
+        
+        # Scheduler Related
+        "scheduler_title": "Task Scheduler",
+        "add_new_job": "Add New Task",
+        "job_id": "Task ID",
+        "job_id_help": "Unique identifier for the task, e.g., bestseller_daily",
+        "job_type": "Task Type",
+        "job_type_help": "cron: execute at specific times, interval: execute at intervals",
+        "crawler_type": "Crawler Type",
+        "crawler_type_help": "Select the type of crawler to execute",
+        "hour": "Hour",
+        "hour_help": "Hour setting for cron task, e.g., */4 means every 4 hours",
+        "minute": "Minute",
+        "minute_help": "Minute setting for cron task, e.g., 30 means at minute 30",
+        "interval_hours": "Interval (Hours)",
+        "interval_minutes": "Interval (Minutes)",
+        "add_job": "Add Task",
+        "job_added": "Task added successfully!",
+        "add_job_failed": "Failed to add task",
+        
+        "existing_jobs": "Existing Tasks",
+        "no_jobs": "No scheduled tasks",
+        "schedule": "Schedule",
+        "interval": "Interval",
+        "next_run": "Next Run Time",
+        "resume": "Resume",
+        "pause": "Pause",
+        "delete": "Delete",
+        "job_resumed": "Task resumed",
+        "job_paused": "Task paused",
+        "job_deleted": "Task deleted",
+        
+        "show_history": "Show History",
+        "no_history": "No execution history",
+        
+        "scheduler_status": "Scheduler Status",
+        "running_jobs": "Running Tasks",
+        "total_jobs": "Total Tasks",
+        "timezone": "Timezone",
+        "stop_scheduler": "Stop Scheduler",
+        "start_scheduler": "Start Scheduler",
+        "reload_scheduler": "Reload",
+        "scheduler_stopped": "Scheduler stopped",
+        "scheduler_started": "Scheduler started",
+        "scheduler_reloaded": "Scheduler reloaded",
+        
+        # Task Status
+        "status_running": "Running",
+        "status_completed": "Completed",
+        "status_failed": "Failed",
+        "status_paused": "Paused",
+        
+        # Crawler Types
+        "crawler_bestseller": "Bestseller Products",
+        "crawler_coupon": "Coupon Products",
+        "crawler_all": "All Products",
+        
+        # Scheduler Related
+        "start_time": "Start Time",
+        "end_time": "End Time",
+        "items_collected": "Items Collected",
+        "error": "Error",
+        "save": "Save",
+        "seconds": "seconds",
+        "price_low_to_high": "Price: Low to High",
+        "price_high_to_low": "Price: High to Low",
+        "discount_low_to_high": "Discount: Low to High",
+        "discount_high_to_low": "Discount: High to Low",
+        "time_old_to_new": "Time: Old to New",
+        "time_new_to_old": "Time: New to Old",
+        
+        # Timezone Settings
+        "timezone_settings": "Timezone Settings",
+        "select_timezone": "Select Timezone",
+        "timezone_help": "Select the timezone for displaying times, all times will be shown in the selected timezone",
+        "update_timezone": "Update Timezone",
+        "timezone_updated": "Timezone updated successfully!",
+        "update_timezone_failed": "Failed to update timezone",
+        "current_timezone": "Current Timezone",
+        
+        "price_unavailable": "Price unavailable",
     }
 } 

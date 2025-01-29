@@ -1,0 +1,51 @@
+# API服务配置
+api:
+  host: "localhost"
+  port: 8000
+  reload: true  # 开发模式下启用热重载
+
+# 前端服务配置
+frontend:
+  host: "localhost"
+  port: 8501
+
+# 数据库配置
+database:
+  url: "sqlite:///amazon_products.db"
+
+# 缓存配置
+cache:
+  ttl: 3600  # 缓存过期时间（秒）
+  max_size: 1000  # 最大缓存条目数
+
+# 爬虫配置
+crawler:
+  max_items: 100
+  batch_size: 10
+  timeout: 30
+  headless: true
+
+# 调度器配置
+scheduler:
+  timezone: "Asia/Shanghai"
+  job_store:
+    url: "sqlite:///jobs.db"
+  jobs:
+    - id: "bestseller_daily"
+      type: "cron"
+      hour: "*/4"  # 每4小时执行一次
+      crawler_type: "bestseller"
+      max_items: 100
+      
+    - id: "coupon_hourly"
+      type: "interval"
+      hours: 1  # 每小时执行一次
+      crawler_type: "coupon"
+      max_items: 50
+      
+    - id: "full_sync_daily"
+      type: "cron"
+      hour: "2"  # 每天凌晨2点
+      minute: "30"
+      crawler_type: "all"
+      max_items: 200 
