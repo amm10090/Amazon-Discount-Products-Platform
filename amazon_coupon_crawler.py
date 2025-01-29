@@ -12,7 +12,7 @@ import re
 import argparse
 from pathlib import Path
 import csv
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, TypedDict
 from datetime import datetime
 import colorama
 from colorama import Fore, Back, Style
@@ -451,7 +451,16 @@ def extract_product_info(card) -> Optional[Dict]:
     except Exception:
         return None
 
-async def save_coupon_results(results: List[Dict], filename: str, format: str = 'json') -> None:
+class CouponInfo(TypedDict):
+    type: str
+    value: float
+
+class ProductInfo(TypedDict):
+    asin: str
+    url: str
+    coupon: CouponInfo
+
+async def save_coupon_results(results: List[ProductInfo], filename: str, format: str = 'json') -> None:
     """异步保存优惠券商品结果
     
     Args:
@@ -482,16 +491,18 @@ async def save_coupon_results(results: List[Dict], filename: str, format: str = 
             
     elif format == 'csv':
         async with aiofiles.open(output_path, 'w', newline='', encoding='utf-8') as f:
-            await f.write('ASIN,Coupon Type,Coupon Value,Timestamp\n')
+            await f.write('ASIN,URL,Coupon Type,Coupon Value\n')
             for item in results:
-                coupon = item['coupon']
-                await f.write(f"{item['asin']},{coupon['type']},{coupon['value']},{item['timestamp']}\n")
+                coupon_info = item['coupon']
+                line = f"{item['asin']},{item['url']},{coupon_info['type']},{coupon_info['value']}\n"
+                await f.write(line)
                 
     elif format == 'txt':
         async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
             for item in results:
-                coupon = item['coupon']
-                await f.write(f"{item['asin']}\t{coupon['type']}\t{coupon['value']}\n")
+                coupon_info = item['coupon']
+                line = f"{item['asin']}\t{item['url']}\t{coupon_info['type']}\t{coupon_info['value']}\n"
+                await f.write(line)
                 
     log_success(f"结果已保存到: {output_path} ({format.upper()}格式)")
 

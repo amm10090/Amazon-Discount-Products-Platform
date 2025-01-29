@@ -231,35 +231,40 @@ class SchedulerManager:
     
     def get_jobs(self) -> List[Dict[str, Any]]:
         """获取所有任务"""
-        jobs = []
-        for job in self.scheduler.get_jobs():
-            job_info = {
-                "id": job.id,
-                "type": "cron" if isinstance(job.trigger, CronTrigger) else "interval",
-                "crawler_type": job.args[1],
-                "max_items": job.args[2],
-                "next_run_time": job.next_run_time.timestamp() if job.next_run_time else None,
-                "paused": job.next_run_time is None
-            }
+        try:
+            jobs = []
+            for job in self.scheduler.get_jobs():
+                job_info = {
+                    "id": job.id,
+                    "type": "cron" if isinstance(job.trigger, CronTrigger) else "interval",
+                    "crawler_type": job.args[1] if len(job.args) > 1 else None,
+                    "max_items": job.args[2] if len(job.args) > 2 else 100,
+                    "next_run_time": job.next_run_time.timestamp() if job.next_run_time else None,
+                    "paused": job.next_run_time is None
+                }
+                
+                # 添加触发器特定的信息
+                if isinstance(job.trigger, CronTrigger):
+                    job_info.update({
+                        "hour": str(job.trigger.fields[5]),  # hour field
+                        "minute": str(job.trigger.fields[4])  # minute field
+                    })
+                else:  # IntervalTrigger
+                    total_seconds = job.trigger.interval.total_seconds()
+                    hours = int(total_seconds // 3600)
+                    minutes = int((total_seconds % 3600) // 60)
+                    job_info.update({
+                        "hours": hours,
+                        "minutes": minutes
+                    })
+                
+                jobs.append(job_info)
             
-            # 添加触发器特定的信息
-            if isinstance(job.trigger, CronTrigger):
-                job_info.update({
-                    "hour": str(job.trigger.fields[5]),  # hour field
-                    "minute": str(job.trigger.fields[4])  # minute field
-                })
-            else:  # IntervalTrigger
-                total_seconds = job.trigger.interval.total_seconds()
-                hours = int(total_seconds // 3600)
-                minutes = int((total_seconds % 3600) // 60)
-                job_info.update({
-                    "hours": hours,
-                    "minutes": minutes
-                })
+            return jobs
             
-            jobs.append(job_info)
-        
-        return jobs
+        except Exception as e:
+            logger.error(f"获取任务列表失败: {str(e)}")
+            return []
     
     def remove_job(self, job_id: str):
         """删除任务"""

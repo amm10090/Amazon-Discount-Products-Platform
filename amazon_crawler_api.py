@@ -368,10 +368,17 @@ async def add_job(job_config: JobConfig):
 async def list_jobs():
     """获取所有定时任务"""
     try:
-        scheduler_manager = SchedulerManager()
-        return scheduler_manager.get_jobs()
+        scheduler = SchedulerManager()
+        jobs = scheduler.get_jobs()
+        return JSONResponse(
+            content=jobs,
+            status_code=200
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取任务列表失败: {str(e)}"
+        )
 
 @app.delete("/api/scheduler/jobs/{job_id}")
 async def delete_job(job_id: str):
@@ -385,23 +392,35 @@ async def delete_job(job_id: str):
 
 @app.post("/api/scheduler/jobs/{job_id}/pause")
 async def pause_job(job_id: str):
-    """暂停定时任务"""
+    """暂停任务"""
     try:
-        scheduler_manager = SchedulerManager()
-        scheduler_manager.pause_job(job_id)
-        return {"status": "success", "message": "任务已暂停"}
+        scheduler = SchedulerManager()
+        scheduler.pause_job(job_id)
+        return JSONResponse(
+            content={"status": "success", "message": f"任务 {job_id} 已暂停"},
+            status_code=200
+        )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.post("/api/scheduler/jobs/{job_id}/resume")
 async def resume_job(job_id: str):
-    """恢复定时任务"""
+    """恢复任务"""
     try:
-        scheduler_manager = SchedulerManager()
-        scheduler_manager.resume_job(job_id)
-        return {"status": "success", "message": "任务已恢复"}
+        scheduler = SchedulerManager()
+        scheduler.resume_job(job_id)
+        return JSONResponse(
+            content={"status": "success", "message": f"任务 {job_id} 已恢复"},
+            status_code=200
+        )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.get("/api/scheduler/jobs/{job_id}/history", response_model=List[JobHistory])
 async def get_job_history(job_id: str):

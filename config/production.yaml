@@ -1,0 +1,31 @@
+# 生产环境配置
+
+environment: production
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 4  # 根据CPU核心数调整
+
+frontend:
+  host: "0.0.0.0"
+  port: 8501
+
+# 日志配置
+logging:
+  level: INFO
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+# 数据库配置
+database:
+  url: "sqlite:///scheduler.db"  # 生产环境建议使用PostgreSQL
+  pool_size: 20
+  max_overflow: 10
+
+# 缓存配置
+cache:
+  type: "redis"
+  url: "redis://localhost:6379/0"
+  ttl: 3600  # 缓存过期时间（秒） 

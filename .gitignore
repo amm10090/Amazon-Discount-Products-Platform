@@ -41,3 +41,5 @@ coupon_deals.json
 .cursorrules
 jobs.db
 scheduler.db
+.cursorrules
+.cursor/
