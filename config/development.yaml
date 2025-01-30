@@ -1,0 +1,78 @@
+# 开发环境配置
+
+environment: development
+
+api:
+  host: "localhost"
+  port: 8000
+  reload: true
+  workers: 1  # 开发环境使用单个worker便于调试
+
+frontend:
+  host: "localhost"
+  port: 8501
+  theme:
+    primaryColor: "#ff9900"
+    backgroundColor: "#ffffff"
+    secondaryBackgroundColor: "#f0f2f6"
+    textColor: "#31333F"
+  page:
+    layout: "wide"
+    initial_sidebar_state: "expanded"
+  cache:
+    ttl: 60  # 开发环境缓存时间较短，便于测试
+    max_entries: 100  # 开发环境缓存条目较少
+  menu_items:
+    get_help_url: "https://github.com/yourusername/amazon-deals-platform"
+    report_bug_url: "https://github.com/yourusername/amazon-deals-platform/issues"
+    about: "Amazon优惠商品平台 - 开发环境"
+
+# 日志配置
+logging:
+  level: DEBUG  # 开发环境使用DEBUG级别
+  max_size: 10485760  # 10MB
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/development.log"
+
+# 数据库配置
+database:
+  url: "sqlite:///dev_scheduler.db"  # 开发环境使用独立的数据库文件
+  pool_size: 5
+  max_overflow: 10
+
+# 缓存配置
+cache:
+  type: "memory"  # 开发环境使用内存缓存
+  ttl: 300  # 缓存过期时间（秒）
+  max_size: 100  # 最大缓存条目数
+
+# 爬虫配置
+crawler:
+  max_retries: 3
+  timeout: 30
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  headless: false  # 开发环境默认不使用无头模式，便于调试
+  delay:
+    min: 1
+    max: 3
+
+# PA-API配置
+paapi:
+  access_key: "your_access_key_here"
+  secret_key: "your_secret_key_here"
+  partner_tag: "your_partner_tag_here"
+  host: "webservices.amazon.com"
+  region: "us-west-2"
+  max_requests_per_second: 1  # 开发环境限制请求速率
+
+# 调度器配置
+scheduler:
+  timezone: "Asia/Shanghai"
+  max_instances: 1
+  coalesce: true
+  misfire_grace_time: 60
+  job_defaults:
+    max_instances: 1
+    coalesce: true
+    misfire_grace_time: 60

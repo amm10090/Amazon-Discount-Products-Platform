@@ -3,14 +3,20 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import asyncio
 import uvicorn
-from amazon_bestseller import crawl_deals, save_results
-import os
+import sys
 from pathlib import Path
+
+# 添加项目根目录到Python路径
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.append(str(project_root))
+
+from ..amazon_bestseller import crawl_deals, save_results
+import os
 from fastapi.responses import FileResponse, JSONResponse
 from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
 from models.product import ProductInfo
 from pydantic import BaseModel
-from amazon_product_api import AmazonProductAPI
+from ..amazon_product_api import AmazonProductAPI
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from models.database import SessionLocal, init_db
@@ -495,6 +501,29 @@ async def update_timezone(timezone_update: TimezoneUpdate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/scheduler/jobs/{job_id}/execute")
+async def execute_job_now(job_id: str):
+    """立即执行任务
+    
+    Args:
+        job_id: 任务ID
+        
+    Returns:
+        Dict: 执行结果
+    """
+    try:
+        scheduler = SchedulerManager()
+        scheduler.execute_job_now(job_id)
+        return JSONResponse(
+            content={"status": "success", "message": f"任务 {job_id} 已开始执行"},
+            status_code=200
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动时的事件处理"""
@@ -503,6 +532,24 @@ async def startup_event():
     print("数据库初始化完成")
 
 if __name__ == "__main__":
-    print("请使用以下命令启动服务：")
-    print("开发模式（支持热更新）: python dev.py")
-    print("生产模式: uvicorn amazon_crawler_api:app --host localhost --port 8000") 
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="FastAPI Development Server")
+    parser.add_argument("--host", default="localhost", help="Host to bind")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    parser.add_argument("--workers", type=int, default=1, help="Number of worker processes")
+    parser.add_argument("--reload-dir", help="Directory to watch for changes")
+    parser.add_argument("--log-level", default="info", help="Logging level")
+    
+    args = parser.parse_args()
+    
+    uvicorn.run(
+        "amazon_crawler_api:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        workers=args.workers,
+        reload_dir=args.reload_dir,
+        log_level=args.log_level
+    ) 

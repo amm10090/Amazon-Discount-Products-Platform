@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, I
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from loguru import logger
+from pathlib import Path
 
 Base = declarative_base()
 
@@ -37,7 +38,7 @@ class SchedulerManager:
     _instance = None
     _initialized = False
     _scheduler = None
-    _db_path = 'sqlite:///scheduler.db'
+    _db_path = None  # 将在初始化时设置
     _timezone = os.getenv('SCHEDULER_TIMEZONE', 'Asia/Shanghai')
     
     def __new__(cls):
@@ -47,6 +48,16 @@ class SchedulerManager:
     
     def __init__(self):
         if not self._initialized:
+            # 优先使用环境变量中的数据库路径
+            if "SCHEDULER_DB_PATH" in os.environ:
+                db_file = os.environ["SCHEDULER_DB_PATH"]
+                self._db_path = f"sqlite:///{db_file}"
+            else:
+                # 默认路径
+                data_dir = Path(__file__).parent.parent / "data" / "db"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                self._db_path = f"sqlite:///{data_dir}/scheduler.db"
+            
             self._setup_database()
             self._init_scheduler()
             SchedulerManager._initialized = True
@@ -79,18 +90,24 @@ class SchedulerManager:
         return SchedulerManager._scheduler
     
     @staticmethod
-    async def _crawl_products(crawler_type: str, max_items: int) -> int:
+    async def _crawl_products(crawler_type: str, max_items: int):
         """执行爬虫任务
         
         Args:
-            crawler_type: 爬虫类型
+            crawler_type: 爬虫类型 (bestseller/coupon/all)
             max_items: 最大采集数量
             
         Returns:
             int: 采集到的商品数量
         """
-        from collect_products import Config, crawl_bestseller_products, crawl_coupon_products
-        from amazon_product_api import AmazonProductAPI
+        from core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
+        from core.amazon_product_api import AmazonProductAPI
+        
+        # 检查必要的环境变量
+        required_env_vars = ["AMAZON_ACCESS_KEY", "AMAZON_SECRET_KEY", "AMAZON_PARTNER_TAG"]
+        for var in required_env_vars:
+            if not os.getenv(var):
+                raise ValueError(f"缺少必要的环境变量: {var}")
         
         # 初始化API客户端
         api = AmazonProductAPI(
@@ -99,49 +116,56 @@ class SchedulerManager:
             partner_tag=os.getenv("AMAZON_PARTNER_TAG")
         )
         
-        # 创建任务配置
+        # 从环境变量读取配置参数
         config = Config(
             max_items=max_items,
-            batch_size=10,
-            timeout=30,
-            headless=True
+            batch_size=int(os.getenv("CRAWLER_BATCH_SIZE", "10")),
+            timeout=int(os.getenv("CRAWLER_TIMEOUT", "30")),
+            headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
         )
         
-        # 根据类型执行不同的爬虫
-        if crawler_type == "bestseller":
-            return await crawl_bestseller_products(
-                api,
-                config.max_items,
-                config.batch_size,
-                config.timeout,
-                config.headless
-            )
-        elif crawler_type == "coupon":
-            return await crawl_coupon_products(
-                api,
-                config.max_items,
-                config.batch_size,
-                config.timeout,
-                config.headless
-            )
-        elif crawler_type == "all":
-            bestseller_items = await crawl_bestseller_products(
-                api,
-                config.max_items,
-                config.batch_size,
-                config.timeout,
-                config.headless
-            )
-            coupon_items = await crawl_coupon_products(
-                api,
-                config.max_items,
-                config.batch_size,
-                config.timeout,
-                config.headless
-            )
-            return bestseller_items + coupon_items
-        else:
-            raise ValueError(f"不支持的爬虫类型: {crawler_type}")
+        logger.info(f"爬虫配置: {config}")
+        
+        try:
+            # 根据类型执行不同的爬虫
+            if crawler_type == "bestseller":
+                return await crawl_bestseller_products(
+                    api,
+                    config.max_items,
+                    config.batch_size,
+                    config.timeout,
+                    config.headless
+                )
+            elif crawler_type == "coupon":
+                return await crawl_coupon_products(
+                    api,
+                    config.max_items,
+                    config.batch_size,
+                    config.timeout,
+                    config.headless
+                )
+            elif crawler_type == "all":
+                bestseller_items = await crawl_bestseller_products(
+                    api,
+                    config.max_items,
+                    config.batch_size,
+                    config.timeout,
+                    config.headless
+                )
+                coupon_items = await crawl_coupon_products(
+                    api,
+                    config.max_items,
+                    config.batch_size,
+                    config.timeout,
+                    config.headless
+                )
+                return bestseller_items + coupon_items
+            else:
+                raise ValueError(f"不支持的爬虫类型: {crawler_type}")
+                
+        except Exception as e:
+            logger.error(f"爬虫执行失败: {str(e)}")
+            raise
 
     @staticmethod
     def _execute_job(job_id: str, crawler_type: str, max_items: int):
@@ -150,48 +174,71 @@ class SchedulerManager:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         
-        # 创建数据库会话
-        engine = create_engine('sqlite:///scheduler.db')
-        Session = sessionmaker(bind=engine)
-        session = Session()
-        
-        history = JobHistoryModel(
-            job_id=job_id,
-            start_time=datetime.now(),
-            status='running'
-        )
-        session.add(history)
-        session.commit()
-        
         try:
-            # 创建新的事件循环来运行异步任务
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # 优先使用环境变量中的数据库路径
+            if "SCHEDULER_DB_PATH" in os.environ:
+                db_file = os.environ["SCHEDULER_DB_PATH"]
+                db_path = f"sqlite:///{db_file}"
+            else:
+                # 默认路径
+                data_dir = Path(__file__).parent.parent / "data" / "db"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                db_path = f"sqlite:///{data_dir}/scheduler.db"
             
-            # 执行爬虫任务
-            items_collected = loop.run_until_complete(
-                SchedulerManager._crawl_products(crawler_type, max_items)
+            logger.info(f"使用数据库路径: {db_path}")
+            
+            # 创建数据库引擎和会话
+            engine = create_engine(db_path)
+            Base.metadata.create_all(engine)  # 确保表已创建
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            
+            # 创建历史记录
+            history = JobHistoryModel(
+                job_id=job_id,
+                start_time=datetime.now(),
+                status='running'
             )
-            
-            # 关闭事件循环
-            loop.close()
-            
-            # 更新历史记录
-            history.end_time = datetime.now()
-            history.status = 'completed'
-            history.items_collected = items_collected
+            session.add(history)
             session.commit()
             
-            logger.success(f"任务 {job_id} 完成，采集数量: {items_collected}")
+            try:
+                logger.info(f"开始执行爬虫任务: {crawler_type}, 目标数量: {max_items}")
+                
+                # 创建新的事件循环来运行异步任务
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # 执行爬虫任务
+                items_collected = loop.run_until_complete(
+                    SchedulerManager._crawl_products(crawler_type, max_items)
+                )
+                
+                logger.info(f"爬虫任务完成，收集到 {len(items_collected)} 个商品")
+                
+                # 更新历史记录
+                history.end_time = datetime.now()
+                history.status = 'completed'
+                history.result = f"成功收集 {len(items_collected)} 个商品"
+                session.commit()
+                
+                # 关闭事件循环
+                loop.close()
+                
+            except Exception as e:
+                logger.error(f"爬虫任务执行失败: {str(e)}")
+                history.end_time = datetime.now()
+                history.status = 'failed'
+                history.result = f"执行失败: {str(e)}"
+                session.commit()
+                raise
             
+            finally:
+                session.close()
+                
         except Exception as e:
-            logger.error(f"任务 {job_id} 执行失败: {str(e)}")
-            history.end_time = datetime.now()
-            history.status = 'failed'
-            history.error = str(e)
-            session.commit()
-        finally:
-            session.close()
+            logger.error(f"任务执行失败: {str(e)}")
+            raise
 
     def add_job(self, job_config: Dict[str, Any]):
         """添加新任务"""
@@ -390,4 +437,36 @@ class SchedulerManager:
         """重新加载调度器"""
         self.stop()
         self._init_scheduler()
-        logger.info("调度器已重新加载") 
+        logger.info("调度器已重新加载")
+
+    def execute_job_now(self, job_id: str):
+        """立即执行任务
+        
+        Args:
+            job_id: 任务ID
+            
+        Raises:
+            ValueError: 任务不存在时抛出
+        """
+        try:
+            job = self.scheduler.get_job(job_id)
+            if not job:
+                raise ValueError(f"任务 {job_id} 不存在")
+            
+            # 获取任务参数
+            crawler_type = job.args[1]
+            max_items = job.args[2]
+            
+            # 在后台执行任务
+            import threading
+            thread = threading.Thread(
+                target=self._execute_job,
+                args=[job_id, crawler_type, max_items]
+            )
+            thread.start()
+            
+            logger.info(f"已开始执行任务: {job_id}")
+            
+        except Exception as e:
+            logger.error(f"立即执行任务 {job_id} 失败: {str(e)}")
+            raise 

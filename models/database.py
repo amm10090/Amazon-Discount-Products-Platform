@@ -1,14 +1,27 @@
+import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
-import os
+from pathlib import Path
+
+# 确保data/db目录存在
+data_dir = Path(__file__).parent.parent / "data" / "db"
+data_dir.mkdir(parents=True, exist_ok=True)
+
+# 优先使用环境变量中的数据库路径
+if "PRODUCTS_DB_PATH" in os.environ:
+    db_file = os.environ["PRODUCTS_DB_PATH"]
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{db_file}"
+else:
+    # 默认路径
+    db_file = data_dir / "amazon_products.db"
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{db_file}"
 
 # 创建数据库引擎
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./amazon_products.db")
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},  # 允许多线程访问
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},  # SQLite特定配置
     pool_pre_ping=True,  # 自动检查连接是否有效
     pool_recycle=3600,  # 每小时回收连接
 )
@@ -101,8 +114,8 @@ class Offer(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-# 创建数据库表
 def init_db():
+    """初始化数据库，创建所有表"""
     Base.metadata.create_all(bind=engine)
 
 # 获取数据库会话

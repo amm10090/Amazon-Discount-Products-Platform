@@ -269,6 +269,21 @@ try:
                                 except Exception as e:
                                     st.error(str(e))
                         
+                        # 立即执行按钮
+                        if st.button(
+                            "⚡ " + get_text("execute_now"),
+                            key=f"execute_{job['id']}"
+                        ):
+                            try:
+                                response = requests.post(
+                                    f"{api_url}/api/scheduler/jobs/{job['id']}/execute"
+                                )
+                                if response.status_code == 200:
+                                    st.success(get_text("job_started"))
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(str(e))
+                        
                         # 删除按钮
                         if st.button(
                             "🗑️ " + get_text("delete"),

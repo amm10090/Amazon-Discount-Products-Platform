@@ -143,7 +143,8 @@ if "task_id" in st.session_state:
     
     # 轮询任务状态
     try:
-        response = requests.get(f"http://localhost:8000/api/status/{task_id}")
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+        response = requests.get(f"{api_url}/api/status/{task_id}")
         
         if response.status_code == 200:
             task_info = response.json()
@@ -161,7 +162,7 @@ if "task_id" in st.session_state:
                     if st.button(get_text("download_results")):
                         try:
                             download_response = requests.get(
-                                f"http://localhost:8000/api/download/{task_id}"
+                                f"{api_url}/api/download/{task_id}"
                             )
                             
                             if download_response.status_code == 200:

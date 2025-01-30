@@ -14,7 +14,7 @@ class JobConfig(BaseModel):
     minutes: Optional[int] = Field(None, ge=0, le=59, description="间隔任务的分钟数")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "bestseller_daily",
                 "type": "cron",
@@ -39,7 +39,7 @@ class JobStatus(BaseModel):
     minutes: Optional[int] = Field(None, description="间隔任务的分钟数")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "bestseller_daily",
                 "type": "cron",
@@ -60,7 +60,7 @@ class SchedulerStatus(BaseModel):
     timezone: str = Field(..., description="时区")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "running": True,
                 "running_jobs": 2,
@@ -78,7 +78,7 @@ class JobHistory(BaseModel):
     error: Optional[str] = Field(None, description="错误信息")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "start_time": "2024-02-28T10:00:00+08:00",
                 "end_time": "2024-02-28T10:05:30+08:00",
@@ -99,4 +99,4 @@ class JobHistoryDB(BaseModel):
     error: Optional[str] = Field(None, description="错误信息")
 
     class Config:
-        orm_mode = True 
+        from_attributes = True 

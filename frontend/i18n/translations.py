@@ -168,6 +168,11 @@ TRANSLATIONS = {
         "current_timezone": "当前时区",
         
         "price_unavailable": "暂无价格",
+        
+        # 调度器相关
+        "execute_now": "立即执行",
+        "job_started": "任务已开始执行",
+        "job_execution_failed": "任务执行失败",
     },
     
     "en": {
@@ -335,5 +340,10 @@ TRANSLATIONS = {
         "current_timezone": "Current Timezone",
         
         "price_unavailable": "Price unavailable",
+        
+        # Scheduler Related
+        "execute_now": "Execute Now",
+        "job_started": "Task execution started",
+        "job_execution_failed": "Task execution failed",
     }
 } 

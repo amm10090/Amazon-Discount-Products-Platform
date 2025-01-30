@@ -1,0 +1,809 @@
+{
+  "metadata": {
+    "total_count": 100,
+    "timestamp": "2025-01-30T20:09:49.203994",
+    "source": "amazon_coupon_deals"
+  },
+  "items": [
+    {
+      "asin": "B01LYNW421",
+      "url": "https://www.amazon.com/dp/B01LYNW421?ref=dlx_deals_dg_dcl_B01LYNW421_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0D5H5JVGH",
+      "url": "https://www.amazon.com/dp/B0D5H5JVGH?ref=dlx_deals_dg_dcl_B0D5H5JVGH_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B00SFSU53G",
+      "url": "https://www.amazon.com/dp/B00SFSU53G?ref=dlx_deals_dg_dcl_B00SFSU53G_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B099WTN2TR",
+      "url": "https://www.amazon.com/dp/B099WTN2TR?ref=dlx_deals_dg_dcl_B099WTN2TR_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0CDNQ62ML",
+      "url": "https://www.amazon.com/dp/B0CDNQ62ML?ref=dlx_deals_dg_dcl_B0CDNQ62ML_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B07C4BMSH4",
+      "url": "https://www.amazon.com/dp/B07C4BMSH4?ref=dlx_deals_dg_dcl_B07C4BMSH4_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B01LYNW421",
+      "url": "https://www.amazon.com/dp/B01LYNW421?ref=dlx_deals_dg_dcl_B01LYNW421_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0D5H5JVGH",
+      "url": "https://www.amazon.com/dp/B0D5H5JVGH?ref=dlx_deals_dg_dcl_B0D5H5JVGH_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B00SFSU53G",
+      "url": "https://www.amazon.com/dp/B00SFSU53G?ref=dlx_deals_dg_dcl_B00SFSU53G_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B099WTN2TR",
+      "url": "https://www.amazon.com/dp/B099WTN2TR?ref=dlx_deals_dg_dcl_B099WTN2TR_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0CDNQ62ML",
+      "url": "https://www.amazon.com/dp/B0CDNQ62ML?ref=dlx_deals_dg_dcl_B0CDNQ62ML_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B07C4BMSH4",
+      "url": "https://www.amazon.com/dp/B07C4BMSH4?ref=dlx_deals_dg_dcl_B07C4BMSH4_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B0DF2WS15J",
+      "url": "https://www.amazon.com/dp/B0DF2WS15J?ref=dlx_deals_dg_dcl_B0DF2WS15J_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B08L8B5JR2",
+      "url": "https://www.amazon.com/dp/B08L8B5JR2?ref=dlx_deals_dg_dcl_B08L8B5JR2_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0831BF1FH",
+      "url": "https://www.amazon.com/dp/B0831BF1FH?ref=dlx_deals_dg_dcl_B0831BF1FH_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B07DNYSJ8W",
+      "url": "https://www.amazon.com/dp/B07DNYSJ8W?ref=dlx_deals_dg_dcl_B07DNYSJ8W_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0CNGHJS8P",
+      "url": "https://www.amazon.com/dp/B0CNGHJS8P?ref=dlx_deals_dg_dcl_B0CNGHJS8P_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0BQ1GZY7H",
+      "url": "https://www.amazon.com/dp/B0BQ1GZY7H?ref=dlx_deals_dg_dcl_B0BQ1GZY7H_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B00NKYYMAW",
+      "url": "https://www.amazon.com/dp/B00NKYYMAW?ref=dlx_deals_dg_dcl_B00NKYYMAW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B08DTH86Q2",
+      "url": "https://www.amazon.com/dp/B08DTH86Q2?ref=dlx_deals_dg_dcl_B08DTH86Q2_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0D3F44F6B",
+      "url": "https://www.amazon.com/dp/B0D3F44F6B?ref=dlx_deals_dg_dcl_B0D3F44F6B_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B01EBDV9BU",
+      "url": "https://www.amazon.com/dp/B01EBDV9BU?ref=dlx_deals_dg_dcl_B01EBDV9BU_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0D7C5QDNF",
+      "url": "https://www.amazon.com/dp/B0D7C5QDNF?ref=dlx_deals_dg_dcl_B0D7C5QDNF_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0DD41G2NZ",
+      "url": "https://www.amazon.com/dp/B0DD41G2NZ?ref=dlx_deals_dg_dcl_B0DD41G2NZ_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B00NKYYMAW",
+      "url": "https://www.amazon.com/dp/B00NKYYMAW?ref=dlx_deals_dg_dcl_B00NKYYMAW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B08DTH86Q2",
+      "url": "https://www.amazon.com/dp/B08DTH86Q2?ref=dlx_deals_dg_dcl_B08DTH86Q2_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0D3F44F6B",
+      "url": "https://www.amazon.com/dp/B0D3F44F6B?ref=dlx_deals_dg_dcl_B0D3F44F6B_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B01EBDV9BU",
+      "url": "https://www.amazon.com/dp/B01EBDV9BU?ref=dlx_deals_dg_dcl_B01EBDV9BU_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0D7C5QDNF",
+      "url": "https://www.amazon.com/dp/B0D7C5QDNF?ref=dlx_deals_dg_dcl_B0D7C5QDNF_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0DD41G2NZ",
+      "url": "https://www.amazon.com/dp/B0DD41G2NZ?ref=dlx_deals_dg_dcl_B0DD41G2NZ_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B07RWRJ4XW",
+      "url": "https://www.amazon.com/dp/B07RWRJ4XW?ref=dlx_deals_dg_dcl_B07RWRJ4XW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B0DCBMDQ8T",
+      "url": "https://www.amazon.com/dp/B0DCBMDQ8T?ref=dlx_deals_dg_dcl_B0DCBMDQ8T_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0CTH2QF23",
+      "url": "https://www.amazon.com/dp/B0CTH2QF23?ref=dlx_deals_dg_dcl_B0CTH2QF23_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B08SM447BQ",
+      "url": "https://www.amazon.com/dp/B08SM447BQ?ref=dlx_deals_dg_dcl_B08SM447BQ_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0CQYTNNW7",
+      "url": "https://www.amazon.com/dp/B0CQYTNNW7?ref=dlx_deals_dg_dcl_B0CQYTNNW7_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B07CVX3516",
+      "url": "https://www.amazon.com/dp/B07CVX3516?ref=dlx_deals_dg_dcl_B07CVX3516_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B00S1TC442",
+      "url": "https://www.amazon.com/dp/B00S1TC442?ref=dlx_deals_dg_dcl_B00S1TC442_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B082F13J55",
+      "url": "https://www.amazon.com/dp/B082F13J55?ref=dlx_deals_dg_dcl_B082F13J55_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0CHS2BGHY",
+      "url": "https://www.amazon.com/dp/B0CHS2BGHY?ref=dlx_deals_dg_dcl_B0CHS2BGHY_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0DLKGLBPG",
+      "url": "https://www.amazon.com/dp/B0DLKGLBPG?ref=dlx_deals_dg_dcl_B0DLKGLBPG_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0DKHCWJ5G",
+      "url": "https://www.amazon.com/dp/B0DKHCWJ5G?ref=dlx_deals_dg_dcl_B0DKHCWJ5G_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B078SZX3ML",
+      "url": "https://www.amazon.com/dp/B078SZX3ML?ref=dlx_deals_dg_dcl_B078SZX3ML_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0C6Y89H47",
+      "url": "https://www.amazon.com/dp/B0C6Y89H47?ref=dlx_deals_dg_dcl_B0C6Y89H47_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DGV4T6BK",
+      "url": "https://www.amazon.com/dp/B0DGV4T6BK?ref=dlx_deals_dg_dcl_B0DGV4T6BK_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DBY95KKP",
+      "url": "https://www.amazon.com/dp/B0DBY95KKP?ref=dlx_deals_dg_dcl_B0DBY95KKP_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 130.0
+      }
+    },
+    {
+      "asin": "B075QQ8VZW",
+      "url": "https://www.amazon.com/dp/B075QQ8VZW?ref=dlx_deals_dg_dcl_B075QQ8VZW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0DLKG4Q9X",
+      "url": "https://www.amazon.com/dp/B0DLKG4Q9X?ref=dlx_deals_dg_dcl_B0DLKG4Q9X_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0CKTDHSRB",
+      "url": "https://www.amazon.com/dp/B0CKTDHSRB?ref=dlx_deals_dg_dcl_B0CKTDHSRB_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 6.0
+      }
+    },
+    {
+      "asin": "B0C58H2CSP",
+      "url": "https://www.amazon.com/dp/B0C58H2CSP?ref=dlx_deals_dg_dcl_B0C58H2CSP_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 80.0
+      }
+    },
+    {
+      "asin": "B08HPQVJMW",
+      "url": "https://www.amazon.com/dp/B08HPQVJMW?ref=dlx_deals_dg_dcl_B08HPQVJMW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B08P4HHSZT",
+      "url": "https://www.amazon.com/dp/B08P4HHSZT?ref=dlx_deals_dg_dcl_B08P4HHSZT_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DBZS6MHK",
+      "url": "https://www.amazon.com/dp/B0DBZS6MHK?ref=dlx_deals_dg_dcl_B0DBZS6MHK_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B07L28V39Q",
+      "url": "https://www.amazon.com/dp/B07L28V39Q?ref=dlx_deals_dg_dcl_B07L28V39Q_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0CGHWFF71",
+      "url": "https://www.amazon.com/dp/B0CGHWFF71?ref=dlx_deals_dg_dcl_B0CGHWFF71_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0C58H2CSP",
+      "url": "https://www.amazon.com/dp/B0C58H2CSP?ref=dlx_deals_dg_dcl_B0C58H2CSP_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 80.0
+      }
+    },
+    {
+      "asin": "B08HPQVJMW",
+      "url": "https://www.amazon.com/dp/B08HPQVJMW?ref=dlx_deals_dg_dcl_B08HPQVJMW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B08P4HHSZT",
+      "url": "https://www.amazon.com/dp/B08P4HHSZT?ref=dlx_deals_dg_dcl_B08P4HHSZT_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DBZS6MHK",
+      "url": "https://www.amazon.com/dp/B0DBZS6MHK?ref=dlx_deals_dg_dcl_B0DBZS6MHK_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B07L28V39Q",
+      "url": "https://www.amazon.com/dp/B07L28V39Q?ref=dlx_deals_dg_dcl_B07L28V39Q_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B0CGHWFF71",
+      "url": "https://www.amazon.com/dp/B0CGHWFF71?ref=dlx_deals_dg_dcl_B0CGHWFF71_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DHNG4DL8",
+      "url": "https://www.amazon.com/dp/B0DHNG4DL8?ref=dlx_deals_dg_dcl_B0DHNG4DL8_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B08YWHN79N",
+      "url": "https://www.amazon.com/dp/B08YWHN79N?ref=dlx_deals_dg_dcl_B08YWHN79N_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0CHFT6T5P",
+      "url": "https://www.amazon.com/dp/B0CHFT6T5P?ref=dlx_deals_dg_dcl_B0CHFT6T5P_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B0BPSQ4XNN",
+      "url": "https://www.amazon.com/dp/B0BPSQ4XNN?ref=dlx_deals_dg_dcl_B0BPSQ4XNN_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DG51RKFW",
+      "url": "https://www.amazon.com/dp/B0DG51RKFW?ref=dlx_deals_dg_dcl_B0DG51RKFW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0BGWRWRX2",
+      "url": "https://www.amazon.com/dp/B0BGWRWRX2?ref=dlx_deals_dg_dcl_B0BGWRWRX2_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B07WNRN9WQ",
+      "url": "https://www.amazon.com/dp/B07WNRN9WQ?ref=dlx_deals_dg_dcl_B07WNRN9WQ_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0BYNF9GZS",
+      "url": "https://www.amazon.com/dp/B0BYNF9GZS?ref=dlx_deals_dg_dcl_B0BYNF9GZS_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B09ZTXVNVD",
+      "url": "https://www.amazon.com/dp/B09ZTXVNVD?ref=dlx_deals_dg_dcl_B09ZTXVNVD_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B07JMZYJVW",
+      "url": "https://www.amazon.com/dp/B07JMZYJVW?ref=dlx_deals_dg_dcl_B07JMZYJVW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0C7VRMHYY",
+      "url": "https://www.amazon.com/dp/B0C7VRMHYY?ref=dlx_deals_dg_dcl_B0C7VRMHYY_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 40.0
+      }
+    },
+    {
+      "asin": "B07KY8G9NM",
+      "url": "https://www.amazon.com/dp/B07KY8G9NM?ref=dlx_deals_dg_dcl_B07KY8G9NM_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B01KVYTV86",
+      "url": "https://www.amazon.com/dp/B01KVYTV86?ref=dlx_deals_dg_dcl_B01KVYTV86_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 7.0
+      }
+    },
+    {
+      "asin": "B0C3QZ7SNF",
+      "url": "https://www.amazon.com/dp/B0C3QZ7SNF?ref=dlx_deals_dg_dcl_B0C3QZ7SNF_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0CZNQD1SR",
+      "url": "https://www.amazon.com/dp/B0CZNQD1SR?ref=dlx_deals_dg_dcl_B0CZNQD1SR_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 24.0
+      }
+    },
+    {
+      "asin": "B0CS7PCPXF",
+      "url": "https://www.amazon.com/dp/B0CS7PCPXF?ref=dlx_deals_dg_dcl_B0CS7PCPXF_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0C39T2VG5",
+      "url": "https://www.amazon.com/dp/B0C39T2VG5?ref=dlx_deals_dg_dcl_B0C39T2VG5_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B00LB7REBE",
+      "url": "https://www.amazon.com/dp/B00LB7REBE?ref=dlx_deals_dg_dcl_B00LB7REBE_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0D56PRG49",
+      "url": "https://www.amazon.com/dp/B0D56PRG49?ref=dlx_deals_dg_dcl_B0D56PRG49_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 6.0
+      }
+    },
+    {
+      "asin": "B09QZDKQLF",
+      "url": "https://www.amazon.com/dp/B09QZDKQLF?ref=dlx_deals_dg_dcl_B09QZDKQLF_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0BXP9NT3S",
+      "url": "https://www.amazon.com/dp/B0BXP9NT3S?ref=dlx_deals_dg_dcl_B0BXP9NT3S_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B0B7RSV894",
+      "url": "https://www.amazon.com/dp/B0B7RSV894?ref=dlx_deals_dg_dcl_B0B7RSV894_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0CSXV3GK4",
+      "url": "https://www.amazon.com/dp/B0CSXV3GK4?ref=dlx_deals_dg_dcl_B0CSXV3GK4_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 12.0
+      }
+    },
+    {
+      "asin": "B0D54QN5JZ",
+      "url": "https://www.amazon.com/dp/B0D54QN5JZ?ref=dlx_deals_dg_dcl_B0D54QN5JZ_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 40.0
+      }
+    },
+    {
+      "asin": "B0D9VPS7CP",
+      "url": "https://www.amazon.com/dp/B0D9VPS7CP?ref=dlx_deals_dg_dcl_B0D9VPS7CP_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B08KG5T8XC",
+      "url": "https://www.amazon.com/dp/B08KG5T8XC?ref=dlx_deals_dg_dcl_B08KG5T8XC_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0CYCLJDST",
+      "url": "https://www.amazon.com/dp/B0CYCLJDST?ref=dlx_deals_dg_dcl_B0CYCLJDST_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B08NCDBT7Q",
+      "url": "https://www.amazon.com/dp/B08NCDBT7Q?ref=dlx_deals_dg_dcl_B08NCDBT7Q_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B0CF9WZXVW",
+      "url": "https://www.amazon.com/dp/B0CF9WZXVW?ref=dlx_deals_dg_dcl_B0CF9WZXVW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0DGLVW188",
+      "url": "https://www.amazon.com/dp/B0DGLVW188?ref=dlx_deals_dg_dcl_B0DGLVW188_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0DHNG4DL8",
+      "url": "https://www.amazon.com/dp/B0DHNG4DL8?ref=dlx_deals_dg_dcl_B0DHNG4DL8_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B08YWHN79N",
+      "url": "https://www.amazon.com/dp/B08YWHN79N?ref=dlx_deals_dg_dcl_B08YWHN79N_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B0CHFT6T5P",
+      "url": "https://www.amazon.com/dp/B0CHFT6T5P?ref=dlx_deals_dg_dcl_B0CHFT6T5P_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 5.0
+      }
+    },
+    {
+      "asin": "B0BPSQ4XNN",
+      "url": "https://www.amazon.com/dp/B0BPSQ4XNN?ref=dlx_deals_dg_dcl_B0BPSQ4XNN_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B0DG51RKFW",
+      "url": "https://www.amazon.com/dp/B0DG51RKFW?ref=dlx_deals_dg_dcl_B0DG51RKFW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0BGWRWRX2",
+      "url": "https://www.amazon.com/dp/B0BGWRWRX2?ref=dlx_deals_dg_dcl_B0BGWRWRX2_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 30.0
+      }
+    },
+    {
+      "asin": "B07WNRN9WQ",
+      "url": "https://www.amazon.com/dp/B07WNRN9WQ?ref=dlx_deals_dg_dcl_B07WNRN9WQ_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    },
+    {
+      "asin": "B0BYNF9GZS",
+      "url": "https://www.amazon.com/dp/B0BYNF9GZS?ref=dlx_deals_dg_dcl_B0BYNF9GZS_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "fixed",
+        "value": 20.0
+      }
+    },
+    {
+      "asin": "B09ZTXVNVD",
+      "url": "https://www.amazon.com/dp/B09ZTXVNVD?ref=dlx_deals_dg_dcl_B09ZTXVNVD_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 15.0
+      }
+    },
+    {
+      "asin": "B07JMZYJVW",
+      "url": "https://www.amazon.com/dp/B07JMZYJVW?ref=dlx_deals_dg_dcl_B07JMZYJVW_dt_sl14_09&pf_rd_r=MENAX7XZKX5FZP1RPC6Z&pf_rd_p=68c51da8-1fa5-4105-8655-82b89da6b209",
+      "coupon": {
+        "type": "percentage",
+        "value": 10.0
+      }
+    }
+  ]
+}

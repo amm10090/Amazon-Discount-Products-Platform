@@ -1,3 +1,15 @@
+"""
+定时任务服务调度器模块
+
+该模块提供了一个完整的定时任务调度系统，用于管理和执行Amazon商品数据采集任务。
+主要功能包括：
+1. 支持cron和interval两种调度方式
+2. 支持任务的添加、删除、暂停、恢复
+3. 支持任务执行历史记录
+4. 支持时区管理
+5. 支持多种爬虫类型（畅销商品、优惠券商品等）
+"""
+
 import os
 import asyncio
 from datetime import datetime
@@ -9,24 +21,44 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from loguru import logger
-from collect_products import Config, crawl_bestseller_products, crawl_coupon_products
-from amazon_product_api import AmazonProductAPI
+from core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
+from core.amazon_product_api import AmazonProductAPI
 
 class SchedulerManager:
-    """定时任务管理器"""
+    """定时任务管理器
+    
+    该类负责管理所有定时任务的生命周期，包括创建、执行、监控和删除任务。
+    使用单例模式确保全局只有一个调度器实例。
+    
+    属性:
+        config (dict): 调度器配置信息
+        scheduler (AsyncIOScheduler): APScheduler异步调度器实例
+        api (AmazonProductAPI): Amazon商品API客户端实例
+    """
     
     def __init__(self, config_path: Optional[str] = None):
+        """初始化调度器管理器
+        
+        Args:
+            config_path: 配置文件路径，如果为None则使用默认配置
+        """
         self.config = self.load_config(config_path)
         self.scheduler = self._init_scheduler()
         self.api = self._init_api()
         self._setup_logging()
         
     def _setup_logging(self):
-        """配置日志"""
+        """配置日志系统
+        
+        设置日志输出格式、轮转策略和保留策略：
+        - 按天轮转日志文件
+        - 保留最近7天的日志
+        - 日志级别为INFO
+        - 使用UTF-8编码
+        """
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
         
-        # 配置日志格式和输出
         logger.add(
             log_dir / "scheduler.log",
             rotation="1 day",
@@ -36,7 +68,20 @@ class SchedulerManager:
         )
         
     def load_config(self, config_path: Optional[str]) -> dict:
-        """加载配置文件"""
+        """加载调度器配置
+        
+        从YAML配置文件加载调度器配置，如果配置文件不存在则使用默认配置。
+        
+        Args:
+            config_path: 配置文件路径
+            
+        Returns:
+            dict: 包含调度器配置的字典
+        """
+        # 确保data/db目录存在
+        data_dir = Path(__file__).parent.parent.parent / "data" / "db"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
         default_config = {
             "scheduler": {
                 "jobs": [
@@ -57,7 +102,7 @@ class SchedulerManager:
                 ],
                 "timezone": "Asia/Shanghai",
                 "job_store": {
-                    "url": "sqlite:///jobs.db"
+                    "url": f"sqlite:///{data_dir}/scheduler.db"
                 }
             }
         }
@@ -74,7 +119,15 @@ class SchedulerManager:
             return default_config
             
     def _init_scheduler(self) -> AsyncIOScheduler:
-        """初始化调度器"""
+        """初始化APScheduler调度器
+        
+        创建并配置APScheduler异步调度器实例：
+        - 设置SQLite作为任务存储后端
+        - 配置默认时区
+        
+        Returns:
+            AsyncIOScheduler: 配置好的调度器实例
+        """
         jobstores = {
             'default': SQLAlchemyJobStore(
                 url=self.config['scheduler']['job_store']['url']
@@ -88,7 +141,16 @@ class SchedulerManager:
         return scheduler
         
     def _init_api(self) -> AmazonProductAPI:
-        """初始化Amazon Product API"""
+        """初始化Amazon Product API客户端
+        
+        从环境变量获取API凭证并创建API客户端实例。
+        
+        Returns:
+            AmazonProductAPI: API客户端实例
+            
+        Raises:
+            ValueError: 缺少必要的API凭证时抛出
+        """
         access_key = os.getenv("AMAZON_ACCESS_KEY")
         secret_key = os.getenv("AMAZON_SECRET_KEY")
         partner_tag = os.getenv("AMAZON_PARTNER_TAG")
@@ -103,7 +165,18 @@ class SchedulerManager:
         )
         
     async def _execute_crawler(self, job_id: str, crawler_type: str, max_items: int):
-        """执行爬虫任务"""
+        """执行爬虫任务
+        
+        根据指定的爬虫类型执行相应的数据采集任务。
+        
+        Args:
+            job_id: 任务ID
+            crawler_type: 爬虫类型（bestseller/coupon/all）
+            max_items: 最大采集商品数量
+            
+        Raises:
+            ValueError: 不支持的爬虫类型
+        """
         try:
             logger.info(f"开始执行任务 {job_id} - {crawler_type}")
             start_time = datetime.now()
@@ -147,7 +220,16 @@ class SchedulerManager:
             logger.error(f"任务 {job_id} 执行失败: {str(e)}")
             
     def add_job(self, job_config: Dict[str, Any]):
-        """添加定时任务"""
+        """添加定时任务
+        
+        根据配置添加新的定时任务到调度器。
+        
+        Args:
+            job_config: 任务配置字典，包含任务ID、类型、执行计划等
+            
+        Raises:
+            ValueError: 不支持的任务类型
+        """
         job_id = job_config["id"]
         job_type = job_config["type"]
         
@@ -183,7 +265,10 @@ class SchedulerManager:
         logger.info(f"已添加任务: {job_id}")
         
     def start(self):
-        """启动调度器"""
+        """启动调度器
+        
+        启动调度器并添加配置文件中定义的所有任务。
+        """
         try:
             # 添加配置的任务
             for job_config in self.config['scheduler']['jobs']:
@@ -198,7 +283,10 @@ class SchedulerManager:
             raise
             
     def stop(self):
-        """停止调度器"""
+        """停止调度器
+        
+        安全地关闭调度器，确保所有资源被正确释放。
+        """
         try:
             self.scheduler.shutdown()
             logger.info("调度器已停止")
@@ -206,7 +294,11 @@ class SchedulerManager:
             logger.error(f"停止调度器失败: {str(e)}")
 
 async def main():
-    """主函数"""
+    """主函数
+    
+    创建并启动调度器管理器的入口点。
+    处理键盘中断和其他异常。
+    """
     try:
         # 获取配置文件路径
         config_path = "config/app.yaml"

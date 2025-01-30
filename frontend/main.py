@@ -191,7 +191,8 @@ with col3:
 
 # 获取商品统计信息
 try:
-    stats = requests.get("http://localhost:8000/api/products/stats").json()
+    api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+    stats = requests.get(f"{api_url}/api/products/stats").json()
     
     st.markdown("---")
     st.subheader("📈 " + get_text("nav_analysis"))
