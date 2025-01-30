@@ -5,6 +5,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from i18n import init_language, get_text, language_selector
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from main import load_config
+
+# 加载配置
+config = load_config()
 
 # 初始化语言设置
 init_language()
@@ -12,18 +19,35 @@ init_language()
 st.set_page_config(
     page_title=get_text("analysis_title"),
     page_icon="📊",
-    layout="wide"
+    layout=config["frontend"]["page"]["layout"],
+    initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"]
 )
 
 # 自定义CSS
-st.markdown("""
+st.markdown(f"""
 <style>
-    .plot-container {
+    .plot-container {{
         border: 1px solid #ddd;
         border-radius: 5px;
         padding: 1rem;
         margin: 1rem 0;
-    }
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .stButton>button {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
+        color: white;
+    }}
+    .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .sidebar .sidebar-content {{
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+    }}
+    body {{
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -36,12 +60,13 @@ with st.sidebar:
 st.title("📊 " + get_text("analysis_title"))
 
 # 获取商品数据
-@st.cache_data(ttl=300)  # 缓存5分钟
+@st.cache_data(ttl=config["frontend"]["cache"]["ttl"])
 def load_products_data():
     try:
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
         response = requests.get(
-            "http://localhost:8000/api/products/list",
-            params={"page_size": 1000}  # 获取最多1000个商品
+            f"{api_url}/api/products/list",
+            params={"page_size": config["frontend"]["cache"]["max_entries"]}
         )
         if response.status_code == 200:
             return pd.DataFrame(response.json())

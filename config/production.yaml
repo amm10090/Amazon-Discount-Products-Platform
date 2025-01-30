@@ -4,19 +4,36 @@ environment: production
 
 api:
   host: "0.0.0.0"
-  port: 8000
+  port: 5001
   reload: false
   workers: 4  # 根据CPU核心数调整
 
 frontend:
   host: "0.0.0.0"
-  port: 8501
+  port: 5002
+  theme:
+    primaryColor: "#ff9900"
+    backgroundColor: "#ffffff"
+    secondaryBackgroundColor: "#f0f2f6"
+    textColor: "#31333F"
+  page:
+    layout: "wide"
+    initial_sidebar_state: "expanded"
+  cache:
+    ttl: 300  # 缓存过期时间（秒）
+    max_entries: 1000  # 最大缓存条目数
+  menu_items:
+    get_help_url: "https://github.com/yourusername/amazon-deals-platform"
+    report_bug_url: "https://github.com/yourusername/amazon-deals-platform/issues"
+    about: "Amazon优惠商品平台 - 帮助用户发现和追踪Amazon平台上的优惠商品"
 
 # 日志配置
 logging:
   level: INFO
   max_size: 10485760  # 10MB
   backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/frontend.log"
 
 # 数据库配置
 database:
@@ -28,4 +45,5 @@ database:
 cache:
   type: "redis"
   url: "redis://localhost:6379/0"
-  ttl: 3600  # 缓存过期时间（秒） 
+  ttl: 3600  # 缓存过期时间（秒）
+  prefix: "amazon_platform:"  # 缓存键前缀 

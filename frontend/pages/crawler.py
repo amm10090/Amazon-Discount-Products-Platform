@@ -5,6 +5,13 @@ from datetime import datetime
 import json
 import pandas as pd
 from i18n import init_language, get_text, language_selector
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from main import load_config
+
+# 加载配置
+config = load_config()
 
 # 初始化语言设置
 init_language()
@@ -12,24 +19,41 @@ init_language()
 st.set_page_config(
     page_title=get_text("crawler_title"),
     page_icon="🔍",
-    layout="wide"
+    layout=config["frontend"]["page"]["layout"],
+    initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"]
 )
 
 # 自定义CSS
-st.markdown("""
+st.markdown(f"""
 <style>
-    .task-container {
+    .task-container {{
         border: 1px solid #ddd;
         border-radius: 5px;
         padding: 1rem;
         margin: 1rem 0;
-    }
-    .success-text {
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .success-text {{
         color: #28a745;
-    }
-    .error-text {
+    }}
+    .error-text {{
         color: #dc3545;
-    }
+    }}
+    .stButton>button {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
+        color: white;
+    }}
+    .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .sidebar .sidebar-content {{
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+    }}
+    body {{
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -85,8 +109,9 @@ with st.form("crawler_config"):
     if submitted:
         try:
             # 发送爬虫任务请求
+            api_url = f"http://{config['api']['host']}:{config['api']['port']}"
             response = requests.post(
-                "http://localhost:8000/api/crawl",
+                f"{api_url}/api/crawl",
                 json={
                     "max_items": max_items,
                     "timeout": timeout,

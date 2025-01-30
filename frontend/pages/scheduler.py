@@ -4,6 +4,13 @@ from datetime import datetime, timedelta
 import pytz
 from i18n import init_language, get_text, language_selector
 import pandas as pd
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from main import load_config
+
+# 加载配置
+config = load_config()
 
 # 初始化语言设置
 init_language()
@@ -11,26 +18,43 @@ init_language()
 st.set_page_config(
     page_title=get_text("scheduler_title"),
     page_icon="⏰",
-    layout="wide"
+    layout=config["frontend"]["page"]["layout"],
+    initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"]
 )
 
 # 自定义CSS
-st.markdown("""
+st.markdown(f"""
 <style>
-    .job-card {
+    .job-card {{
         border: 1px solid #ddd;
         border-radius: 5px;
         padding: 1rem;
         margin: 1rem 0;
-    }
-    .status-running {
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .status-running {{
         color: #28a745;
         font-weight: bold;
-    }
-    .status-stopped {
+    }}
+    .status-stopped {{
         color: #dc3545;
         font-weight: bold;
-    }
+    }}
+    .stButton>button {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
+        color: white;
+    }}
+    .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .sidebar .sidebar-content {{
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+    }}
+    body {{
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,8 +158,9 @@ with st.form("add_job"):
                 })
             
             # 发送添加任务请求
+            api_url = f"http://{config['api']['host']}:{config['api']['port']}"
             response = requests.post(
-                "http://localhost:8000/api/scheduler/jobs",
+                f"{api_url}/api/scheduler/jobs",
                 json=job_config
             )
             
@@ -153,7 +178,8 @@ st.subheader(get_text("existing_jobs"))
 
 # 获取调度器状态和当前时区
 try:
-    scheduler_status = requests.get("http://localhost:8000/api/scheduler/status").json()
+    api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+    scheduler_status = requests.get(f"{api_url}/api/scheduler/status").json()
     current_timezone = scheduler_status.get('timezone', 'UTC')
 except Exception:
     current_timezone = 'UTC'
@@ -170,7 +196,7 @@ def format_datetime(dt, timezone=None):
 
 try:
     # 获取所有任务
-    response = requests.get("http://localhost:8000/api/scheduler/jobs")
+    response = requests.get(f"{api_url}/api/scheduler/jobs")
     
     if response.status_code == 200:
         jobs = response.json()
@@ -221,7 +247,7 @@ try:
                             ):
                                 try:
                                     response = requests.post(
-                                        f"http://localhost:8000/api/scheduler/jobs/{job['id']}/resume"
+                                        f"{api_url}/api/scheduler/jobs/{job['id']}/resume"
                                     )
                                     if response.status_code == 200:
                                         st.success(get_text("job_resumed"))
@@ -235,7 +261,7 @@ try:
                             ):
                                 try:
                                     response = requests.post(
-                                        f"http://localhost:8000/api/scheduler/jobs/{job['id']}/pause"
+                                        f"{api_url}/api/scheduler/jobs/{job['id']}/pause"
                                     )
                                     if response.status_code == 200:
                                         st.success(get_text("job_paused"))
@@ -250,7 +276,7 @@ try:
                         ):
                             try:
                                 response = requests.delete(
-                                    f"http://localhost:8000/api/scheduler/jobs/{job['id']}"
+                                    f"{api_url}/api/scheduler/jobs/{job['id']}"
                                 )
                                 if response.status_code == 200:
                                     st.success(get_text("job_deleted"))
@@ -265,7 +291,7 @@ try:
                     ):
                         try:
                             history = requests.get(
-                                f"http://localhost:8000/api/scheduler/jobs/{job['id']}/history"
+                                f"{api_url}/api/scheduler/jobs/{job['id']}/history"
                             ).json()
                             
                             if history:
@@ -315,7 +341,7 @@ st.markdown("---")
 st.subheader(get_text("scheduler_status"))
 
 try:
-    response = requests.get("http://localhost:8000/api/scheduler/status")
+    response = requests.get(f"{api_url}/api/scheduler/status")
     
     if response.status_code == 200:
         status = response.json()
@@ -348,7 +374,7 @@ try:
                 if st.button(get_text("update_timezone")):
                     try:
                         response = requests.post(
-                            "http://localhost:8000/api/scheduler/timezone",
+                            f"{api_url}/api/scheduler/timezone",
                             json={"timezone": new_timezone}
                         )
                         if response.status_code == 200:
@@ -367,7 +393,7 @@ try:
                 if st.button("⏹️ " + get_text("stop_scheduler")):
                     try:
                         response = requests.post(
-                            "http://localhost:8000/api/scheduler/stop"
+                            f"{api_url}/api/scheduler/stop"
                         )
                         if response.status_code == 200:
                             st.success(get_text("scheduler_stopped"))
@@ -378,7 +404,7 @@ try:
                 if st.button("▶️ " + get_text("start_scheduler")):
                     try:
                         response = requests.post(
-                            "http://localhost:8000/api/scheduler/start"
+                            f"{api_url}/api/scheduler/start"
                         )
                         if response.status_code == 200:
                             st.success(get_text("scheduler_started"))
@@ -390,7 +416,7 @@ try:
             if st.button("🔄 " + get_text("reload_scheduler")):
                 try:
                     response = requests.post(
-                        "http://localhost:8000/api/scheduler/reload"
+                        f"{api_url}/api/scheduler/reload"
                     )
                     if response.status_code == 200:
                         st.success(get_text("scheduler_reloaded"))

@@ -4,6 +4,64 @@ from datetime import datetime
 import pandas as pd
 import plotly.express as px
 from i18n import init_language, get_text, language_selector
+import yaml
+import os
+from pathlib import Path
+
+def load_config(config_path: str = None) -> dict:
+    """加载配置文件
+    
+    Args:
+        config_path: 配置文件路径，如果为None则使用默认路径
+        
+    Returns:
+        dict: 配置字典
+    """
+    # 默认配置
+    default_config = {
+        "environment": "development",
+        "frontend": {
+            "host": "localhost",
+            "port": 8501,
+            "page": {
+                "layout": "wide",
+                "initial_sidebar_state": "expanded"
+            },
+            "theme": {
+                "primaryColor": "#ff9900",
+                "backgroundColor": "#f0f0f0",
+                "textColor": "#333333"
+            }
+        },
+        "api": {
+            "host": "localhost",
+            "port": 8000
+        },
+        "logging": {
+            "level": "INFO",
+            "max_size": 10485760,
+            "backup_count": 5
+        }
+    }
+    
+    if not config_path:
+        config_path = os.getenv("CONFIG_PATH", "config/production.yaml")
+    
+    try:
+        config_file = Path(config_path)
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                return {**default_config, **config}
+        else:
+            print(f"配置文件 {config_path} 不存在，使用默认配置")
+            return default_config
+    except Exception as e:
+        print(f"加载配置文件失败: {e}")
+        return default_config
+
+# 加载配置
+config = load_config()
 
 # 初始化语言设置
 init_language()
@@ -12,26 +70,44 @@ init_language()
 st.set_page_config(
     page_title="Amazon优惠商品平台",
     page_icon="🛍️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout=config["frontend"]["page"]["layout"],
+    initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"],
+    menu_items={
+        'Get Help': 'https://github.com/yourusername/amazon-deals-platform',
+        'Report a bug': "https://github.com/yourusername/amazon-deals-platform/issues",
+        'About': "Amazon优惠商品平台 - 帮助用户发现和追踪Amazon平台上的优惠商品"
+    }
 )
 
 # 自定义CSS样式
-st.markdown("""
+st.markdown(f"""
 <style>
-    .main {
+    .main {{
         padding: 0rem 1rem;
-    }
-    .stButton>button {
+    }}
+    .stButton>button {{
         width: 100%;
-    }
-    .stProgress > div > div > div > div {
-        background-color: #ff9900;
-    }
-    .css-1v0mbdj.ebxwdo61 {
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
+        color: white;
+    }}
+    .stProgress > div > div > div > div {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
+    }}
+    .css-1v0mbdj.ebxwdo61 {{
         width: 100%;
         max-width: 100%;
-    }
+    }}
+    .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .sidebar .sidebar-content {{
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+    }}
+    body {{
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -46,7 +122,8 @@ with st.sidebar:
     
     # API状态检查
     try:
-        response = requests.get("http://localhost:8000/api/health")
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+        response = requests.get(f"{api_url}/api/health")
         if response.status_code == 200:
             st.success(get_text("api_running"))
         else:
@@ -58,7 +135,7 @@ with st.sidebar:
     
     # 缓存统计
     try:
-        cache_stats = requests.get("http://localhost:8000/api/cache/stats").json()
+        cache_stats = requests.get(f"{api_url}/api/cache/stats").json()
         st.subheader("📊 " + get_text("cache_stats"))
         col1, col2 = st.columns(2)
         with col1:
@@ -68,7 +145,7 @@ with st.sidebar:
         
         # 清理缓存按钮
         if st.button("🧹 " + get_text("clear_cache")):
-            response = requests.post("http://localhost:8000/api/cache/clear")
+            response = requests.post(f"{api_url}/api/cache/clear")
             if response.status_code == 200:
                 st.success(get_text("cache_cleared"))
             else:

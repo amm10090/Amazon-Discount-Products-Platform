@@ -4,6 +4,13 @@ import pandas as pd
 from datetime import datetime
 import json
 from i18n import init_language, get_text, language_selector
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from main import load_config
+
+# 加载配置
+config = load_config()
 
 # 初始化语言设置
 init_language()
@@ -11,35 +18,52 @@ init_language()
 st.set_page_config(
     page_title=get_text("products_title"),
     page_icon="📦",
-    layout="wide"
+    layout=config["frontend"]["page"]["layout"],
+    initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"]
 )
 
 # 自定义CSS
-st.markdown("""
+st.markdown(f"""
 <style>
-    .product-card {
+    .product-card {{
         border: 1px solid #ddd;
         border-radius: 5px;
         padding: 1rem;
         margin: 1rem 0;
-    }
-    .product-image {
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .product-image {{
         max-width: 200px;
         height: auto;
-    }
-    .price-tag {
+    }}
+    .price-tag {{
         color: #B12704;
         font-size: 1.2em;
         font-weight: bold;
-    }
-    .discount-tag {
+    }}
+    .discount-tag {{
         color: #067D62;
         font-weight: bold;
-    }
-    .prime-tag {
+    }}
+    .prime-tag {{
         color: #00A8E1;
         font-weight: bold;
-    }
+    }}
+    .stButton>button {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
+        color: white;
+    }}
+    .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .sidebar .sidebar-content {{
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+    }}
+    body {{
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -102,7 +126,7 @@ with st.sidebar:
     )
 
 # 获取商品数据
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=config["frontend"]["cache"]["ttl"])
 def load_products(
     page: int,
     page_size: int,
@@ -128,8 +152,9 @@ def load_products(
             "sort_order": sort_order
         }
         
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
         response = requests.get(
-            "http://localhost:8000/api/products/list",
+            f"{api_url}/api/products/list",
             params=params
         )
         
