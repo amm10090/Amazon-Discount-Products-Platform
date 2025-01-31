@@ -71,8 +71,18 @@ sudo nano /etc/supervisor/conf.d/amazon_platform.conf
 
 添加以下配置：
 ```ini
+[program:amazon_platform]
+directory=/path/to/your/project
+command=/path/to/your/venv/bin/python run.py
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/supervisor/amazon_platform.err.log
+stdout_logfile=/var/log/supervisor/amazon_platform.out.log
+environment=CONFIG_PATH="/path/to/your/project/config/production.yaml"
 
-
+user=your_user  # 运行服务的用户
+numprocs=1
+process_name=%(program_name)s_%(process_num)02d
 ```
 
 ### 配置Nginx
@@ -212,4 +222,179 @@ sudo supervisorctl restart amazon_platform
    - 监控系统资源使用
    - 检查日志文件大小
    - 清理临时文件
-   - 更新SSL证书 
+   - 更新SSL证书
+
+## 使用 Supervisor 部署
+
+### 1. 安装 Supervisor
+
+```bash
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install supervisor
+
+# CentOS/RHEL
+sudo yum install supervisor
+sudo systemctl enable supervisord
+sudo systemctl start supervisord
+```
+
+### 2. 创建 Supervisor 配置文件
+
+在 `/etc/supervisor/conf.d/` 目录下创建配置文件：
+
+```bash
+sudo nano /etc/supervisor/conf.d/amazon_platform.conf
+```
+
+配置文件内容：
+
+```ini
+[program:amazon_platform]
+directory=/path/to/your/project
+command=/path/to/your/venv/bin/python run.py
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/supervisor/amazon_platform.err.log
+stdout_logfile=/var/log/supervisor/amazon_platform.out.log
+environment=CONFIG_PATH="/path/to/your/project/config/production.yaml"
+
+user=your_user  # 运行服务的用户
+numprocs=1
+process_name=%(program_name)s_%(process_num)02d
+```
+
+### 3. 创建日志目录
+
+```bash
+sudo mkdir -p /var/log/supervisor
+sudo chown -R your_user:your_user /var/log/supervisor
+```
+
+### 4. 更新 Supervisor 配置
+
+```bash
+# 重新加载配置
+sudo supervisorctl reread
+
+# 更新配置
+sudo supervisorctl update
+
+# 启动服务
+sudo supervisorctl start amazon_platform:*
+```
+
+### 5. 查看服务状态
+
+```bash
+# 查看所有服务状态
+sudo supervisorctl status
+
+# 查看特定服务状态
+sudo supervisorctl status amazon_platform:*
+```
+
+### 6. 常用管理命令
+
+```bash
+# 启动服务
+sudo supervisorctl start amazon_platform:*
+
+# 停止服务
+sudo supervisorctl stop amazon_platform:*
+
+# 重启服务
+sudo supervisorctl restart amazon_platform:*
+
+# 查看日志
+sudo tail -f /var/log/supervisor/amazon_platform.out.log
+sudo tail -f /var/log/supervisor/amazon_platform.err.log
+```
+
+### 7. 注意事项
+
+1. 确保配置文件中的路径都是绝对路径
+2. 确保运行服务的用户有足够的权限
+3. 确保环境变量正确设置
+4. 建议在生产环境使用虚拟环境
+5. 定期检查日志文件大小，必要时进行日志轮转
+
+### 8. 日志轮转配置
+
+创建日志轮转配置文件：
+
+```bash
+sudo nano /etc/logrotate.d/supervisor
+```
+
+添加以下内容：
+
+```
+/var/log/supervisor/*.log {
+    weekly
+    missingok
+    rotate 52
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+}
+```
+
+### 9. 故障排查
+
+1. 检查服务状态：
+```bash
+sudo supervisorctl status
+```
+
+2. 检查日志文件：
+```bash
+sudo tail -f /var/log/supervisor/amazon_platform.out.log
+sudo tail -f /var/log/supervisor/amazon_platform.err.log
+```
+
+3. 检查 Supervisor 系统日志：
+```bash
+sudo tail -f /var/log/supervisor/supervisord.log
+```
+
+4. 常见问题解决：
+
+- 如果服务无法启动，检查：
+  - 配置文件路径是否正确
+  - 用户权限是否足够
+  - 虚拟环境路径是否正确
+  - 项目依赖是否安装完整
+
+- 如果服务频繁重启：
+  - 检查错误日志
+  - 确认内存使用情况
+  - 检查磁盘空间
+
+### 10. 生产环境配置建议
+
+1. 内存管理：
+```ini
+[program:amazon_platform]
+# ... 其他配置 ...
+stopasgroup=true
+killasgroup=true
+```
+
+2. 环境变量设置：
+```ini
+environment=CONFIG_PATH="/path/to/your/project/config/production.yaml",PYTHONPATH="/path/to/your/project"
+```
+
+3. 启动重试设置：
+```ini
+startretries=3
+startsecs=10
+```
+
+4. 进程控制：
+```ini
+stopwaitsecs=60
+stopsignal=TERM
+``` 

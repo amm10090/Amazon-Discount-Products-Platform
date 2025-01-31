@@ -27,7 +27,7 @@ sys.path.append(str(project_root))
 from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
 from src.core.amazon_product_api import AmazonProductAPI
 from models.database import SessionLocal
-from models.scheduler import JobHistory
+from models.scheduler import JobHistoryModel
 
 class SchedulerManager:
     """定时任务管理器
@@ -169,7 +169,8 @@ class SchedulerManager:
             partner_tag=partner_tag
         )
         
-    async def _execute_crawler(self, job_id: str, crawler_type: str, max_items: int):
+    @staticmethod
+    async def _execute_crawler(job_id: str, crawler_type: str, max_items: int):
         """执行爬虫任务
         
         根据指定的爬虫类型执行相应的数据采集任务。
@@ -200,10 +201,17 @@ class SchedulerManager:
                 crawler_types=[crawler_type]  # 设置爬虫类型
             )
             
+            # 初始化API客户端
+            api = AmazonProductAPI(
+                access_key=os.getenv("AMAZON_ACCESS_KEY"),
+                secret_key=os.getenv("AMAZON_SECRET_KEY"),
+                partner_tag=os.getenv("AMAZON_PARTNER_TAG")
+            )
+            
             # 根据类型执行不同的爬虫
             if crawler_type == "bestseller":
                 result = await crawl_bestseller_products(
-                    self.api,
+                    api,
                     config.max_items,
                     config.batch_size,
                     config.timeout,
@@ -211,7 +219,7 @@ class SchedulerManager:
                 )
             elif crawler_type == "coupon":
                 result = await crawl_coupon_products(
-                    self.api,
+                    api,
                     config.max_items,
                     config.batch_size,
                     config.timeout,
@@ -229,7 +237,7 @@ class SchedulerManager:
             
             # 记录任务执行状态
             with SessionLocal() as db:
-                job_history = JobHistory(
+                job_history = JobHistoryModel(
                     job_id=job_id,
                     start_time=start_time,
                     end_time=datetime.now(),
@@ -243,7 +251,7 @@ class SchedulerManager:
             logger.error(f"任务 {job_id} 执行失败: {str(e)}")
             # 记录失败状态
             with SessionLocal() as db:
-                job_history = JobHistory(
+                job_history = JobHistoryModel(
                     job_id=job_id,
                     start_time=start_time if 'start_time' in locals() else datetime.now(),
                     end_time=datetime.now(),
@@ -283,9 +291,9 @@ class SchedulerManager:
         else:
             raise ValueError(f"不支持的任务类型: {job_type}")
             
-        # 添加任务
+        # 添加任务，使用静态方法
         self.scheduler.add_job(
-            self._execute_crawler,
+            SchedulerManager._execute_crawler,
             trigger=trigger,
             id=job_id,
             args=[

@@ -100,8 +100,8 @@ class SchedulerManager:
         Returns:
             int: 采集到的商品数量
         """
-        from core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
-        from core.amazon_product_api import AmazonProductAPI
+        from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
+        from src.core.amazon_product_api import AmazonProductAPI
         
         # 检查必要的环境变量
         required_env_vars = ["AMAZON_ACCESS_KEY", "AMAZON_SECRET_KEY", "AMAZON_PARTNER_TAG"]

@@ -27,8 +27,8 @@ import hashlib
 from datetime import datetime
 import urllib.parse
 from models.product import ProductInfo, ProductOffer
-from utils.cache_manager import CacheManager, cache_decorator
-from utils.api_retry import with_retry
+from src.utils.cache_manager import CacheManager, cache_decorator
+from src.utils.api_retry import with_retry
 import logging
 
 logger = logging.getLogger(__name__)
