@@ -186,18 +186,20 @@ async def crawl_bestseller_products(
         asin_list = list(asins)
         total_batches = (len(asin_list) + batch_size - 1) // batch_size
         
-        for i in range(0, len(asin_list), batch_size):
-            batch_asins = asin_list[i:i + batch_size]
-            saved_count = await process_products_batch(
-                api, 
-                batch_asins, 
-                i // batch_size,
-                total_batches
-            )
-            total_success += saved_count
-            
-            if i + batch_size < len(asin_list):
-                await asyncio.sleep(1)  # 避免API限制
+        # 使用异步上下文管理器确保会话正确关闭
+        async with api:
+            for i in range(0, len(asin_list), batch_size):
+                batch_asins = asin_list[i:i + batch_size]
+                saved_count = await process_products_batch(
+                    api, 
+                    batch_asins, 
+                    i // batch_size,
+                    total_batches
+                )
+                total_success += saved_count
+                
+                if i + batch_size < len(asin_list):
+                    await asyncio.sleep(1)  # 避免API限制
                 
         return total_success
         
@@ -232,39 +234,40 @@ async def crawl_coupon_products(
         total_success = 0
         total_batches = (len(asins) + batch_size - 1) // batch_size
         
-        # 分批处理
-        for i in range(0, len(asins), batch_size):
-            batch_asins = asins[i:i + batch_size]
-            batch_results = results[i:i + batch_size]
-            
-            # 获取产品详细信息并添加优惠券信息
-            products = await api.get_products_by_asins(batch_asins)
-            if products:
-                # 将优惠券信息添加到产品数据中
-                for product, result in zip(products, batch_results):
-                    if 'coupon' in result and result['coupon']:
-                        coupon_info = result['coupon']
-                        # 验证优惠券信息格式
-                        if isinstance(coupon_info, dict) and 'type' in coupon_info and 'value' in coupon_info:
-                            # 使用setattr设置coupon_info属性
-                            setattr(product, 'coupon_info', {
-                                'type': coupon_info['type'],  # percentage 或 fixed
-                                'value': float(coupon_info['value'])  # 优惠券值
-                            })
+        # 使用异步上下文管理器
+        async with api:
+            # 分批处理
+            for i in range(0, len(asins), batch_size):
+                batch_asins = asins[i:i + batch_size]
+                batch_results = results[i:i + batch_size]
                 
-                # 存储到数据库
-                with SessionLocal() as db:
-                    saved_products = ProductService.bulk_create_or_update_products(
-                        db, 
-                        products,
-                        include_coupon=True
-                    )
-                    total_success += len(saved_products)
-                    log_success(f"成功保存 {len(saved_products)} 个优惠券商品信息")
-            
-            if i + batch_size < len(asins):
-                await asyncio.sleep(1)
+                # 获取产品详细信息并添加优惠券信息
+                products = await api.get_products_by_asins(batch_asins)
+                if products:
+                    # 将优惠券信息添加到产品数据中
+                    for product, result in zip(products, batch_results):
+                        if 'coupon' in result and result['coupon']:
+                            coupon_info = result['coupon']
+                            # 验证优惠券信息格式
+                            if isinstance(coupon_info, dict) and 'type' in coupon_info and 'value' in coupon_info:
+                                # 将优惠券信息添加到第一个offer中
+                                if product.offers:
+                                    product.offers[0].coupon_type = coupon_info['type']
+                                    product.offers[0].coupon_value = float(coupon_info['value'])
+                    
+                    # 存储到数据库
+                    with SessionLocal() as db:
+                        saved_products = ProductService.bulk_create_or_update_products(
+                            db, 
+                            products,
+                            include_coupon=True
+                        )
+                        total_success += len(saved_products)
+                        log_success(f"成功保存 {len(saved_products)} 个优惠券商品信息")
                 
+                if i + batch_size < len(asins):
+                    await asyncio.sleep(1)
+                    
         return total_success
         
     except Exception as e:

@@ -214,12 +214,14 @@ class SchedulerManager:
                     SchedulerManager._crawl_products(crawler_type, max_items)
                 )
                 
-                logger.info(f"爬虫任务完成，收集到 {len(items_collected)} 个商品")
+                # 修改日志记录方式，直接使用返回的数量
+                logger.info(f"爬虫任务完成，收集到 {items_collected} 个商品")
                 
                 # 更新历史记录
                 history.end_time = datetime.now()
                 history.status = 'completed'
-                history.result = f"成功收集 {len(items_collected)} 个商品"
+                history.items_collected = items_collected  # 直接使用返回的数量
+                history.result = f"成功收集 {items_collected} 个商品"
                 session.commit()
                 
                 # 关闭事件循环

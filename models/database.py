@@ -75,6 +75,7 @@ class Product(Base):
 
     # 关联优惠信息
     offers = relationship("Offer", back_populates="product", cascade="all, delete-orphan")
+    coupons = relationship("CouponHistory", back_populates="product", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Product(asin={self.asin}, title={self.title})>"
@@ -113,6 +114,27 @@ class Offer(Base):
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class CouponHistory(Base):
+    """优惠券历史记录表"""
+    __tablename__ = "coupon_history"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(String(10), ForeignKey("products.asin", ondelete="CASCADE"))
+    
+    # 优惠券信息
+    coupon_type = Column(String(50))      # 优惠券类型（percentage/fixed）
+    coupon_value = Column(Float)          # 优惠券值（百分比或固定金额）
+    
+    # 时间信息
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 关联商品
+    product = relationship("Product", back_populates="coupons")
+    
+    def __repr__(self):
+        return f"<CouponHistory(product_id={self.product_id}, type={self.coupon_type}, value={self.coupon_value})>"
 
 def init_db():
     """初始化数据库，创建所有表"""

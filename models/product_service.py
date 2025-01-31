@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc
 from datetime import datetime, timedelta
-from .database import Product, Offer
+from .database import Product, Offer, CouponHistory
 from .product import ProductInfo, ProductOffer
 
 class ProductService:
@@ -225,10 +225,19 @@ class ProductService:
                 )
                 
                 # 如果包含优惠券信息，添加优惠券相关字段
-                if include_coupon and hasattr(offer_info, 'coupon_info'):
-                    coupon_info = offer_info.coupon_info
-                    offer.coupon_type = coupon_info.get('type')  # percentage 或 fixed
-                    offer.coupon_value = float(coupon_info.get('value', 0))  # 优惠券值
+                if include_coupon and hasattr(offer_info, 'coupon_type') and hasattr(offer_info, 'coupon_value'):
+                    offer.coupon_type = offer_info.coupon_type
+                    offer.coupon_value = offer_info.coupon_value
+                    
+                    # 添加优惠券历史记录
+                    coupon_history = CouponHistory(
+                        product_id=product.asin,
+                        coupon_type=offer_info.coupon_type,
+                        coupon_value=offer_info.coupon_value,
+                        created_at=current_time,
+                        updated_at=current_time
+                    )
+                    db.add(coupon_history)
                 
                 db.add(offer)
             

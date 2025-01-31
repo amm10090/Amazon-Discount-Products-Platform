@@ -14,11 +14,22 @@ class ProductOffer(BaseModel):
     merchant_name: str
     is_buybox_winner: bool = False
     deal_type: Optional[str] = None
+    coupon_type: Optional[str] = None      # 优惠券类型（percentage/fixed）
+    coupon_value: Optional[float] = None   # 优惠券值（百分比或固定金额）
     
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+        
+    def dict(self, *args, **kwargs):
+        """重写dict方法以支持datetime序列化"""
+        d = super().dict(*args, **kwargs)
+        if 'coupon_type' in d and d['coupon_type'] is None:
+            del d['coupon_type']
+        if 'coupon_value' in d and d['coupon_value'] is None:
+            del d['coupon_value']
+        return d
 
 class ProductInfo(BaseModel):
     """商品信息模型"""

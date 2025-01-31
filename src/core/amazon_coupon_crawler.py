@@ -190,7 +190,7 @@ def extract_coupon_info(card_element) -> Optional[Dict]:
 
 def scroll_page(driver, scroll_count: int) -> bool:
     """
-    智能滚动页面，遇到登录提示区域时停止
+    智能滚动页面，处理登录提示区域、加载更多按钮和连接问题
     
     Args:
         driver: Selenium WebDriver对象
@@ -200,19 +200,6 @@ def scroll_page(driver, scroll_count: int) -> bool:
         bool: 滚动是否成功
     """
     try:
-        # 检查是否存在登录提示区域
-        login_area_selectors = [
-            'div[class*="_cDEzb_identity_"]',
-            'div[class="rhf-state-signin"]',
-            'div[data-card-metrics-id*="p13n-rvi_"]'
-        ]
-        
-        for selector in login_area_selectors:
-            login_area = driver.find_elements(By.CSS_SELECTOR, selector)
-            if login_area and any(elem.is_displayed() for elem in login_area):
-                log_warning("检测到登录提示区域，停止滚动")
-                return False
-        
         # 获取当前窗口高度和页面总高度
         window_height = driver.execute_script("return window.innerHeight;")
         total_height = driver.execute_script("return document.body.scrollHeight;")
@@ -220,26 +207,86 @@ def scroll_page(driver, scroll_count: int) -> bool:
         
         log_info("滚动 #" + str(scroll_count) + " - 窗口高度: " + str(window_height) + "px, 总高度: " + str(total_height) + "px, 当前位置: " + str(current_position) + "px")
         
-        # 计算下一个滚动位置
-        next_position = min(current_position + window_height, total_height - window_height)
+        # 检查是否存在登录提示区域
+        login_area_selectors = [
+            'div[class*="_cDEzb_identity_"]',
+            'div[class="rhf-state-signin"]',
+            'div[data-card-metrics-id*="p13n-rvi_"]'
+        ]
         
-        # 检查是否已经滚动到登录区域附近
         login_area_position = float('inf')
         for selector in login_area_selectors:
             elements = driver.find_elements(By.CSS_SELECTOR, selector)
             for elem in elements:
                 try:
-                    elem_position = driver.execute_script("return arguments[0].getBoundingClientRect().top + window.pageYOffset;", elem)
-                    login_area_position = min(login_area_position, elem_position)
+                    if elem.is_displayed():
+                        elem_position = driver.execute_script("return arguments[0].getBoundingClientRect().top + window.pageYOffset;", elem)
+                        login_area_position = min(login_area_position, elem_position)
                 except:
                     continue
         
-        # 如果下一个滚动位置会超过登录区域，则调整滚动位置
-        if login_area_position != float('inf'):
-            next_position = min(next_position, login_area_position - window_height)
+        # 计算下一个滚动位置
+        next_position = min(current_position + window_height, total_height - window_height)
         
-        # 如果已经接近底部或登录区域，尝试触发加载更多
+        # 如果下一个滚动位置会超过登录区域，检查各种情况
+        if login_area_position != float('inf'):
+            if next_position >= login_area_position - window_height:
+                log_warning("接近登录提示区域，检查页面状态...")
+                
+                # 1. 检查连接问题重试按钮
+                retry_button = driver.find_elements(By.CSS_SELECTOR, 'input[data-testid="connection-problem-retry-button"]')
+                if retry_button and retry_button[0].is_displayed():
+                    log_warning("检测到连接问题，尝试重新加载...")
+                    retry_button[0].click()
+                    time.sleep(3)
+                    return True
+                
+                # 2. 检查加载更多按钮
+                load_more_button = driver.find_elements(
+                    By.CSS_SELECTOR,
+                    'button[data-testid="load-more-view-more-button"]'
+                )
+                if load_more_button and load_more_button[0].is_displayed():
+                    log_warning("检测到加载更多按钮，尝试点击...")
+                    # 滚动到按钮位置
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", load_more_button[0])
+                    time.sleep(1)
+                    load_more_button[0].click()
+                    time.sleep(2)
+                    return True
+                
+                # 3. 如果都没有特殊情况，等待商品加载
+                log_warning("等待商品加载...")
+                # 滚动到登录区域上方一点的位置
+                safe_position = login_area_position - window_height + 200
+                driver.execute_script(f"window.scrollTo({{top: {safe_position}, behavior: 'smooth'}})")
+                time.sleep(2)
+                
+                # 来回轻微滚动以触发加载
+                for _ in range(3):
+                    driver.execute_script(f"window.scrollTo({{top: {safe_position - 100}, behavior: 'smooth'}})")
+                    time.sleep(0.5)
+                    driver.execute_script(f"window.scrollTo({{top: {safe_position}, behavior: 'smooth'}})")
+                    time.sleep(0.5)
+                
+                return True
+        
+        # 如果已经接近底部，尝试触发加载更多
         if total_height - (current_position + window_height) < window_height:
+            # 检查是否有加载更多按钮
+            load_more_button = driver.find_elements(
+                By.CSS_SELECTOR,
+                'button[data-testid="load-more-view-more-button"]'
+            )
+            if load_more_button and load_more_button[0].is_displayed():
+                log_warning("检测到加载更多按钮，尝试点击...")
+                # 滚动到按钮位置
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", load_more_button[0])
+                time.sleep(1)
+                load_more_button[0].click()
+                time.sleep(2)
+                return True
+                
             # 来回滚动以触发加载
             driver.execute_script(f"window.scrollTo({{top: {next_position}, behavior: 'smooth'}})")
             time.sleep(0.5)
@@ -342,103 +389,6 @@ def check_no_results(driver) -> bool:
         # 如果所有检查都失败，返回False以允许程序继续
         return False
 
-async def crawl_coupon_deals(
-    max_items: int,
-    timeout: int,
-    headless: bool
-) -> List[Dict]:
-    """爬取优惠券商品数据"""
-    try:
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始爬取优惠券商品...")
-        print(f"目标数量: {max_items} 个商品")
-        print(f"超时时间: {timeout} 秒")
-        print(f"无头模式: {'是' if headless else '否'}\n")
-        
-        driver = setup_driver(headless)
-        products = []
-        last_products_count = 0
-        no_new_items_time = 0
-        
-        try:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在访问Amazon Deals页面...")
-            driver.get('https://www.amazon.com/deals?bubble-id=deals-collection-coupons')
-            
-            # 等待页面加载
-            time.sleep(5)
-            
-            # 检查页面是否有商品
-            if check_no_results(driver):
-                log_warning("当前页面没有可用的优惠券商品，退出爬取")
-                return []
-                
-            try:
-                viewport = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((
-                        By.CSS_SELECTOR, 
-                        'div[data-testid="virtuoso-item-list"]'
-                    ))
-                )
-                log_success("成功找到viewport容器")
-            except TimeoutException:
-                log_warning("无法找到商品展示区域，退出爬取")
-                return []
-            
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 开始获取商品信息...")
-            scroll_count = 0
-            
-            while len(products) < max_items:
-                scroll_count += 1
-                
-                # 获取当前页面商品
-                new_products = process_visible_products(driver)
-                if new_products:
-                    products.extend(new_products)
-                    log_progress(len(products), max_items)
-                
-                # 检查是否有新商品
-                if len(products) == last_products_count:
-                    no_new_items_time += 1
-                    if no_new_items_time >= 3:  # 连续3次没有新商品，等待更长时间
-                        log_warning(f"连续{no_new_items_time}次未发现新商品，等待加载...")
-                        time.sleep(2)  # 增加等待时间
-                        
-                        # 尝试触发更多加载
-                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                        time.sleep(1)
-                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 100);")
-                        
-                        if no_new_items_time >= timeout:  # 超时退出
-                            log_warning(f"超过{timeout}秒未发现新商品，结束爬取")
-                            break
-                else:
-                    no_new_items_time = 0  # 重置计数器
-                    
-                last_products_count = len(products)
-                
-                # 滚动页面
-                if not scroll_page(driver, scroll_count):
-                    log_error("滚动页面失败")
-                    break
-                    
-                # 处理可能的连接问题
-                if handle_connection_problem(driver):
-                    continue
-                    
-                # 等待新内容加载
-                time.sleep(1)
-            
-            print(f"\n\n[{datetime.now().strftime('%H:%M:%S')}] 商品获取完成")
-            print(f"共获取 {len(products)} 个商品\n")
-            
-            return products[:max_items]
-            
-        finally:
-            driver.quit()
-            
-    except Exception as e:
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 错误: {str(e)}")
-        return []
-
 def process_visible_products(driver) -> List[Dict]:
     """处理当前可见的商品信息"""
     products = []
@@ -533,6 +483,109 @@ async def save_coupon_results(results: List[ProductInfo], filename: str, format:
                 await f.write(line)
                 
     log_success(f"结果已保存到: {output_path} ({format.upper()}格式)")
+
+async def crawl_coupon_deals(
+    max_items: int,
+    timeout: int,
+    headless: bool
+) -> List[Dict]:
+    """爬取优惠券商品数据"""
+    try:
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始爬取优惠券商品...")
+        print(f"目标数量: {max_items} 个商品")
+        print(f"超时时间: {timeout} 秒")
+        print(f"无头模式: {'是' if headless else '否'}\n")
+        
+        driver = setup_driver(headless)
+        products = []
+        last_products_count = 0
+        no_new_items_time = 0
+        
+        try:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在访问Amazon Deals页面...")
+            driver.get('https://www.amazon.com/deals?bubble-id=deals-collection-coupons')
+            
+            # 等待页面加载
+            time.sleep(5)
+            
+            # 检查页面是否有商品
+            if check_no_results(driver):
+                log_warning("当前页面没有可用的优惠券商品，退出爬取")
+                return []
+                
+            try:
+                viewport = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((
+                        By.CSS_SELECTOR, 
+                        'div[data-testid="virtuoso-item-list"]'
+                    ))
+                )
+                log_success("成功找到viewport容器")
+            except TimeoutException:
+                log_warning("无法找到商品展示区域，退出爬取")
+                return []
+            
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 开始获取商品信息...")
+            scroll_count = 0
+            
+            while len(products) < max_items:
+                scroll_count += 1
+                
+                # 获取当前页面商品
+                new_products = process_visible_products(driver)
+                if new_products:
+                    # 只添加到达到目标数量的商品
+                    remaining = max_items - len(products)
+                    products.extend(new_products[:remaining])
+                    log_progress(len(products), max_items)
+                    
+                    # 如果已达到目标数量，退出循环
+                    if len(products) >= max_items:
+                        break
+                
+                # 检查是否有新商品
+                if len(products) == last_products_count:
+                    no_new_items_time += 1
+                    if no_new_items_time >= 3:  # 连续3次没有新商品，等待更长时间
+                        log_warning(f"连续{no_new_items_time}次未发现新商品，等待加载...")
+                        time.sleep(2)  # 增加等待时间
+                        
+                        # 尝试触发更多加载
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        time.sleep(1)
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 100);")
+                        
+                        if no_new_items_time >= timeout:  # 超时退出
+                            log_warning(f"超过{timeout}秒未发现新商品，结束爬取")
+                            break
+                else:
+                    no_new_items_time = 0  # 重置计数器
+                    
+                last_products_count = len(products)
+                
+                # 滚动页面
+                if not scroll_page(driver, scroll_count):
+                    log_error("滚动页面失败")
+                    break
+                    
+                # 处理可能的连接问题
+                if handle_connection_problem(driver):
+                    continue
+                    
+                # 等待新内容加载
+                time.sleep(1)
+            
+            print(f"\n\n[{datetime.now().strftime('%H:%M:%S')}] 商品获取完成")
+            print(f"共获取 {len(products)} 个商品\n")
+            
+            return products[:max_items]  # 确保返回不超过max_items的商品
+            
+        finally:
+            driver.quit()
+            
+    except Exception as e:
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 错误: {str(e)}")
+        return []
 
 async def main():
     """异步主函数"""

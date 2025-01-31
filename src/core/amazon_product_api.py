@@ -10,6 +10,7 @@ from datetime import datetime
 import urllib.parse
 from models.product import ProductInfo, ProductOffer
 from models.cache_manager import CacheManager
+from utils.api_retry import with_retry
 
 class AmazonProductAPI:
     def __init__(self, access_key: str, secret_key: str, partner_tag: str, marketplace: str = "www.amazon.com", cache_dir: str = "cache"):
@@ -35,15 +36,28 @@ class AmazonProductAPI:
         
     async def __aenter__(self):
         """异步上下文管理器入口"""
-        self._session = aiohttp.ClientSession()
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器退出"""
-        if self._session:
+        if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
-        
+            
+    async def close(self):
+        """手动关闭会话"""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+            
+    def _get_session(self) -> aiohttp.ClientSession:
+        """获取当前会话或创建新会话"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+    
     def _sign(self, key: bytes, msg: str) -> bytes:
         """计算HMAC-SHA256签名"""
         return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
@@ -114,9 +128,10 @@ class AmazonProductAPI:
             
         return offers
 
+    @with_retry(max_retries=3, base_delay=2.0, max_delay=30.0)
     async def get_products_by_asins(self, asins: List[str]) -> List[ProductInfo]:
         """
-        通过ASIN列表异步获取商品信息，支持缓存
+        通过ASIN列表异步获取商品信息，支持缓存和重试机制
         
         Args:
             asins: ASIN列表（最多10个）

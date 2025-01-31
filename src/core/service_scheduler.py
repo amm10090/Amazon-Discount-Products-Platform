@@ -23,6 +23,8 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from loguru import logger
 from core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
 from core.amazon_product_api import AmazonProductAPI
+from models.database import SessionLocal
+from models.scheduler import JobHistory
 
 class SchedulerManager:
     """定时任务管理器
@@ -181,12 +183,18 @@ class SchedulerManager:
             logger.info(f"开始执行任务 {job_id} - {crawler_type}")
             start_time = datetime.now()
             
+            # 从环境变量获取配置
+            headless = os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
+            timeout = int(os.getenv("CRAWLER_TIMEOUT", "30"))
+            batch_size = int(os.getenv("CRAWLER_BATCH_SIZE", "10"))
+            
             # 创建任务配置
             config = Config(
                 max_items=max_items,
-                batch_size=10,
-                timeout=30,
-                headless=True
+                batch_size=batch_size,
+                timeout=timeout,
+                headless=headless,
+                crawler_types=[crawler_type]  # 设置爬虫类型
             )
             
             # 根据类型执行不同的爬虫
@@ -216,8 +224,31 @@ class SchedulerManager:
                 f"耗时: {duration:.2f}秒"
             )
             
+            # 记录任务执行状态
+            with SessionLocal() as db:
+                job_history = JobHistory(
+                    job_id=job_id,
+                    start_time=start_time,
+                    end_time=datetime.now(),
+                    status="success",
+                    items_collected=result
+                )
+                db.add(job_history)
+                db.commit()
+            
         except Exception as e:
             logger.error(f"任务 {job_id} 执行失败: {str(e)}")
+            # 记录失败状态
+            with SessionLocal() as db:
+                job_history = JobHistory(
+                    job_id=job_id,
+                    start_time=start_time if 'start_time' in locals() else datetime.now(),
+                    end_time=datetime.now(),
+                    status="failed",
+                    error=str(e)
+                )
+                db.add(job_history)
+                db.commit()
             
     def add_job(self, job_config: Dict[str, Any]):
         """添加定时任务
