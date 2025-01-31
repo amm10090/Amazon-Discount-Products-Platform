@@ -8,6 +8,8 @@
 - PostgreSQL（可选）
 - Nginx
 - pnpm（用于前端依赖管理）
+- Chrome/Chromium
+- ChromeDriver
 
 ### 安装系统依赖
 ```bash
@@ -18,8 +20,54 @@ sudo apt upgrade -y
 # 安装必要的系统依赖
 sudo apt install -y python3-pip python3-dev build-essential libssl-dev libffi-dev python3-setuptools nginx postgresql postgresql-contrib
 
+# 安装 Chrome 和相关依赖
+sudo apt install -y chromium-browser chromium-chromedriver
+# 或者如果需要安装 Google Chrome
+wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y ./google-chrome-stable_current_amd64.deb
+
 # 安装pnpm
 curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# 验证 Chrome 和 ChromeDriver 安装
+google-chrome --version  # 或 chromium-browser --version
+chromedriver --version
+
+# 确保 ChromeDriver 在系统路径中
+sudo ln -s /usr/lib/chromium-browser/chromedriver /usr/local/bin/chromedriver
+```
+
+### ChromeDriver 配置
+```bash
+# 创建 ChromeDriver 配置目录
+sudo mkdir -p /opt/selenium
+sudo chown -R your_user:your_user /opt/selenium
+
+# 设置 ChromeDriver 环境变量（添加到 .env 文件）
+echo "CHROME_DRIVER_PATH=/usr/local/bin/chromedriver" >> .env
+echo "CHROME_BINARY_PATH=/usr/bin/google-chrome" >> .env  # 或 /usr/bin/chromium-browser
+```
+
+注意：确保 ChromeDriver 版本与已安装的 Chrome/Chromium 版本匹配。如果版本不匹配，可能需要手动下载对应版本的 ChromeDriver：
+
+```bash
+# 查看 Chrome 版本
+google-chrome --version  # 或 chromium-browser --version
+
+# 下载对应版本的 ChromeDriver（替换 VERSION 为对应版本号）
+wget https://chromedriver.storage.googleapis.com/VERSION/chromedriver_linux64.zip
+unzip chromedriver_linux64.zip
+sudo mv chromedriver /usr/local/bin/
+sudo chmod +x /usr/local/bin/chromedriver
+```
+
+### 爬虫相关配置
+在 supervisor 配置文件中添加必要的环境变量：
+
+```ini
+[program:amazon_platform]
+# ... 其他配置 ...
+environment=CHROME_DRIVER_PATH="/usr/local/bin/chromedriver",CHROME_BINARY_PATH="/usr/bin/google-chrome",CONFIG_PATH="/path/to/your/project/config/production.yaml"
 ```
 
 ## 2. 项目部署
@@ -69,23 +117,10 @@ sudo apt install supervisor
 sudo nano /etc/supervisor/conf.d/amazon_platform.conf
 ```
 
-添加以下配置：
-```ini
-[program:amazon_platform]
-directory=/path/to/your/project
-command=/path/to/your/venv/bin/python run.py
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/supervisor/amazon_platform.err.log
-stdout_logfile=/var/log/supervisor/amazon_platform.out.log
-environment=CONFIG_PATH="/path/to/your/project/config/production.yaml"
+# 复制新的配置文件到 supervisor 配置目录
+sudo cp deploy/supervisor/amazon_platform.conf /etc/supervisor/conf.d/
 
-user=your_user  # 运行服务的用户
-numprocs=1
-process_name=%(program_name)s_%(process_num)02d
-```
-
-### 配置Nginx
+### 配置Nginx(可选)
 ```bash
 sudo nano /etc/nginx/sites-available/amazon_platform
 ```
@@ -120,7 +155,7 @@ sudo systemctl restart nginx
 # 重启Supervisor服务
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl restart amazon_platform
+sudo supervisorctl restart amazon_platform all
 
 # 检查服务状态
 sudo supervisorctl status amazon_platform
@@ -137,6 +172,19 @@ sudo supervisorctl restart amazon_platform:*
 
 # 检查状态
 sudo supervisorctl status
+## 4.2相关指令
+关闭单个进程：sudo supervisorctl stop <进程名>
+
+关闭整个组：sudo supervisorctl stop <组名>:*
+
+关闭所有进程：sudo supervisorctl stop all
+
+停止 supervisor 服务：sudo systemctl stop supervisor
+
+禁用 supervisor 服务：sudo systemctl disable supervisor
+
+重启 supervisor 服务：sudo systemctl restart supervisor
+
 ## 5. 定时任务配置
 
 配置爬虫和数据更新的定时任务：

@@ -19,6 +19,12 @@ from colorama import Fore, Back, Style
 import asyncio
 import aiofiles
 import os
+import logging
+import psutil
+import tempfile
+
+# 配置WebDriver Manager的日志
+logging.getLogger('WDM').setLevel(logging.INFO)
 
 # 初始化colorama
 colorama.init()
@@ -89,51 +95,92 @@ def parse_arguments():
 
 def setup_driver(headless=True):
     """设置Chrome浏览器选项"""
-    options = webdriver.ChromeOptions()
-    
-    # 基本配置
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    if headless:
-        options.add_argument('--headless=new')
-    
-    # 添加更多选项来模拟真实浏览器
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_argument('--disable-infobars')
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument('--start-maximized')
-    options.add_argument('--ignore-certificate-errors')
-    
-    # 禁用图片加载以提高性能
-    prefs = {
-        'profile.managed_default_content_settings.images': 2,
-        'permissions.default.stylesheet': 2,
-        'javascript.enabled': True
-    }
-    options.add_experimental_option('prefs', prefs)
-    
-    # 设置user agent
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
-    
-    # 添加实验性选项
-    options.add_experimental_option('excludeSwitches', ['enable-automation'])
-    options.add_experimental_option('useAutomationExtension', False)
-    
-    # 使用 ChromeDriverManager 自动下载和管理驱动
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    
-    # 执行CDP命令来修改webdriver状态
-    driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-        "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
-    })
-    
-    # 设置页面加载策略
-    driver.set_page_load_timeout(30)
-    driver.set_script_timeout(30)
-    
-    return driver
+    try:
+        # 检查系统资源
+        memory = psutil.virtual_memory()
+        if memory.percent > 90:
+            log_error(f"系统内存使用率过高: {memory.percent}%")
+            raise Exception("系统内存不足")
+            
+        options = webdriver.ChromeOptions()
+        
+        # Linux环境特定配置
+        options.add_argument('--no-sandbox')  # 在root用户下运行必需
+        options.add_argument('--disable-dev-shm-usage')  # 避免Linux下的内存问题
+        
+        # 设置共享内存目录
+        if os.path.exists('/dev/shm'):
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--shm-size=2gb')
+        
+        # 设置临时目录
+        options.add_argument(f'--user-data-dir={tempfile.gettempdir()}/chrome_temp')
+        
+        # 无头模式配置
+        if headless:
+            options.add_argument('--headless=new')
+            options.add_argument('--disable-gpu')
+            
+        # 浏览器性能优化
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-software-rasterizer')
+        options.add_argument('--disable-dev-tools')
+        options.add_argument('--disable-logging')
+        options.add_argument('--log-level=3')
+        options.add_argument('--silent')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        
+        # 设置窗口大小和其他选项
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--start-maximized')
+        options.add_argument('--ignore-certificate-errors')
+        options.add_argument('--disable-notifications')
+        
+        # 设置user agent
+        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
+        options.add_argument(f'user-agent={user_agent}')
+        
+        # 添加实验性选项
+        options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
+        options.add_experimental_option('useAutomationExtension', False)
+        
+        # 使用WebDriver Manager安装和管理ChromeDriver
+        log_info("正在初始化ChromeDriver...")
+        
+        # 设置ChromeDriver的日志级别
+        logging.getLogger('selenium').setLevel(logging.WARNING)
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        
+        service = Service(ChromeDriverManager().install())
+        service.log_path = os.devnull
+        service.service_args = ['--verbose', '--log-path=/dev/null', '--disable-dev-shm-usage']
+        
+        # 创建driver实例并设置超时
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(30)
+        driver.set_script_timeout(30)
+        driver.implicitly_wait(10)
+        
+        # 验证driver是否正常工作
+        try:
+            driver.execute_script('return navigator.userAgent')
+            log_success("ChromeDriver初始化成功并验证正常")
+            return driver
+        except Exception as e:
+            log_error(f"ChromeDriver验证失败: {str(e)}")
+            if driver:
+                driver.quit()
+            raise
+            
+    except Exception as e:
+        log_error(f"ChromeDriver初始化失败: {str(e)}")
+        # 清理可能存在的Chrome进程
+        try:
+            os.system('pkill -f chrome')
+            os.system('pkill -f chromedriver')
+        except:
+            pass
+        raise
 
 def extract_coupon_info(card_element) -> Optional[Dict]:
     """

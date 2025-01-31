@@ -4,7 +4,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 import time
 import random
 import json
@@ -15,6 +14,8 @@ import csv
 import asyncio
 from typing import List, Set
 import aiofiles
+import logging
+import os
 
 def parse_arguments():
     """添加命令行参数支持"""
@@ -76,7 +77,7 @@ def setup_driver(headless=True):
     options.add_argument('--start-maximized')
     options.add_argument('--ignore-certificate-errors')
     
-    # 禁用图片加载
+    # 禁用图片加载以提高性能
     prefs = {
         'profile.managed_default_content_settings.images': 2,
         'permissions.default.stylesheet': 2,
@@ -91,9 +92,8 @@ def setup_driver(headless=True):
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     options.add_experimental_option('useAutomationExtension', False)
     
-    # 使用 ChromeDriverManager 自动下载和管理驱动
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    # 使用Selenium Manager自动管理驱动
+    driver = webdriver.Chrome(options=options)
     
     # 执行CDP命令来修改webdriver状态
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {

@@ -12,15 +12,15 @@ from main import load_config
 # 加载配置
 config = load_config()
 
-# 初始化语言设置
-init_language()
-
 st.set_page_config(
     page_title=get_text("scheduler_title"),
     page_icon="⏰",
     layout=config["frontend"]["page"]["layout"],
     initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"]
 )
+
+# 初始化语言设置
+init_language()
 
 # 自定义CSS
 st.markdown(f"""
