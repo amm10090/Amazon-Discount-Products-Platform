@@ -16,6 +16,7 @@ class ProductOffer(BaseModel):
     deal_type: Optional[str] = None
     coupon_type: Optional[str] = None      # 优惠券类型（percentage/fixed）
     coupon_value: Optional[float] = None   # 优惠券值（百分比或固定金额）
+    coupon_history: Optional[List[Dict]] = None  # 优惠券历史记录
     
     class Config:
         json_encoders = {

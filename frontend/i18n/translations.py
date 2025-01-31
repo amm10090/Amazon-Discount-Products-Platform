@@ -180,6 +180,12 @@ TRANSLATIONS = {
         "execute_now": "立即执行",
         "job_started": "任务已开始执行",
         "job_execution_failed": "任务执行失败",
+        
+        # 新增翻译
+        "discount_products": "折扣商品",
+        "coupon_products": "优惠券商品",
+        "product_list": "商品列表",
+        "product_count": "商品数量",
     },
     
     "en": {
@@ -359,5 +365,11 @@ TRANSLATIONS = {
         "execute_now": "Execute Now",
         "job_started": "Task execution started",
         "job_execution_failed": "Task execution failed",
+        
+        # 新增翻译
+        "discount_products": "Discount Products",
+        "coupon_products": "Coupon Products",
+        "product_list": "Product List",
+        "product_count": "Product Count",
     }
 } 

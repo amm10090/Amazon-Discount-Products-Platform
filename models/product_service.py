@@ -96,9 +96,47 @@ class ProductService:
         return db_product
     
     @staticmethod
-    def get_product_by_asin(db: Session, asin: str) -> Optional[Product]:
-        """通过ASIN获取产品"""
-        return db.query(Product).filter(Product.asin == asin).first()
+    def get_product_by_asin(db: Session, asin: str) -> Optional[ProductInfo]:
+        """
+        根据ASIN获取单个产品详情
+        """
+        try:
+            product = db.query(Product).filter(Product.asin == asin).first()
+            
+            if not product:
+                return None
+            
+            # 获取商品的所有优惠信息
+            offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+            print(f"Debug - 商品 {product.asin} 有 {len(offers)} 个优惠")
+                
+            return ProductInfo(
+                asin=product.asin,
+                title=product.title,
+                url=product.url,
+                brand=product.brand,
+                main_image=product.main_image,
+                timestamp=product.timestamp or datetime.utcnow(),
+                offers=[
+                    ProductOffer(
+                        condition=o.condition or "New",  # 提供默认值
+                        price=o.price or 0.0,  # 提供默认值
+                        currency=o.currency or "USD",  # 提供默认值
+                        savings=o.savings,
+                        savings_percentage=o.savings_percentage,
+                        is_prime=o.is_prime or False,
+                        availability=o.availability or "Available",  # 提供默认值
+                        merchant_name=o.merchant_name or "Amazon",  # 提供默认值
+                        is_buybox_winner=o.is_buybox_winner or False,
+                        deal_type=o.deal_type,
+                        coupon_type=o.coupon_type if hasattr(o, 'coupon_type') else None,
+                        coupon_value=o.coupon_value if hasattr(o, 'coupon_value') else None
+                    ) for o in offers
+                ]
+            )
+        except Exception as e:
+            print(f"Debug - 获取商品 {asin} 详情时出错: {str(e)}")
+            raise e
     
     @staticmethod
     def get_products(db: Session, skip: int = 0, limit: int = 100) -> List[Product]:
@@ -258,98 +296,96 @@ class ProductService:
         min_discount: Optional[int] = None,
         sort_by: Optional[str] = None,
         sort_order: str = "desc",
-        is_prime_only: bool = False
+        is_prime_only: bool = False,
+        product_type: str = "all"
     ) -> List[ProductInfo]:
-        """
-        获取产品列表，支持分页、筛选和排序
-        """
-        # 构建基础查询
-        query = db.query(Product)
-        
-        # 应用筛选条件
-        if min_price is not None:
-            query = query.filter(Product.current_price >= min_price)
-        if max_price is not None:
-            query = query.filter(Product.current_price <= max_price)
-        if min_discount is not None:
-            query = query.filter(Product.savings_percentage >= min_discount)
-        if is_prime_only:
-            query = query.filter(Product.is_prime == True)
-            
-        # 应用排序
-        if sort_by:
-            order_func = desc if sort_order == "desc" else asc
-            if sort_by == "price":
-                query = query.order_by(order_func(Product.current_price))
-            elif sort_by == "discount":
-                query = query.order_by(order_func(Product.savings_percentage))
-            elif sort_by == "timestamp":
-                query = query.order_by(order_func(Product.timestamp))
-                
-        # 应用分页
-        query = query.offset((page - 1) * page_size).limit(page_size)
-        
-        # 执行查询
-        products = query.all()
-        
-        # 转换为ProductInfo对象
-        return [
-            ProductInfo(
-                asin=p.asin,
-                title=p.title,
-                url=p.url,
-                brand=p.brand,
-                main_image=p.main_image,
-                offers=[
-                    ProductOffer(
-                        condition=o.condition,
-                        price=o.price,
-                        currency=o.currency,
-                        savings=o.savings,
-                        savings_percentage=o.savings_percentage,
-                        is_prime=o.is_prime,
-                        availability=o.availability,
-                        merchant_name=o.merchant_name,
-                        is_buybox_winner=o.is_buybox_winner,
-                        deal_type=o.deal_type
-                    ) for o in p.offers
-                ],
-                timestamp=p.timestamp
-            ) for p in products
-        ]
+        """获取产品列表，支持分页、价格范围、折扣率筛选和排序"""
+        try:
+            # 构建基础查询
+            query = db.query(Product)
 
-    @staticmethod
-    def get_product_by_asin(db: Session, asin: str) -> Optional[ProductInfo]:
-        """
-        根据ASIN获取单个产品详情
-        """
-        product = db.query(Product).filter(Product.asin == asin).first()
-        
-        if not product:
-            return None
-            
-        return ProductInfo(
-            asin=product.asin,
-            title=product.title,
-            url=product.url,
-            brand=product.brand,
-            main_image=product.main_image,
-            offers=[
-                ProductOffer(
-                    condition=o.condition,
-                    price=o.price,
-                    currency=o.currency,
-                    savings=o.savings,
-                    savings_percentage=o.savings_percentage,
-                    is_prime=o.is_prime,
-                    availability=o.availability,
-                    merchant_name=o.merchant_name,
-                    is_buybox_winner=o.is_buybox_winner,
-                    deal_type=o.deal_type
-                ) for o in product.offers
-            ],
-            timestamp=product.timestamp
-        )
+            # 应用过滤条件
+            if min_price is not None:
+                query = query.filter(Product.current_price >= min_price)
+            if max_price is not None:
+                query = query.filter(Product.current_price <= max_price)
+            if min_discount is not None:
+                query = query.filter(Product.savings_percentage >= min_discount)
+            if is_prime_only:
+                query = query.filter(Product.is_prime == True)
+
+            # 根据商品类型过滤
+            if product_type == "discount":
+                query = query.filter(Product.savings_percentage > 0)
+            elif product_type == "coupon":
+                # 使用左连接查询优惠券商品
+                query = query.join(
+                    CouponHistory,
+                    Product.asin == CouponHistory.product_id,
+                    isouter=True  # 使用左连接
+                ).filter(CouponHistory.id.isnot(None))  # 确保有优惠券记录
+                
+                # 添加distinct避免重复
+                query = query.distinct(Product.asin)
+
+            # 应用排序
+            if sort_by:
+                sort_column = getattr(Product, sort_by, Product.timestamp)
+                if sort_order == "desc":
+                    query = query.order_by(desc(sort_column))
+                else:
+                    query = query.order_by(asc(sort_column))
+            else:
+                # 默认按更新时间倒序排序
+                query = query.order_by(desc(Product.timestamp))
+
+            # 应用分页
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+
+            # 执行查询
+            products = query.all()
+
+            # 转换为ProductInfo对象
+            result = []
+            for product in products:
+                try:
+                    # 获取商品的所有优惠信息
+                    offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+
+                    # 构建ProductInfo对象
+                    product_info = ProductInfo(
+                        asin=product.asin,
+                        title=product.title,
+                        url=product.url,
+                        brand=product.brand,
+                        main_image=product.main_image,
+                        timestamp=product.timestamp or datetime.utcnow(),
+                        offers=[
+                            ProductOffer(
+                                condition=offer.condition or "New",
+                                price=offer.price or 0.0,
+                                currency=offer.currency or "USD",
+                                savings=offer.savings,
+                                savings_percentage=offer.savings_percentage,
+                                is_prime=offer.is_prime or False,
+                                availability=offer.availability or "Available",
+                                merchant_name=offer.merchant_name or "Amazon",
+                                is_buybox_winner=offer.is_buybox_winner or False,
+                                deal_type=offer.deal_type,
+                                coupon_type=getattr(offer, 'coupon_type', None),
+                                coupon_value=getattr(offer, 'coupon_value', None)
+                            ) for offer in offers
+                        ]
+                    )
+                    result.append(product_info)
+                except Exception as e:
+                    continue
+
+            return result
+
+        except Exception as e:
+            raise e
 
     @staticmethod
     def get_stats(db: Session) -> Dict[str, Any]:

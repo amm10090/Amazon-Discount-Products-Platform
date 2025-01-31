@@ -282,11 +282,11 @@ async def list_products(
     min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
     sort_by: Optional[SortField] = Query(None, description="排序字段"),
     sort_order: SortOrder = Query(SortOrder.desc, description="排序方向"),
-    is_prime_only: bool = Query(False, description="是否只显示Prime商品")
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    product_type: str = Query("all", description="商品类型：discount/coupon/all"),
+    include_coupon_history: bool = Query(False, description="是否包含优惠券历史记录")
 ):
-    """
-    获取产品列表，支持分页、价格范围、折扣率筛选和排序
-    """
+    """获取产品列表，支持分页、价格范围、折扣率筛选和排序"""
     try:
         products = ProductService.list_products(
             db,
@@ -297,7 +297,9 @@ async def list_products(
             min_discount=min_discount,
             sort_by=sort_by,
             sort_order=sort_order,
-            is_prime_only=is_prime_only
+            is_prime_only=is_prime_only,
+            product_type=product_type,
+            include_coupon_history=include_coupon_history
         )
         return products
     except Exception as e:
