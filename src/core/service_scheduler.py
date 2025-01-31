@@ -21,8 +21,11 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from loguru import logger
-from core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
-from core.amazon_product_api import AmazonProductAPI
+import sys
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
+from src.core.amazon_product_api import AmazonProductAPI
 from models.database import SessionLocal
 from models.scheduler import JobHistory
 

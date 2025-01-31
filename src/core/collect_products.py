@@ -7,9 +7,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Set, Dict, Any, Optional
 from enum import Enum
-from core.amazon_bestseller import crawl_deals
-from core.amazon_coupon_crawler import crawl_coupon_deals
-from core.amazon_product_api import AmazonProductAPI
+import sys
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+from src.core.amazon_bestseller import crawl_deals
+from src.core.amazon_coupon_crawler import crawl_coupon_deals
+from src.core.amazon_product_api import AmazonProductAPI
 from models.database import init_db, SessionLocal
 from models.product_service import ProductService
 from dotenv import load_dotenv

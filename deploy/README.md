@@ -71,80 +71,7 @@ sudo nano /etc/supervisor/conf.d/amazon_platform.conf
 
 添加以下配置：
 ```ini
-[group:amazon_platform]
-programs=fastapi_server,streamlit_frontend,scheduler_server
 
-; FastAPI服务
-[program:fastapi_server]
-directory=/root/Amazon-Discount-Products-Platform
-command=/root/Amazon-Discount-Products-Platform/venv/bin/uvicorn amazon_crawler_api:app --host 0.0.0.0 --port 5001 --workers 4
-user=root
-autostart=true
-autorestart=true
-startsecs=10
-stopwaitsecs=10
-startretries=3
-redirect_stderr=true
-stdout_logfile=/var/log/amazon_platform/fastapi.log
-stdout_logfile_maxbytes=20MB
-stdout_logfile_backups=10
-stderr_logfile=/var/log/amazon_platform/fastapi_err.log
-stderr_logfile_maxbytes=20MB
-stderr_logfile_backups=10
-environment=PYTHONPATH="/root/Amazon-Discount-Products-Platform",PATH="/root/Amazon-Discount-Products-Platform/venv/bin:%(ENV_PATH)s",CONFIG_PATH="/root/Amazon-Discount-Products-Platform/config/production.yaml"
-
-; Streamlit前端服务
-[program:streamlit_frontend]
-directory=/root/Amazon-Discount-Products-Platform
-command=/root/Amazon-Discount-Products-Platform/venv/bin/streamlit run frontend/main.py --server.port 5002 --server.address 0.0.0.0
-user=root
-autostart=true
-autorestart=true
-startsecs=10
-stopwaitsecs=10
-startretries=3
-redirect_stderr=true
-stdout_logfile=/var/log/amazon_platform/streamlit.log
-stdout_logfile_maxbytes=20MB
-stdout_logfile_backups=10
-stderr_logfile=/var/log/amazon_platform/streamlit_err.log
-stderr_logfile_maxbytes=20MB
-stderr_logfile_backups=10
-environment=PYTHONPATH="/root/Amazon-Discount-Products-Platform",PATH="/root/Amazon-Discount-Products-Platform/venv/bin:%(ENV_PATH)s",CONFIG_PATH="/root/Amazon-Discount-Products-Platform/config/production.yaml"
-
-; 调度器服务
-[program:scheduler_server]
-directory=/root/Amazon-Discount-Products-Platform
-command=/root/Amazon-Discount-Products-Platform/venv/bin/python run.py --config config/production.yaml
-user=root
-autostart=true
-autorestart=true
-startsecs=10
-stopwaitsecs=10
-startretries=3
-redirect_stderr=true
-stdout_logfile=/var/log/amazon_platform/scheduler.log
-stdout_logfile_maxbytes=20MB
-stdout_logfile_backups=10
-stderr_logfile=/var/log/amazon_platform/scheduler_err.log
-stderr_logfile_maxbytes=20MB
-stderr_logfile_backups=10
-environment=PYTHONPATH="/root/Amazon-Discount-Products-Platform",PATH="/root/Amazon-Discount-Products-Platform/venv/bin:%(ENV_PATH)s",CONFIG_PATH="/root/Amazon-Discount-Products-Platform/config/production.yaml"
-
-[supervisord]
-logfile=/var/log/supervisor/supervisord.log
-logfile_maxbytes=50MB
-logfile_backups=10
-loglevel=info
-pidfile=/var/run/supervisord.pid
-nodaemon=false
-minfds=1024
-minprocs=200
-
-; 内存监控
-[eventlistener:memmon]
-command=memmon -p fastapi_server=500MB streamlit_frontend=300MB scheduler_server=200MB
-events=TICK_60 
 
 ```
 
@@ -188,7 +115,18 @@ sudo supervisorctl restart amazon_platform
 # 检查服务状态
 sudo supervisorctl status amazon_platform
 ```
+## 4.1更新和重启服务
+# 重新加载supervisor配置
+sudo supervisorctl reread
 
+# 更新配置
+sudo supervisorctl update
+
+# 重启所有服务
+sudo supervisorctl restart amazon_platform:*
+
+# 检查状态
+sudo supervisorctl status
 ## 5. 定时任务配置
 
 配置爬虫和数据更新的定时任务：
