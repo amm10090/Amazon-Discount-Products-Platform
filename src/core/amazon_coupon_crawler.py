@@ -190,7 +190,7 @@ def extract_coupon_info(card_element) -> Optional[Dict]:
 
 def scroll_page(driver, scroll_count: int) -> bool:
     """
-    智能滚动页面
+    智能滚动页面，遇到登录提示区域时停止
     
     Args:
         driver: Selenium WebDriver对象
@@ -200,6 +200,19 @@ def scroll_page(driver, scroll_count: int) -> bool:
         bool: 滚动是否成功
     """
     try:
+        # 检查是否存在登录提示区域
+        login_area_selectors = [
+            'div[class*="_cDEzb_identity_"]',
+            'div[class="rhf-state-signin"]',
+            'div[data-card-metrics-id*="p13n-rvi_"]'
+        ]
+        
+        for selector in login_area_selectors:
+            login_area = driver.find_elements(By.CSS_SELECTOR, selector)
+            if login_area and any(elem.is_displayed() for elem in login_area):
+                log_warning("检测到登录提示区域，停止滚动")
+                return False
+        
         # 获取当前窗口高度和页面总高度
         window_height = driver.execute_script("return window.innerHeight;")
         total_height = driver.execute_script("return document.body.scrollHeight;")
@@ -210,14 +223,29 @@ def scroll_page(driver, scroll_count: int) -> bool:
         # 计算下一个滚动位置
         next_position = min(current_position + window_height, total_height - window_height)
         
-        # 如果已经接近底部，尝试触发加载更多
+        # 检查是否已经滚动到登录区域附近
+        login_area_position = float('inf')
+        for selector in login_area_selectors:
+            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+            for elem in elements:
+                try:
+                    elem_position = driver.execute_script("return arguments[0].getBoundingClientRect().top + window.pageYOffset;", elem)
+                    login_area_position = min(login_area_position, elem_position)
+                except:
+                    continue
+        
+        # 如果下一个滚动位置会超过登录区域，则调整滚动位置
+        if login_area_position != float('inf'):
+            next_position = min(next_position, login_area_position - window_height)
+        
+        # 如果已经接近底部或登录区域，尝试触发加载更多
         if total_height - (current_position + window_height) < window_height:
             # 来回滚动以触发加载
-            driver.execute_script(f"window.scrollTo({{top: {total_height}, behavior: 'smooth'}})")
+            driver.execute_script(f"window.scrollTo({{top: {next_position}, behavior: 'smooth'}})")
             time.sleep(0.5)
-            driver.execute_script(f"window.scrollTo({{top: {total_height - 200}, behavior: 'smooth'}})")
+            driver.execute_script(f"window.scrollTo({{top: {next_position - 200}, behavior: 'smooth'}})")
             time.sleep(0.5)
-            driver.execute_script(f"window.scrollTo({{top: {total_height}, behavior: 'smooth'}})")
+            driver.execute_script(f"window.scrollTo({{top: {next_position}, behavior: 'smooth'}})")
         else:
             # 正常滚动到下一个位置
             driver.execute_script(f"window.scrollTo({{top: {next_position}, behavior: 'smooth'}})")

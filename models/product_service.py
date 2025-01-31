@@ -382,4 +382,50 @@ class ProductService:
             "avg_discount": float(discount_stats[2]) if discount_stats[2] else 0,
             "prime_products": prime_products,
             "last_update": last_update
+        }
+
+    @staticmethod
+    def batch_delete_products(db: Session, asins: List[str]) -> Dict[str, int]:
+        """批量删除商品
+        
+        Args:
+            db: 数据库会话
+            asins: 要删除的商品ASIN列表
+            
+        Returns:
+            Dict[str, int]: 包含成功和失败数量的字典
+        """
+        success_count = 0
+        fail_count = 0
+        
+        try:
+            # 开始事务
+            for asin in asins:
+                try:
+                    # 删除关联的优惠信息
+                    db.query(Offer).filter(Offer.product_id == asin).delete()
+                    
+                    # 删除商品记录
+                    result = db.query(Product).filter(Product.asin == asin).delete()
+                    
+                    if result > 0:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                        
+                except Exception:
+                    fail_count += 1
+                    continue
+            
+            # 提交事务
+            db.commit()
+            
+        except Exception as e:
+            # 如果发生错误，回滚事务
+            db.rollback()
+            raise e
+            
+        return {
+            "success_count": success_count,
+            "fail_count": fail_count
         } 

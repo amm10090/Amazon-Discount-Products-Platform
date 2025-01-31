@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 from main import load_config
+from typing import List, Dict
 
 # 加载配置
 config = load_config()
@@ -179,11 +180,65 @@ products = load_products(
     sort_by=sort_by
 )
 
+# 删除商品
+def delete_product(asin: str):
+    try:
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+        response = requests.delete(f"{api_url}/api/products/{asin}")
+        
+        if response.status_code == 200:
+            st.success(get_text("delete_success"))
+            # 清除缓存以刷新商品列表
+            load_products.clear()
+            # 重新加载页面
+            st.rerun()
+        else:
+            st.error(f"{get_text('delete_failed')}: {response.json().get('detail', '')}")
+    except Exception as e:
+        st.error(f"{get_text('delete_failed')}: {str(e)}")
+
+# 批量删除商品
+def batch_delete_products(products: List[Dict]):
+    try:
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+        asins = [product["asin"] for product in products]
+        
+        response = requests.post(
+            f"{api_url}/api/products/batch-delete",
+            json={"asins": asins}
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            success_count = result.get("success_count", 0)
+            fail_count = result.get("fail_count", 0)
+            
+            if success_count > 0:
+                st.success(get_text("batch_delete_success").format(success_count=success_count))
+            if fail_count > 0:
+                st.error(get_text("batch_delete_failed").format(fail_count=fail_count))
+                
+            # 清除缓存并刷新页面
+            load_products.clear()
+            st.rerun()
+        else:
+            st.error(f"{get_text('delete_failed')}: {response.json().get('detail', '')}")
+    except Exception as e:
+        st.error(f"{get_text('delete_failed')}: {str(e)}")
+
 if products:
+    # 添加批量删除功能
+    st.markdown("### 商品列表")
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🗑️ " + get_text("delete_all")):
+            if st.warning(get_text("confirm_delete_all")):
+                batch_delete_products(products)
+
     # 显示商品列表
     for product in products:
         with st.container():
-            col1, col2 = st.columns([1, 3])
+            col1, col2, col3 = st.columns([1, 2, 1])
             
             with col1:
                 if product.get("main_image"):
@@ -216,7 +271,6 @@ if products:
                             currency = offers[0].get("currency", "USD")
                             
                             if price > 0:
-                                # 显示原价（带删除线）和当前价格
                                 st.markdown(
                                     f'<p class="price-tag">'
                                     f'<span style="text-decoration: line-through; color: #666;">${original_price:.2f}</span><br/>'
@@ -229,11 +283,6 @@ if products:
                                     f'<p class="price-tag">{get_text("price_unavailable")}</p>',
                                     unsafe_allow_html=True
                                 )
-                        else:
-                            st.markdown(
-                                f'<p class="price-tag">{get_text("price_unavailable")}</p>',
-                                unsafe_allow_html=True
-                            )
                     except (ValueError, TypeError):
                         st.markdown(
                             f'<p class="price-tag">{get_text("price_unavailable")}</p>',
@@ -242,7 +291,6 @@ if products:
                 
                 with discount_col:
                     try:
-                        # 获取折扣信息
                         offers = product.get("offers", [])
                         if offers and isinstance(offers, list) and len(offers) > 0:
                             savings_percentage = float(offers[0].get("savings_percentage", 0))
@@ -259,7 +307,6 @@ if products:
                 
                 with prime_col:
                     try:
-                        # 获取Prime信息
                         offers = product.get("offers", [])
                         if offers and isinstance(offers, list) and len(offers) > 0:
                             is_prime = offers[0].get("is_prime", False)
@@ -270,15 +317,21 @@ if products:
                                 )
                     except (ValueError, TypeError):
                         pass
-                
-                # 商品链接
+            
+            with col3:
+                # 商品链接和删除按钮
                 if product.get("url"):
                     st.markdown(f"[🔗 {get_text('view_details')}]({product['url']})")
+                
+                # 删除按钮
+                if st.button(f"🗑️ {get_text('delete')}", key=f"delete_{product['asin']}", type="secondary"):
+                    if st.warning(get_text("confirm_delete")):
+                        delete_product(product["asin"])
                 
                 # 更新时间
                 if product.get("timestamp"):
                     st.caption(f"{get_text('update_time')}: {product['timestamp']}")
-                
+            
             st.markdown("---")
     
     # 分页控制

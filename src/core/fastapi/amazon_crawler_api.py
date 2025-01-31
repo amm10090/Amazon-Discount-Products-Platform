@@ -15,7 +15,7 @@ import os
 from fastapi.responses import FileResponse, JSONResponse
 from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
 from models.product import ProductInfo
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ..amazon_product_api import AmazonProductAPI
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -530,6 +530,43 @@ async def startup_event():
     # 确保数据库表已创建
     init_db()
     print("数据库初始化完成")
+
+# 在现有代码中添加新的端点
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求模型"""
+    asins: List[str] = Field(..., description="要删除的商品ASIN列表")
+
+@app.post("/api/products/batch-delete")
+async def batch_delete_products(
+    request: BatchDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """批量删除商品
+    
+    Args:
+        request: 包含要删除的商品ASIN列表的请求体
+        db: 数据库会话
+        
+    Returns:
+        Dict: 删除操作的结果
+    """
+    try:
+        result = ProductService.batch_delete_products(db, request.asins)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"批量删除完成",
+                "success_count": result["success_count"],
+                "fail_count": result["fail_count"]
+            },
+            status_code=200
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"批量删除失败: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import argparse
