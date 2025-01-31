@@ -1,3 +1,21 @@
+"""
+Amazon产品广告API客户端模块
+
+该模块提供了与Amazon Product Advertising API (PA-API) 5.0版本交互的异步客户端实现。
+主要功能：
+1. 异步获取Amazon商品信息
+2. 支持商品信息的本地缓存
+3. 实现AWS签名V4认证
+4. 提供重试机制
+5. 支持批量商品查询
+
+技术特点：
+- 使用aiohttp进行异步HTTP请求
+- 实现异步上下文管理器
+- 使用HMAC-SHA256进行AWS认证签名
+- 支持商品信息的JSON格式化存储
+"""
+
 from typing import List, Dict
 import os
 import asyncio
@@ -9,11 +27,35 @@ import hashlib
 from datetime import datetime
 import urllib.parse
 from models.product import ProductInfo, ProductOffer
-from models.cache_manager import CacheManager
+from utils.cache_manager import CacheManager, cache_decorator
 from utils.api_retry import with_retry
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AmazonProductAPI:
-    def __init__(self, access_key: str, secret_key: str, partner_tag: str, marketplace: str = "www.amazon.com", cache_dir: str = "cache"):
+    """
+    Amazon Product Advertising API客户端类
+    
+    该类提供了与Amazon PA-API交互的主要功能，包括：
+    - 异步获取商品信息
+    - 本地缓存管理
+    - AWS签名认证
+    - 会话管理
+    
+    属性:
+        access_key: Amazon PA-API访问密钥
+        secret_key: Amazon PA-API密钥
+        partner_tag: Amazon Associates合作伙伴标签
+        marketplace: 目标市场域名
+        host: API主机地址
+        region: AWS区域
+        service: 服务名称
+        cache_manager: 缓存管理器实例
+        _session: aiohttp会话对象
+    """
+    
+    def __init__(self, access_key: str, secret_key: str, partner_tag: str, marketplace: str = "www.amazon.com", config_path: str = "config/cache_config.yaml"):
         """
         初始化Amazon Product API客户端
         
@@ -22,7 +64,7 @@ class AmazonProductAPI:
             secret_key: Amazon PA-API密钥
             partner_tag: Amazon Associates合作伙伴标签
             marketplace: 目标市场（默认为美国）
-            cache_dir: 缓存目录路径
+            config_path: 缓存配置文件路径
         """
         self.access_key = access_key
         self.secret_key = secret_key
@@ -31,39 +73,83 @@ class AmazonProductAPI:
         self.host = "webservices.amazon.com"
         self.region = "us-east-1"
         self.service = "ProductAdvertisingAPI"
-        self.cache_manager = CacheManager(cache_dir)
+        self.cache_manager = CacheManager(config_path)
         self._session = None
         
     async def __aenter__(self):
-        """异步上下文管理器入口"""
+        """
+        异步上下文管理器入口
+        
+        用于在异步with语句中初始化会话
+        
+        Returns:
+            self: 当前实例
+        """
         if self._session is None:
             self._session = aiohttp.ClientSession()
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """异步上下文管理器退出"""
+        """
+        异步上下文管理器退出
+        
+        用于在异步with语句结束时清理资源
+        
+        Args:
+            exc_type: 异常类型
+            exc_val: 异常值
+            exc_tb: 异常回溯
+        """
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
             
     async def close(self):
-        """手动关闭会话"""
+        """
+        手动关闭会话
+        
+        当不使用上下文管理器时，用于手动关闭aiohttp会话
+        """
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
             
     def _get_session(self) -> aiohttp.ClientSession:
-        """获取当前会话或创建新会话"""
+        """
+        获取当前会话或创建新会话
+        
+        Returns:
+            aiohttp.ClientSession: 当前活动的会话对象
+        """
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
     
     def _sign(self, key: bytes, msg: str) -> bytes:
-        """计算HMAC-SHA256签名"""
+        """
+        计算HMAC-SHA256签名
+        
+        Args:
+            key: 密钥字节串
+            msg: 待签名消息
+            
+        Returns:
+            bytes: HMAC-SHA256签名结果
+        """
         return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
     
     def _get_signature_key(self, date_stamp: str) -> bytes:
-        """生成AWS签名密钥"""
+        """
+        生成AWS签名密钥
+        
+        使用AWS签名版本4算法生成签名密钥
+        
+        Args:
+            date_stamp: 日期字符串（YYYYMMDD格式）
+            
+        Returns:
+            bytes: 签名密钥
+        """
         k_date = self._sign(f'AWS4{self.secret_key}'.encode('utf-8'), date_stamp)
         k_region = self._sign(k_date, self.region)
         k_service = self._sign(k_region, self.service)
@@ -71,7 +157,19 @@ class AmazonProductAPI:
         return k_signing
         
     def _get_authorization_header(self, amz_date: str, date_stamp: str, canonical_request: str) -> str:
-        """生成Authorization头"""
+        """
+        生成Authorization头
+        
+        根据AWS签名版本4规范生成授权头
+        
+        Args:
+            amz_date: AWS格式的日期时间
+            date_stamp: 日期字符串
+            canonical_request: 规范化请求字符串
+            
+        Returns:
+            str: 授权头字符串
+        """
         algorithm = 'AWS4-HMAC-SHA256'
         credential_scope = f'{date_stamp}/{self.region}/{self.service}/aws4_request'
         string_to_sign = f'{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()}'
@@ -84,7 +182,17 @@ class AmazonProductAPI:
                 f'Signature={signature}')
 
     def _extract_offer_from_item(self, item: Dict) -> List[ProductOffer]:
-        """从商品数据中提取优惠信息"""
+        """
+        从商品数据中提取优惠信息
+        
+        解析API返回的商品数据，提取价格、折扣、Prime资格等信息
+        
+        Args:
+            item: 商品数据字典
+            
+        Returns:
+            List[ProductOffer]: 商品优惠信息列表
+        """
         offers = []
         
         if 'Offers' not in item or 'Listings' not in item['Offers']:
@@ -128,16 +236,22 @@ class AmazonProductAPI:
             
         return offers
 
-    @with_retry(max_retries=3, base_delay=2.0, max_delay=30.0)
+    @cache_decorator(cache_type="products")
     async def get_products_by_asins(self, asins: List[str]) -> List[ProductInfo]:
         """
         通过ASIN列表异步获取商品信息，支持缓存和重试机制
+        
+        该方法会首先检查本地缓存，对于未缓存的商品才会请求API
         
         Args:
             asins: ASIN列表（最多10个）
             
         Returns:
             List[ProductInfo]: 商品信息列表
+            
+        Raises:
+            ValueError: 当ASIN数量超过10个时
+            Exception: API请求失败时
         """
         if not asins:
             return []
@@ -150,19 +264,28 @@ class AmazonProductAPI:
         uncached_asins = []
         
         # 首先检查缓存
+        logger.info(f"开始检查商品缓存: ASINs={asins}")
         for asin in asins:
-            cached_data = self.cache_manager.get(asin)
+            cached_data = self.cache_manager.get(asin, "products")
             if cached_data:
-                # 从缓存创建ProductInfo对象
-                product = ProductInfo(**cached_data)
-                products.append(product)
+                try:
+                    # 从缓存创建ProductInfo对象
+                    product = ProductInfo(**cached_data)
+                    products.append(product)
+                    logger.debug(f"成功从缓存加载商品: ASIN={asin}")
+                except Exception as e:
+                    logger.error(f"从缓存创建ProductInfo对象失败: {str(e)}, ASIN={asin}")
+                    uncached_asins.append(asin)
             else:
+                logger.debug(f"商品未缓存: ASIN={asin}")
                 uncached_asins.append(asin)
                 
         # 如果所有商品都在缓存中，直接返回
         if not uncached_asins:
+            logger.info(f"所有商品均命中缓存: ASINs={asins}")
             return products
             
+        logger.info(f"开始从API获取未缓存商品: ASINs={uncached_asins}")
         try:
             # 准备请求数据
             payload = {
@@ -246,40 +369,60 @@ class AmazonProductAPI:
             
             if 'ItemsResult' in response_data and 'Items' in response_data['ItemsResult']:
                 for item in response_data['ItemsResult']['Items']:
-                    # 提取商品信息
-                    offers = self._extract_offer_from_item(item)
-                    main_image = None
-                    if 'Images' in item and 'Primary' in item['Images']:
-                        main_image = item['Images']['Primary'].get('Large', {}).get('URL')
+                    try:
+                        # 提取商品信息
+                        offers = self._extract_offer_from_item(item)
+                        main_image = None
+                        if 'Images' in item and 'Primary' in item['Images']:
+                            main_image = item['Images']['Primary'].get('Large', {}).get('URL')
+                        
+                        brand = None
+                        if ('ItemInfo' in item and 'ByLineInfo' in item['ItemInfo'] and 
+                            'Brand' in item['ItemInfo']['ByLineInfo']):
+                            brand = item['ItemInfo']['ByLineInfo']['Brand'].get('DisplayValue')
+                        
+                        # 创建商品信息对象
+                        product = ProductInfo(
+                            asin=item['ASIN'],
+                            title=item.get('ItemInfo', {}).get('Title', {}).get('DisplayValue', ''),
+                            url=item.get('DetailPageURL', ''),
+                            brand=brand,
+                            main_image=main_image,
+                            offers=offers,
+                            timestamp=datetime.utcnow()
+                        )
+                        
+                        # 缓存商品信息
+                        try:
+                            self.cache_manager.set(item['ASIN'], product.dict(), "products")
+                            logger.debug(f"成功缓存商品信息: ASIN={item['ASIN']}")
+                        except Exception as e:
+                            logger.error(f"缓存商品信息失败: {str(e)}, ASIN={item['ASIN']}")
+                            
+                        products.append(product)
+                    except Exception as e:
+                        logger.error(f"处理商品信息失败: {str(e)}, ASIN={item.get('ASIN', 'unknown')}")
+                        continue
                     
-                    brand = None
-                    if ('ItemInfo' in item and 'ByLineInfo' in item['ItemInfo'] and 
-                        'Brand' in item['ItemInfo']['ByLineInfo']):
-                        brand = item['ItemInfo']['ByLineInfo']['Brand'].get('DisplayValue')
-                    
-                    # 创建商品信息对象
-                    product = ProductInfo(
-                        asin=item['ASIN'],
-                        title=item.get('ItemInfo', {}).get('Title', {}).get('DisplayValue', ''),
-                        url=item.get('DetailPageURL', ''),
-                        brand=brand,
-                        main_image=main_image,
-                        offers=offers,
-                        timestamp=datetime.utcnow()
-                    )
-                    
-                    # 缓存商品信息
-                    self.cache_manager.set(item['ASIN'], product.dict())
-                    products.append(product)
+            logger.info(f"成功获取并处理商品信息: 总数={len(products)}")
                     
         except Exception as e:
-            print(f"获取商品信息时出错: {str(e)}")
+            logger.error(f"获取商品信息时出错: {str(e)}")
             raise
             
         return products
 
     async def save_products_info(self, products: List[ProductInfo], output_file: str):
-        """异步保存商品信息到文件"""
+        """
+        异步保存商品信息到文件
+        
+        Args:
+            products: 商品信息列表
+            output_file: 输出文件路径
+            
+        Raises:
+            Exception: 文件操作失败时
+        """
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump([p.dict() for p in products], f, ensure_ascii=False, indent=2)
@@ -288,11 +431,23 @@ class AmazonProductAPI:
             raise
 
     def clear_expired_cache(self):
-        """清理过期缓存"""
+        """
+        清理过期缓存
+        
+        调用缓存管理器清理过期的缓存数据
+        """
         self.cache_manager.clear_expired()
 
 async def main():
-    """异步主函数示例"""
+    """
+    异步主函数示例
+    
+    展示如何使用AmazonProductAPI类的基本用法：
+    1. 从环境变量获取API凭证
+    2. 创建API客户端实例
+    3. 获取测试商品信息
+    4. 保存结果到文件
+    """
     # 从环境变量获取凭证
     access_key = os.getenv("AMAZON_ACCESS_KEY")
     secret_key = os.getenv("AMAZON_SECRET_KEY")

@@ -1,0 +1,20 @@
+cache:
+  base_dir: "cache"  # 缓存根目录
+  ttl:  # 缓存过期时间配置
+    offers: 3600  # Offers资源缓存1小时
+    browse_nodes: 3600  # BrowseNodeInfo缓存1小时
+    others: 86400  # 其他资源缓存1天（Images, ItemInfo等）
+  
+  options:
+    max_size: 1000  # 最大缓存条目数
+    cleanup_interval: 3600  # 清理间隔（秒）
+    
+  serialization:
+    format: "json"  # 缓存序列化格式
+    compress: true  # 是否压缩
+    
+  file_structure:
+    offers: "offers"  # offers缓存子目录
+    browse_nodes: "browse_nodes"  # browse_nodes缓存子目录
+    products: "products"  # 产品信息缓存子目录
+    images: "images"  # 图片缓存子目录 

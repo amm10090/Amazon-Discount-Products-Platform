@@ -274,49 +274,29 @@ def load_products(
 ) -> List[Dict]:
     """加载商品数据"""
     try:
-        # 解析排序参数
-        sort_field = sort_by.split("_")[0]
-        sort_order = sort_by.split("_")[1]
-        
+        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
         params = {
             "page": page,
             "page_size": page_size,
-            "min_price": min_price,
-            "max_price": max_price,
-            "min_discount": min_discount,
+            "min_price": min_price if min_price > 0 else None,
+            "max_price": max_price if max_price > 0 else None,
+            "min_discount": min_discount if min_discount > 0 else None,
             "is_prime_only": prime_only,
-            "sort_by": sort_field,
-            "sort_order": sort_order,
-            "product_type": product_type
+            "product_type": product_type,
+            "sort_by": sort_by
         }
         
-        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+        # 移除None值的参数
+        params = {k: v for k, v in params.items() if v is not None}
+        
         response = requests.get(
             f"{api_url}/api/products/list",
             params=params
         )
         
         if response.status_code == 200:
-            products = response.json()
-            
-            # 如果是优惠券商品，确保每个商品都有优惠券信息
-            if product_type == "coupon":
-                products = [p for p in products if any(
-                    offer.get("coupon_type") is not None or  # 检查优惠券类型
-                    any(ch.get("type") is not None for ch in offer.get("coupon_history", []))  # 检查优惠券历史
-                    for offer in p.get("offers", [])
-                    if isinstance(offer, dict)
-                )]
-            return products
-            
-        st.error(f"API请求失败: {response.status_code}")
-        try:
-            error_detail = response.json()
-            st.error(f"错误详情: {error_detail}")
-        except:
-            st.error("无法解析错误详情")
+            return response.json()
         return []
-        
     except Exception as e:
         st.error(f"{get_text('loading_failed')}: {str(e)}")
         return []

@@ -66,10 +66,27 @@ def load_products_data():
         api_url = f"http://{config['api']['host']}:{config['api']['port']}"
         response = requests.get(
             f"{api_url}/api/products/list",
-            params={"page_size": config["frontend"]["cache"]["max_entries"]}
+            params={
+                "page_size": config["frontend"]["cache"]["max_entries"],
+                "product_type": "all"  # 获取所有类型的商品
+            }
         )
         if response.status_code == 200:
-            return pd.DataFrame(response.json())
+            data = response.json()
+            df = pd.DataFrame([
+                {
+                    'asin': item['asin'],
+                    'title': item['title'],
+                    'price': item['offers'][0]['price'] if item['offers'] else None,
+                    'savings_percentage': item['offers'][0]['savings_percentage'] if item['offers'] else None,
+                    'is_prime': item['offers'][0]['is_prime'] if item['offers'] else False,
+                    'coupon_type': item['offers'][0]['coupon_type'] if item['offers'] and 'coupon_type' in item['offers'][0] else None,
+                    'coupon_value': item['offers'][0]['coupon_value'] if item['offers'] and 'coupon_value' in item['offers'][0] else None,
+                    'timestamp': item['timestamp']
+                }
+                for item in data
+            ])
+            return df
         return None
     except Exception as e:
         st.error(f"{get_text('loading_failed')}: {str(e)}")
@@ -82,12 +99,14 @@ if df is not None and not df.empty:
     # 数据预处理
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
     df["savings_percentage"] = pd.to_numeric(df["savings_percentage"], errors="coerce")
+    df["coupon_value"] = pd.to_numeric(df["coupon_value"], errors="coerce")
     
     # 创建分析选项卡
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         get_text("price_analysis"),
         get_text("discount_analysis"),
-        get_text("prime_analysis")
+        get_text("prime_analysis"),
+        "🎫 " + get_text("coupon_analysis")  # 新增优惠券分析选项卡
     ])
     
     with tab1:
@@ -283,5 +302,102 @@ if df is not None and not df.empty:
             )
             st.plotly_chart(fig_prime_discount, use_container_width=True)
             
+    with tab4:
+        st.subheader("🎫 " + get_text("coupon_analysis"))
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 优惠券类型分布
+            coupon_type_counts = df[df["coupon_type"].notna()]["coupon_type"].value_counts()
+            
+            if not coupon_type_counts.empty:
+                fig_coupon_type = px.pie(
+                    values=coupon_type_counts.values,
+                    names=coupon_type_counts.index,
+                    title=get_text("coupon_type_distribution"),
+                    color_discrete_sequence=["#ff9900", "#232f3e"]
+                )
+                st.plotly_chart(fig_coupon_type, use_container_width=True)
+                
+                # 优惠券统计信息
+                st.markdown(f"""
+                **{get_text("coupon_stats")}:**
+                - {get_text("total_coupons")}: {len(df[df["coupon_type"].notna()])}
+                - {get_text("percentage_coupons")}: {len(df[df["coupon_type"] == "percentage"])}
+                - {get_text("fixed_coupons")}: {len(df[df["coupon_type"] == "fixed"])}
+                """)
+            else:
+                st.info(get_text("no_coupon_data"))
+        
+        with col2:
+            # 优惠券值分布
+            if not df[df["coupon_value"].notna()].empty:
+                fig_coupon_value = px.histogram(
+                    df[df["coupon_value"].notna()],
+                    x="coupon_value",
+                    nbins=20,
+                    title=get_text("coupon_value_distribution"),
+                    labels={
+                        "coupon_value": get_text("coupon_value"),
+                        "count": get_text("product_count")
+                    },
+                    color_discrete_sequence=["#ff9900"]
+                )
+                st.plotly_chart(fig_coupon_value, use_container_width=True)
+                
+                # 优惠券值统计
+                coupon_value_stats = df[df["coupon_value"].notna()]["coupon_value"].describe()
+                st.markdown(f"""
+                **{get_text("coupon_value_stats")}:**
+                - {get_text("min_value")}: {coupon_value_stats['min']:.2f}
+                - {get_text("max_value")}: {coupon_value_stats['max']:.2f}
+                - {get_text("avg_value")}: {coupon_value_stats['mean']:.2f}
+                - {get_text("median_value")}: {coupon_value_stats['50%']:.2f}
+                """)
+            else:
+                st.info(get_text("no_coupon_value_data"))
+        
+        # 优惠券与价格关系分析
+        st.subheader(get_text("coupon_price_analysis"))
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 优惠券类型与商品价格的关系
+            if not df[df["coupon_type"].notna()].empty:
+                fig_coupon_price = px.box(
+                    df[df["coupon_type"].notna()],
+                    x="coupon_type",
+                    y="price",
+                    title=get_text("coupon_price_relation"),
+                    labels={
+                        "coupon_type": get_text("coupon_type"),
+                        "price": get_text("price") + " ($)"
+                    },
+                    color="coupon_type",
+                    color_discrete_sequence=["#ff9900", "#232f3e"]
+                )
+                st.plotly_chart(fig_coupon_price, use_container_width=True)
+            else:
+                st.info(get_text("no_coupon_price_data"))
+        
+        with col2:
+            # 优惠券值与商品价格的散点图
+            if not df[df["coupon_value"].notna()].empty:
+                fig_value_price = px.scatter(
+                    df[df["coupon_value"].notna()],
+                    x="price",
+                    y="coupon_value",
+                    title=get_text("coupon_value_price_relation"),
+                    labels={
+                        "price": get_text("price") + " ($)",
+                        "coupon_value": get_text("coupon_value")
+                    },
+                    color_discrete_sequence=["#ff9900"]
+                )
+                st.plotly_chart(fig_value_price, use_container_width=True)
+            else:
+                st.info(get_text("no_coupon_value_price_data"))
 else:
     st.warning(get_text("no_products")) 
