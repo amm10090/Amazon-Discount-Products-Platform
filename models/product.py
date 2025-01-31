@@ -52,4 +52,21 @@ class ProductInfo(BaseModel):
         """重写dict方法以支持datetime序列化"""
         d = super().dict(*args, **kwargs)
         d['timestamp'] = self.timestamp.isoformat()
-        return d 
+        return d
+
+    def to_cache_dict(self) -> dict:
+        """
+        转换为可缓存的字典格式
+        
+        Returns:
+            dict: 可序列化的字典
+        """
+        return {
+            "asin": self.asin,
+            "title": self.title,
+            "url": self.url,
+            "brand": self.brand,
+            "main_image": self.main_image,
+            "offers": [offer.dict() for offer in self.offers],
+            "timestamp": self.timestamp.isoformat()
+        } 

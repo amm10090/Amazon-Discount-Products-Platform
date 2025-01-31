@@ -112,11 +112,57 @@ class CacheManager:
             
         Returns:
             bytes: 序列化后的数据
+            
+        Raises:
+            ValueError: 当数据无法序列化时
         """
-        json_str = json.dumps(data)
-        if self.config["cache"]["serialization"]["compress"]:
-            return gzip.compress(json_str.encode('utf-8'))
-        return json_str.encode('utf-8')
+        try:
+            # 如果数据有to_cache_dict方法，优先使用
+            if hasattr(data, 'to_cache_dict'):
+                data = data.to_cache_dict()
+            # 否则如果有dict方法，使用dict方法
+            elif hasattr(data, 'dict'):
+                data = data.dict()
+            # 如果是列表，递归处理每个元素
+            elif isinstance(data, list):
+                data = [
+                    item.to_cache_dict() if hasattr(item, 'to_cache_dict')
+                    else item.dict() if hasattr(item, 'dict')
+                    else item
+                    for item in data
+                ]
+                
+            # 使用自定义的JSON编码器处理日期时间等特殊类型
+            json_str = json.dumps(
+                data,
+                ensure_ascii=False,
+                default=self._json_serial
+            )
+            
+            if self.config["cache"]["serialization"]["compress"]:
+                return gzip.compress(json_str.encode('utf-8'))
+            return json_str.encode('utf-8')
+        except Exception as e:
+            logger.error(f"序列化数据失败: {str(e)}, 数据类型: {type(data)}", exc_info=True)
+            raise ValueError(f"无法序列化数据: {str(e)}")
+            
+    def _json_serial(self, obj):
+        """
+        JSON序列化器，处理特殊类型
+        
+        Args:
+            obj: 要序列化的对象
+            
+        Returns:
+            str: 序列化后的字符串
+        """
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if hasattr(obj, 'to_cache_dict'):
+            return obj.to_cache_dict()
+        if hasattr(obj, 'dict'):
+            return obj.dict()
+        raise TypeError(f"类型 {type(obj)} 不支持JSON序列化")
         
     def _deserialize(self, data: bytes) -> Any:
         """
@@ -281,13 +327,40 @@ def cache_decorator(cache_type: str = "products", ttl: Optional[int] = None):
             # 尝试从缓存获取
             cached_result = self.cache_manager.get(cache_key, cache_type)
             if cached_result is not None:
+                logger.info(f"函数缓存命中: func={func.__name__}, args={args}, kwargs={kwargs}")
+                # 如果是列表，则需要将每个元素转换为ProductInfo对象
+                if isinstance(cached_result, list):
+                    from models.product import ProductInfo
+                    return [ProductInfo.parse_obj(item) if isinstance(item, dict) else item for item in cached_result]
                 return cached_result
                 
             # 执行原函数
+            logger.debug(f"函数缓存未命中，执行原函数: func={func.__name__}, args={args}, kwargs={kwargs}")
             result = await func(self, *args, **kwargs)
             
-            # 缓存结果
-            self.cache_manager.set(cache_key, result, cache_type)
+            # 序列化结果
+            if result:
+                try:
+                    # 如果是列表，则将每个ProductInfo对象转换为字典
+                    if isinstance(result, list):
+                        serialized_result = [
+                            item.to_cache_dict() if hasattr(item, 'to_cache_dict') 
+                            else item.dict() if hasattr(item, 'dict')
+                            else item 
+                            for item in result
+                        ]
+                    else:
+                        serialized_result = (
+                            result.to_cache_dict() if hasattr(result, 'to_cache_dict')
+                            else result.dict() if hasattr(result, 'dict')
+                            else result
+                        )
+                        
+                    # 缓存结果
+                    self.cache_manager.set(cache_key, serialized_result, cache_type)
+                    logger.debug(f"函数结果已缓存: func={func.__name__}, cache_key={cache_key}")
+                except Exception as e:
+                    logger.error(f"序列化缓存数据失败: {str(e)}", exc_info=True)
             
             return result
         return wrapper
