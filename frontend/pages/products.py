@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 from main import load_config
+from utils.cache_manager import cache_manager
 from typing import List, Dict, Optional
 
 # 加载配置
@@ -242,8 +243,12 @@ tab_discount, tab_coupon = st.tabs([
     "🎫 " + get_text("coupon_products")
 ])
 
-@st.cache_data(ttl=config["frontend"]["cache"]["ttl"])
+@cache_manager.data_cache(
+    ttl=300,
+    show_spinner="正在加载商品数据..."
+)
 def load_products(
+    api_url: str,
     product_type: str,
     page: int,
     page_size: int,
@@ -254,10 +259,24 @@ def load_products(
     sort_by: str,
     coupon_type: Optional[str] = None
 ) -> List[Dict]:
-    """加载商品数据"""
-    try:
-        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+    """加载商品数据
+    
+    Args:
+        api_url: API服务地址
+        product_type: 商品类型
+        page: 页码
+        page_size: 每页数量
+        min_price: 最低价格
+        max_price: 最高价格
+        min_discount: 最低折扣率
+        prime_only: 是否只显示Prime商品
+        sort_by: 排序方式
+        coupon_type: 优惠券类型
         
+    Returns:
+        List[Dict]: 商品列表
+    """
+    try:
         # 基本参数
         params = {
             "page": page,
@@ -292,8 +311,18 @@ def load_products(
         st.error(f"{get_text('loading_failed')}: {str(e)}")
         return []
 
-def display_products(products: List[Dict], key_suffix: str = ""):
-    """显示商品列表"""
+def display_products(
+    products: List[Dict],
+    api_url: str,
+    key_suffix: str = ""
+):
+    """显示商品列表
+    
+    Args:
+        products: 商品列表
+        api_url: API服务地址
+        key_suffix: 状态键后缀
+    """
     if not products:
         st.warning(get_text("no_matching_products"))
         return
@@ -301,7 +330,7 @@ def display_products(products: List[Dict], key_suffix: str = ""):
     if len(products) == 0:
         st.info(get_text("no_products"))
         return
-        
+    
     # 显示商品总数
     st.success(f"{get_text('total_items')}: {len(products)}")
     
@@ -314,8 +343,21 @@ def display_products(products: List[Dict], key_suffix: str = ""):
             key=f"delete_all_{key_suffix}"
         ):
             if st.warning(get_text("confirm_delete_all")):
-                batch_delete_products(products)
-
+                result = batch_delete_products(api_url, products)
+                if result["success_count"] > 0:
+                    st.success(
+                        get_text("batch_delete_success").format(
+                            success_count=result["success_count"]
+                        )
+                    )
+                if result["fail_count"] > 0:
+                    st.error(
+                        get_text("batch_delete_failed").format(
+                            fail_count=result["fail_count"]
+                        )
+                    )
+                st.rerun()
+    
     # 显示商品列表
     for product in products:
         with st.container():
@@ -464,7 +506,9 @@ def display_products(products: List[Dict], key_suffix: str = ""):
                     type="secondary"
                 ):
                     if st.warning(get_text("confirm_delete")):
-                        delete_product(product["asin"])
+                        if delete_product(api_url, product["asin"]):
+                            st.success(get_text("delete_success"))
+                            st.rerun()
                 
                 # 更新时间
                 if product.get("timestamp"):
@@ -472,14 +516,22 @@ def display_products(products: List[Dict], key_suffix: str = ""):
             
             st.markdown("---")
 
-def handle_pagination(total_items: int, page: int, page_size: int, key_suffix: str = ""):
+def handle_pagination(
+    total_items: int,
+    page: int,
+    page_size: int,
+    key_suffix: str = ""
+) -> int:
     """处理分页
     
     Args:
         total_items: 总商品数
         page: 当前页码
         page_size: 每页数量
-        key_suffix: 用于区分不同标签页的状态键后缀
+        key_suffix: 状态键后缀
+        
+    Returns:
+        int: 新的页码
     """
     col1, col2, col3 = st.columns([1, 2, 1])
     
@@ -510,23 +562,26 @@ def handle_pagination(total_items: int, page: int, page_size: int, key_suffix: s
     
     return page
 
-def handle_export(products: List[Dict], key_suffix: str = ""):
+def handle_export(
+    products: List[Dict],
+    key_suffix: str = ""
+):
     """处理数据导出
     
     Args:
         products: 商品列表
-        key_suffix: 用于区分不同标签页的状态键后缀
+        key_suffix: 状态键后缀
     """
     st.markdown("---")
     st.subheader(get_text("export_data"))
-
+    
     export_format = st.selectbox(
         get_text("export_format"),
         options=["CSV", "JSON", "Excel"],
         index=0,
         key=f"export_format_{key_suffix}"
     )
-
+    
     if st.button(
         get_text("export_button"),
         key=f"export_{key_suffix}"
@@ -580,6 +635,54 @@ def handle_export(products: List[Dict], key_suffix: str = ""):
         else:
             st.warning(get_text("no_data"))
 
+def delete_product(api_url: str, asin: str) -> bool:
+    """删除商品
+    
+    Args:
+        api_url: API服务地址
+        asin: 商品ASIN
+        
+    Returns:
+        bool: 是否删除成功
+    """
+    try:
+        response = requests.delete(f"{api_url}/api/products/{asin}")
+        success = response.status_code == 200
+        if success:
+            # 清除相关缓存
+            cache_manager.clear_cache()
+        return success
+    except Exception as e:
+        st.error(f"{get_text('delete_failed')}: {str(e)}")
+        return False
+
+def batch_delete_products(api_url: str, products: List[Dict]) -> Dict[str, int]:
+    """批量删除商品
+    
+    Args:
+        api_url: API服务地址
+        products: 商品列表
+        
+    Returns:
+        Dict[str, int]: 删除结果统计
+    """
+    try:
+        asins = [product["asin"] for product in products]
+        response = requests.post(
+            f"{api_url}/api/products/batch-delete",
+            json={"asins": asins}
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            # 清除相关缓存
+            cache_manager.clear_cache()
+            return result
+        return {"success_count": 0, "fail_count": len(asins)}
+    except Exception as e:
+        st.error(f"{get_text('delete_failed')}: {str(e)}")
+        return {"success_count": 0, "fail_count": len(asins)}
+
 # 处理折扣商品标签页
 with tab_discount:
     # 分页控制
@@ -593,6 +696,7 @@ with tab_discount:
     
     # 加载折扣商品数据
     discount_products = load_products(
+        api_url=f"http://{config['api']['host']}:{config['api']['port']}",
         product_type="discount",
         page=discount_page,
         page_size=page_size,
@@ -604,7 +708,7 @@ with tab_discount:
     )
     
     # 显示折扣商品
-    display_products(discount_products, "discount")
+    display_products(discount_products, f"http://{config['api']['host']}:{config['api']['port']}", "discount")
     
     # 处理分页
     discount_page = handle_pagination(
@@ -630,6 +734,7 @@ with tab_coupon:
     
     # 加载优惠券商品数据
     coupon_products = load_products(
+        api_url=f"http://{config['api']['host']}:{config['api']['port']}",
         product_type="coupon",
         page=coupon_page,
         page_size=page_size,
@@ -641,7 +746,7 @@ with tab_coupon:
     )
     
     # 显示优惠券商品
-    display_products(coupon_products, "coupon")
+    display_products(coupon_products, f"http://{config['api']['host']}:{config['api']['port']}", "coupon")
     
     # 处理分页
     coupon_page = handle_pagination(
@@ -652,50 +757,4 @@ with tab_coupon:
     )
     
     # 处理导出
-    handle_export(coupon_products, "coupon")
-
-# 删除商品
-def delete_product(asin: str):
-    try:
-        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
-        response = requests.delete(f"{api_url}/api/products/{asin}")
-        
-        if response.status_code == 200:
-            st.success(get_text("delete_success"))
-            # 清除缓存以刷新商品列表
-            load_products.clear()
-            # 重新加载页面
-            st.rerun()
-        else:
-            st.error(f"{get_text('delete_failed')}: {response.json().get('detail', '')}")
-    except Exception as e:
-        st.error(f"{get_text('delete_failed')}: {str(e)}")
-
-# 批量删除商品
-def batch_delete_products(products: List[Dict]):
-    try:
-        api_url = f"http://{config['api']['host']}:{config['api']['port']}"
-        asins = [product["asin"] for product in products]
-        
-        response = requests.post(
-            f"{api_url}/api/products/batch-delete",
-            json={"asins": asins}
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            success_count = result.get("success_count", 0)
-            fail_count = result.get("fail_count", 0)
-            
-            if success_count > 0:
-                st.success(get_text("batch_delete_success").format(success_count=success_count))
-            if fail_count > 0:
-                st.error(get_text("batch_delete_failed").format(fail_count=fail_count))
-                
-            # 清除缓存并刷新页面
-            load_products.clear()
-            st.rerun()
-        else:
-            st.error(f"{get_text('delete_failed')}: {response.json().get('detail', '')}")
-    except Exception as e:
-        st.error(f"{get_text('delete_failed')}: {str(e)}") 
+    handle_export(coupon_products, "coupon") 
