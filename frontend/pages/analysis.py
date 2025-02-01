@@ -526,28 +526,38 @@ def main():
                 
                 with col1:
                     # 优惠券类型与商品价格的关系
+                    coupon_price_df = pd.DataFrame({
+                        'coupon_type': coupon_analysis["price_relation"]["types"],
+                        'price': coupon_analysis["price_relation"]["prices"]
+                    })
                     fig_coupon_price = px.box(
-                        x=coupon_analysis["price_relation"]["types"],
-                        y=coupon_analysis["price_relation"]["prices"],
+                        data_frame=coupon_price_df,
+                        x='coupon_type',
+                        y='price',
                         title=get_text("coupon_price_relation"),
                         labels={
-                            "x": get_text("coupon_type"),
-                            "y": get_text("price") + " ($)"
+                            "coupon_type": get_text("coupon_type"),
+                            "price": get_text("price") + " ($)"
                         },
-                        color="x",
+                        color='coupon_type',
                         color_discrete_sequence=["#ff9900", "#232f3e"]
                     )
                     st.plotly_chart(fig_coupon_price, use_container_width=True)
                 
                 with col2:
                     # 优惠券值与商品价格的散点图
+                    value_price_df = pd.DataFrame({
+                        'price': coupon_analysis["price_relation"]["prices"],
+                        'coupon_value': coupon_analysis["price_relation"]["values"]
+                    })
                     fig_value_price = px.scatter(
-                        x=coupon_analysis["price_relation"]["prices"],
-                        y=coupon_analysis["price_relation"]["values"],
+                        data_frame=value_price_df,
+                        x='price',
+                        y='coupon_value',
                         title=get_text("coupon_value_price_relation"),
                         labels={
-                            "x": get_text("price") + " ($)",
-                            "y": get_text("coupon_value")
+                            "price": get_text("price") + " ($)",
+                            "coupon_value": get_text("coupon_value")
                         },
                         color_discrete_sequence=["#ff9900"]
                     )
