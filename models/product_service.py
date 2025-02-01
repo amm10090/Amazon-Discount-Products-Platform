@@ -157,7 +157,13 @@ class ProductService:
         return ProductService.create_product(db, product_info, source)
     
     @staticmethod
-    def bulk_create_or_update_products(db: Session, products: List[ProductInfo], include_coupon: bool = False) -> List[ProductInfo]:
+    def bulk_create_or_update_products(
+        db: Session, 
+        products: List[ProductInfo], 
+        include_coupon: bool = False,
+        source: Optional[str] = None,  # 数据来源渠道：bestseller/coupon
+        api_provider: str = "pa-api"  # API提供者
+    ) -> List[ProductInfo]:
         """
         批量创建或更新产品信息
         
@@ -165,6 +171,8 @@ class ProductService:
             db: 数据库会话
             products: 产品信息列表
             include_coupon: 是否包含优惠券信息
+            source: 数据来源渠道（bestseller/coupon）
+            api_provider: API提供者（pa-api等）
         """
         saved_products = []
         current_time = datetime.utcnow()
@@ -212,7 +220,8 @@ class ProductService:
                     timestamp=current_time,
                     
                     # 元数据
-                    source="pa-api",
+                    source=source,
+                    api_provider=api_provider,
                     raw_data=product_info.dict()
                 )
                 db.add(product)
@@ -244,6 +253,9 @@ class ProductService:
                 # 更新时间和元数据
                 product.updated_at = current_time
                 product.timestamp = current_time
+                if source:  # 只在明确指定source时更新
+                    product.source = source
+                product.api_provider = api_provider  # 始终更新API提供者
                 product.raw_data = product_info.dict()
             
             # 删除旧的优惠信息
@@ -621,8 +633,9 @@ class ProductService:
             # 构建基础查询
             query = db.query(Product).distinct(Product.asin)
             
-            # 确保商品有折扣
+            # 确保商品有折扣且来源为bestseller
             query = query.filter(Product.savings_percentage > 0)
+            query = query.filter(Product.source == "bestseller")  # 只返回bestseller来源的商品
             
             # 应用过滤条件
             if min_price is not None:

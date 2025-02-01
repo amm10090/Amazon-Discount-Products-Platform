@@ -70,7 +70,8 @@ class Product(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)  # 数据采集时间
     
     # 元数据
-    source = Column(String(50))  # 数据来源：'crawler' 或 'pa-api'
+    source = Column(String(50))  # 数据来源渠道：bestseller/coupon
+    api_provider = Column(String(50))  # API提供者：pa-api等
     raw_data = Column(JSON)  # 存储原始API响应
 
     # 关联优惠信息

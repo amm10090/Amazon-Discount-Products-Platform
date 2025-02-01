@@ -181,13 +181,19 @@ async def crawl_bestseller_products(
         async with api:
             for i in range(0, len(asin_list), batch_size):
                 batch_asins = asin_list[i:i + batch_size]
-                saved_count = await process_products_batch(
-                    api, 
-                    batch_asins, 
-                    i // batch_size,
-                    total_batches
-                )
-                total_success += saved_count
+                # 获取产品详细信息
+                products = await api.get_products_by_asins(batch_asins)
+                if products:
+                    # 存储到数据库
+                    with SessionLocal() as db:
+                        saved_products = ProductService.bulk_create_or_update_products(
+                            db, 
+                            products,
+                            source="bestseller",  # 数据来源渠道
+                            api_provider="pa-api"  # API提供者
+                        )
+                        total_success += len(saved_products)
+                        log_success(f"成功保存 {len(saved_products)} 个产品信息")
                 
                 if i + batch_size < len(asin_list):
                     await asyncio.sleep(1)  # 避免API限制
@@ -251,7 +257,9 @@ async def crawl_coupon_products(
                         saved_products = ProductService.bulk_create_or_update_products(
                             db, 
                             products,
-                            include_coupon=True
+                            include_coupon=True,
+                            source="coupon",  # 数据来源渠道
+                            api_provider="pa-api"  # API提供者
                         )
                         total_success += len(saved_products)
                         log_success(f"成功保存 {len(saved_products)} 个优惠券商品信息")
