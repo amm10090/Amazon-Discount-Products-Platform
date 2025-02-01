@@ -25,6 +25,11 @@ TRANSLATIONS = {
         "cache_stats": "缓存统计",
         "cache_files": "缓存文件数",
         "cache_size": "缓存大小",
+        "cache_type_distribution": "缓存类型分布",
+        "cache_status": "缓存状态",
+        "cache_health": "健康状态",
+        "cleanup_status": "清理状态",
+        "last_cleanup": "最后清理时间",
         "clear_cache": "清理过期缓存",
         "cache_cleared": "缓存清理成功",
         "cache_clear_failed": "缓存清理失败",
@@ -209,6 +214,22 @@ TRANSLATIONS = {
         "no_coupon_price_data": "暂无优惠券价格关系数据",
         "no_coupon_value_price_data": "暂无优惠券金额与价格关系数据",
         "coupon_type": "优惠券类型",
+        
+        # 缓存相关
+        "cache_stats": "缓存统计",
+        "cache_files": "总文件数",
+        "cache_size": "总大小",
+        "cache_type_distribution": "缓存类型分布",
+        "cache_status": "缓存状态",
+        "cache_health": "健康状态",
+        "cleanup_status": "清理状态",
+        "last_cleanup": "最后清理时间",
+        "clear_cache": "清理缓存",
+        "cache_cleared": "缓存已成功清理",
+        "cache_clear_failed": "清理缓存失败",
+        "loading_failed": "加载数据失败",
+        "size": "大小",
+        "files": "文件数",
     },
     
     "en": {
@@ -231,9 +252,14 @@ TRANSLATIONS = {
         
         # Cache Management
         "cache_stats": "Cache Statistics",
-        "cache_files": "Cached Files",
-        "cache_size": "Cache Size",
-        "clear_cache": "Clear Expired Cache",
+        "cache_files": "Total Files",
+        "cache_size": "Total Size",
+        "cache_type_distribution": "Cache Type Distribution",
+        "cache_status": "Cache Status",
+        "cache_health": "Health Status",
+        "cleanup_status": "Cleanup Status",
+        "last_cleanup": "Last Cleanup Time",
+        "clear_cache": "Clear Cache",
         "cache_cleared": "Cache cleared successfully",
         "cache_clear_failed": "Failed to clear cache",
         
@@ -417,5 +443,21 @@ TRANSLATIONS = {
         "no_coupon_price_data": "No coupon price relation data available",
         "no_coupon_value_price_data": "No coupon value and price relation data available",
         "coupon_type": "Coupon Type",
+        
+        # 缓存相关
+        "cache_stats": "Cache Statistics",
+        "cache_files": "Total Files",
+        "cache_size": "Total Size",
+        "cache_type_distribution": "Cache Type Distribution",
+        "cache_status": "Cache Status",
+        "cache_health": "Health Status",
+        "cleanup_status": "Cleanup Status",
+        "last_cleanup": "Last Cleanup Time",
+        "clear_cache": "Clear Cache",
+        "cache_cleared": "Cache cleared successfully",
+        "cache_clear_failed": "Failed to clear cache",
+        "loading_failed": "Failed to load data",
+        "size": "Size",
+        "files": "Files",
     }
 } 

@@ -16,11 +16,33 @@ from src.core.amazon_product_api import AmazonProductAPI
 from models.database import init_db, SessionLocal
 from models.product_service import ProductService
 from dotenv import load_dotenv
-import colorama
-from colorama import Fore, Style
+from src.utils.logger_manager import (
+    log_info, log_debug, log_warning, 
+    log_error, log_success, log_progress,
+    log_section, set_log_config
+)
+from src.utils.config_loader import config_loader
 
-# 初始化colorama
-colorama.init()
+# 初始化组件日志配置
+def init_logger():
+    """初始化日志配置"""
+    collector_config = config_loader.get_component_config('collector')
+    if collector_config:
+        set_log_config(
+            log_to_file=True,
+            log_dir=os.path.dirname(collector_config.get('file', 'logs/collector.log')),
+            max_file_size=10 * 1024 * 1024,  # 10MB
+            backup_count=5,
+            use_colors=True,
+            buffer_size=1000,
+            flush_interval=5
+        )
+        
+        # 设置环境变量来控制日志级别
+        os.environ['DEBUG_LEVEL'] = collector_config.get('level', 'INFO')
+
+# 调用初始化
+init_logger()
 
 class CrawlerType(Enum):
     """爬虫类型枚举"""
@@ -100,40 +122,6 @@ class Config:
             headless=not args.no_headless,
             crawler_types=crawler_types or [CrawlerType.ALL]
         )
-
-# 日志格式常量
-LOG_INFO = f"{Fore.GREEN}[INFO]{Style.RESET_ALL}"
-LOG_DEBUG = f"{Fore.BLUE}[DEBUG]{Style.RESET_ALL}"
-LOG_WARNING = f"{Fore.YELLOW}[WARN]{Style.RESET_ALL}"
-LOG_ERROR = f"{Fore.RED}[ERROR]{Style.RESET_ALL}"
-LOG_SUCCESS = f"{Fore.GREEN}[✓]{Style.RESET_ALL}"
-
-def log_message(level: str, message: str) -> None:
-    """输出带时间戳的日志消息"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {level} {message}")
-
-def log_info(message: str) -> None:
-    log_message(LOG_INFO, message)
-
-def log_debug(message: str) -> None:
-    log_message(LOG_DEBUG, message)
-
-def log_warning(message: str) -> None:
-    log_message(LOG_WARNING, message)
-
-def log_error(message: str) -> None:
-    log_message(LOG_ERROR, message)
-
-def log_success(message: str) -> None:
-    log_message(LOG_SUCCESS, message)
-
-def format_progress_bar(current: int, total: int, width: int = 30) -> str:
-    """生成进度条"""
-    percentage = current / total
-    filled = int(width * percentage)
-    bar = '█' * filled + '░' * (width - filled)
-    return f"{Fore.CYAN}[{bar}] {current}/{total} ({percentage*100:.1f}%){Style.RESET_ALL}"
 
 async def process_products_batch(
     api: AmazonProductAPI,
@@ -220,7 +208,7 @@ async def crawl_coupon_products(
     """爬取优惠券商品数据"""
     try:
         log_info("开始爬取优惠券商品...")
-        results = await crawl_coupon_deals(
+        results, stats = await crawl_coupon_deals(
             max_items=max_items,
             timeout=timeout,
             headless=headless
@@ -241,14 +229,14 @@ async def crawl_coupon_products(
         async with api:
             # 分批处理
             for i in range(0, len(asins), batch_size):
-                batch_asins = asins[i:i + batch_size]
-                batch_results = results[i:i + batch_size]
+                batch = results[i:i + batch_size]
+                batch_asins = [item['asin'] for item in batch]
                 
                 # 获取产品详细信息并添加优惠券信息
                 products = await api.get_products_by_asins(batch_asins)
                 if products:
                     # 将优惠券信息添加到产品数据中
-                    for product, result in zip(products, batch_results):
+                    for product, result in zip(products, batch):
                         if 'coupon' in result and result['coupon']:
                             coupon_info = result['coupon']
                             # 验证优惠券信息格式

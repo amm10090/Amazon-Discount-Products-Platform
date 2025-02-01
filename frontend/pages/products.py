@@ -180,54 +180,37 @@ with st.sidebar:
     # 语言选择器
     language_selector()
     st.markdown("---")
-
-st.title("📦 " + get_text("products_title"))
-
-# 创建标签页
-tab_discount, tab_coupon = st.tabs([
-    "🏷️ " + get_text("discount_products"),
-    "🎫 " + get_text("coupon_products")
-])
-
-def create_filter_sidebar(key_suffix: str = "") -> dict:
-    """创建筛选边栏
     
-    Args:
-        key_suffix: 用于区分不同标签页的状态键后缀
-        
-    Returns:
-        dict: 筛选条件字典
-    """
-    st.sidebar.subheader(get_text("filter_conditions"))
+    st.subheader(get_text("filter_conditions"))
     
     # 价格范围
-    price_range = st.sidebar.slider(
+    price_range = st.slider(
         get_text("price_range") + " ($)",
         min_value=0,
         max_value=1000,
         value=(0, 1000),
         step=10,
-        key=f"price_range_{key_suffix}"
+        key="price_range"
     )
     
     # 最低折扣率
-    min_discount = st.sidebar.slider(
+    min_discount = st.slider(
         get_text("min_discount_rate") + " (%)",
         min_value=0,
         max_value=100,
         value=0,
         step=5,
-        key=f"min_discount_{key_suffix}"
+        key="min_discount"
     )
     
     # 是否只显示Prime商品
-    prime_only = st.sidebar.checkbox(
+    prime_only = st.checkbox(
         get_text("prime_only"),
-        key=f"prime_only_{key_suffix}"
+        key="prime_only"
     )
     
     # 排序方式
-    sort_by = st.sidebar.selectbox(
+    sort_by = st.selectbox(
         get_text("sort_by"),
         options=[
             "price_asc", "price_desc",
@@ -242,24 +225,22 @@ def create_filter_sidebar(key_suffix: str = "") -> dict:
             "time_asc": get_text("time_old_to_new"),
             "time_desc": get_text("time_new_to_old")
         }[x],
-        key=f"sort_by_{key_suffix}"
+        key="sort_by"
     )
     
     # 每页显示数量
-    page_size = st.sidebar.selectbox(
+    page_size = st.selectbox(
         get_text("items_per_page"),
         options=[10, 20, 50, 100],
         index=1,
-        key=f"page_size_{key_suffix}"
+        key="page_size"
     )
-    
-    return {
-        "price_range": price_range,
-        "min_discount": min_discount,
-        "prime_only": prime_only,
-        "sort_by": sort_by,
-        "page_size": page_size
-    }
+
+# 创建标签页
+tab_discount, tab_coupon = st.tabs([
+    "🏷️ " + get_text("discount_products"),
+    "🎫 " + get_text("coupon_products")
+])
 
 @st.cache_data(ttl=config["frontend"]["cache"]["ttl"])
 def load_products(
@@ -270,11 +251,14 @@ def load_products(
     max_price: float,
     min_discount: int,
     prime_only: bool,
-    sort_by: str
+    sort_by: str,
+    coupon_type: Optional[str] = None
 ) -> List[Dict]:
     """加载商品数据"""
     try:
         api_url = f"http://{config['api']['host']}:{config['api']['port']}"
+        
+        # 基本参数
         params = {
             "page": page,
             "page_size": page_size,
@@ -282,17 +266,24 @@ def load_products(
             "max_price": max_price if max_price > 0 else None,
             "min_discount": min_discount if min_discount > 0 else None,
             "is_prime_only": prime_only,
-            "product_type": product_type,
             "sort_by": sort_by
         }
+        
+        # 根据商品类型选择不同的API端点
+        if product_type == "discount":
+            endpoint = "/api/products/discount"
+        elif product_type == "coupon":
+            endpoint = "/api/products/coupon"
+            if coupon_type:
+                params["coupon_type"] = coupon_type
+        else:
+            endpoint = "/api/products/list"
+            params["product_type"] = product_type
         
         # 移除None值的参数
         params = {k: v for k, v in params.items() if v is not None}
         
-        response = requests.get(
-            f"{api_url}/api/products/list",
-            params=params
-        )
+        response = requests.get(f"{api_url}{endpoint}", params=params)
         
         if response.status_code == 200:
             return response.json()
@@ -352,14 +343,26 @@ def display_products(products: List[Dict], key_suffix: str = ""):
                 
                 with price_col:
                     try:
-                        offers = product.get("offers", [])
-                        if offers and isinstance(offers, list) and len(offers) > 0:
-                            price = float(offers[0].get("price", 0))
-                            savings = float(offers[0].get("savings", 0))
-                            original_price = price + savings
-                            currency = offers[0].get("currency", "USD")
-                            
-                            if price > 0:
+                        # 获取价格信息
+                        price = None
+                        original_price = None
+                        currency = "USD"
+                        
+                        # 从offers中获取价格信息
+                        if isinstance(product.get("offers"), list) and len(product["offers"]) > 0:
+                            offer = product["offers"][0]
+                            price = float(offer.get("price", 0))
+                            # 如果有优惠券，计算原价
+                            if offer.get("coupon_type") == "percentage" and offer.get("coupon_value"):
+                                original_price = price / (1 - float(offer["coupon_value"]) / 100)
+                            elif offer.get("coupon_type") == "fixed" and offer.get("coupon_value"):
+                                original_price = price + float(offer["coupon_value"])
+                            else:
+                                original_price = price
+                            currency = offer.get("currency", "USD")
+                        
+                        if price and price > 0:
+                            if original_price and original_price > price:
                                 st.markdown(
                                     f'<p class="price-tag">'
                                     f'<span style="text-decoration: line-through; color: #666;">${original_price:.2f}</span><br/>'
@@ -369,10 +372,17 @@ def display_products(products: List[Dict], key_suffix: str = ""):
                                 )
                             else:
                                 st.markdown(
-                                    f'<p class="price-tag">{get_text("price_unavailable")}</p>',
+                                    f'<p class="price-tag">'
+                                    f'<span style="color: #B12704; font-size: 1.2em;">${price:.2f}</span> {currency}'
+                                    f'</p>',
                                     unsafe_allow_html=True
                                 )
-                    except (ValueError, TypeError):
+                        else:
+                            st.markdown(
+                                f'<p class="price-tag">{get_text("price_unavailable")}</p>',
+                                unsafe_allow_html=True
+                            )
+                    except (ValueError, TypeError, AttributeError) as e:
                         st.markdown(
                             f'<p class="price-tag">{get_text("price_unavailable")}</p>',
                             unsafe_allow_html=True
@@ -380,30 +390,42 @@ def display_products(products: List[Dict], key_suffix: str = ""):
                 
                 with discount_col:
                     try:
-                        offers = product.get("offers", [])
-                        if offers and isinstance(offers, list) and len(offers) > 0:
-                            savings_percentage = float(offers[0].get("savings_percentage", 0))
-                            savings = float(offers[0].get("savings", 0))
-                            if savings_percentage > 0:
-                                st.markdown(
-                                    f'<p class="discount-tag">'
-                                    f'{get_text("save_money")} ${savings:.2f} ({savings_percentage:.0f}%)'
-                                    f'</p>',
-                                    unsafe_allow_html=True
-                                )
-                            
-                            # 显示优惠券信息
-                            coupon_type = offers[0].get("coupon_type")
-                            coupon_value = offers[0].get("coupon_value")
+                        # 获取优惠券信息
+                        if isinstance(product.get("offers"), list) and len(product["offers"]) > 0:
+                            offer = product["offers"][0]
+                            coupon_type = offer.get("coupon_type")
+                            coupon_value = offer.get("coupon_value")
                             
                             if coupon_type and coupon_value:
-                                # 根据优惠券类型构建显示内容
-                                if coupon_type.lower() == "percentage":
-                                    left_text = f"{coupon_value}%"
-                                    right_text = "Percentage"
-                                else:
-                                    left_text = f"${coupon_value}"
-                                    right_text = "Fixed"
+                                # 计算折扣金额和百分比
+                                price = float(offer.get("price", 0))
+                                if coupon_type == "percentage":
+                                    savings = price * (float(coupon_value) / 100)
+                                    savings_percentage = float(coupon_value)
+                                else:  # fixed
+                                    savings = float(coupon_value)
+                                    savings_percentage = (savings / price) * 100 if price > 0 else 0
+                                
+                                # 显示折扣信息
+                                if savings > 0:
+                                    st.markdown(
+                                        f'<p class="discount-tag">'
+                                        f'{get_text("save_money")} ${savings:.2f} ({savings_percentage:.0f}%)'
+                                        f'</p>',
+                                        unsafe_allow_html=True
+                                    )
+                                
+                                # 显示优惠券信息
+                                left_text = (
+                                    f"{coupon_value}%" 
+                                    if coupon_type.lower() == "percentage" 
+                                    else f"${coupon_value}"
+                                )
+                                right_text = (
+                                    "OFF" 
+                                    if coupon_type.lower() == "percentage" 
+                                    else "COUPON"
+                                )
                                 
                                 st.markdown(
                                     f'''
@@ -414,7 +436,7 @@ def display_products(products: List[Dict], key_suffix: str = ""):
                                     ''',
                                     unsafe_allow_html=True
                                 )
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError, AttributeError) as e:
                         pass
                 
                 with prime_col:
@@ -560,9 +582,6 @@ def handle_export(products: List[Dict], key_suffix: str = ""):
 
 # 处理折扣商品标签页
 with tab_discount:
-    # 获取折扣商品的筛选条件
-    discount_filters = create_filter_sidebar("discount")
-    
     # 分页控制
     discount_page = st.number_input(
         get_text("page"),
@@ -576,12 +595,12 @@ with tab_discount:
     discount_products = load_products(
         product_type="discount",
         page=discount_page,
-        page_size=discount_filters["page_size"],
-        min_price=discount_filters["price_range"][0],
-        max_price=discount_filters["price_range"][1],
-        min_discount=discount_filters["min_discount"],
-        prime_only=discount_filters["prime_only"],
-        sort_by=discount_filters["sort_by"]
+        page_size=page_size,
+        min_price=price_range[0],
+        max_price=price_range[1],
+        min_discount=min_discount,
+        prime_only=prime_only,
+        sort_by=sort_by
     )
     
     # 显示折扣商品
@@ -591,7 +610,7 @@ with tab_discount:
     discount_page = handle_pagination(
         len(discount_products),
         discount_page,
-        discount_filters["page_size"],
+        page_size,
         "discount"
     )
     
@@ -600,9 +619,6 @@ with tab_discount:
 
 # 处理优惠券商品标签页
 with tab_coupon:
-    # 获取优惠券商品的筛选条件
-    coupon_filters = create_filter_sidebar("coupon")
-    
     # 分页控制
     coupon_page = st.number_input(
         get_text("page"),
@@ -616,12 +632,12 @@ with tab_coupon:
     coupon_products = load_products(
         product_type="coupon",
         page=coupon_page,
-        page_size=coupon_filters["page_size"],
-        min_price=coupon_filters["price_range"][0],
-        max_price=coupon_filters["price_range"][1],
-        min_discount=coupon_filters["min_discount"],
-        prime_only=coupon_filters["prime_only"],
-        sort_by=coupon_filters["sort_by"]
+        page_size=page_size,
+        min_price=price_range[0],
+        max_price=price_range[1],
+        min_discount=min_discount,
+        prime_only=prime_only,
+        sort_by=sort_by
     )
     
     # 显示优惠券商品
@@ -631,7 +647,7 @@ with tab_coupon:
     coupon_page = handle_pagination(
         len(coupon_products),
         coupon_page,
-        coupon_filters["page_size"],
+        page_size,
         "coupon"
     )
     

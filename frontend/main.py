@@ -159,14 +159,36 @@ with st.sidebar:
         with col2:
             st.metric(get_text("cache_size"), f"{cache_stats.get('total_size_mb', 0):.1f}MB")
         
+        # 显示各类型缓存使用情况
+        if cache_stats.get("by_type"):
+            st.markdown("### " + get_text("cache_type_distribution"))
+            for cache_type, stats in cache_stats["by_type"].items():
+                with st.container():
+                    st.markdown(f"""
+                    **{cache_type}**:
+                    - {get_text("size")}: {stats['size_mb']:.1f}MB
+                    - {get_text("files")}: {stats['count']}
+                    """)
+        
+        # 显示缓存状态
+        if cache_stats.get("status_details"):
+            st.markdown("### " + get_text("cache_status"))
+            status_details = cache_stats["status_details"]
+            st.markdown(f"""
+            - {get_text("cache_health")}: {status_details['cache_health']}
+            - {get_text("cleanup_status")}: {'运行中' if status_details['is_cleanup_running'] else '已停止'}
+            - {get_text("last_cleanup")}: {cache_stats.get('last_cleanup', '未知')}
+            """)
+        
         # 清理缓存按钮
         if st.button("🧹 " + get_text("clear_cache")):
             response = requests.post(f"{api_url}/api/cache/clear")
             if response.status_code == 200:
                 st.success(get_text("cache_cleared"))
+                st.rerun()
             else:
                 st.error(get_text("cache_clear_failed"))
-    except:
+    except Exception as e:
         st.warning(get_text("loading_failed"))
 
 # 主页面

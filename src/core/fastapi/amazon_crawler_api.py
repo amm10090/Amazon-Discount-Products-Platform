@@ -41,6 +41,7 @@ from enum import Enum
 from models.scheduler import SchedulerManager
 from models.scheduler_models import JobConfig, JobStatus, SchedulerStatus, JobHistory
 import pytz
+import logging
 
 # 加载环境变量
 load_dotenv()
@@ -57,6 +58,12 @@ app = FastAPI(
 
 # 存储任务状态的字典
 tasks_status: Dict[str, Dict] = {}
+
+logger = logging.getLogger(__name__)
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求模型"""
+    asins: List[str] = Field(..., description="要删除的商品ASIN列表")
 
 class ProductRequest(BaseModel):
     """
@@ -196,21 +203,20 @@ async def crawl_task(task_id: str, params: CrawlerRequest):
             "timestamp": datetime.now()
         }
 
+# 系统状态相关API
+@app.get("/api/health")
+async def health_check():
+    """健康检查端点"""
+    return {
+        "status": "healthy",
+        "service": "amazon-data-api",
+        "timestamp": datetime.now().isoformat()
+    }
+
+# 爬虫任务相关API
 @app.post("/api/crawl", response_model=CrawlerResponse)
-async def start_crawler(
-    params: CrawlerRequest,
-    background_tasks: BackgroundTasks
-):
-    """
-    启动爬虫任务
-    
-    Args:
-        params: 爬虫请求参数
-        background_tasks: FastAPI后台任务管理器
-        
-    Returns:
-        CrawlerResponse: 包含任务ID和状态的响应
-    """
+async def start_crawler(params: CrawlerRequest, background_tasks: BackgroundTasks):
+    """启动爬虫任务"""
     task_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # 初始化任务状态
@@ -231,18 +237,7 @@ async def start_crawler(
 
 @app.get("/api/status/{task_id}", response_model=CrawlerResult)
 async def get_task_status(task_id: str):
-    """
-    获取任务状态
-    
-    Args:
-        task_id: 任务ID
-        
-    Returns:
-        CrawlerResult: 任务执行结果
-        
-    Raises:
-        HTTPException: 当任务不存在或执行失败时抛出
-    """
+    """获取任务状态"""
     if task_id not in tasks_status:
         raise HTTPException(status_code=404, detail="Task not found")
         
@@ -265,18 +260,7 @@ async def get_task_status(task_id: str):
 
 @app.get("/api/download/{task_id}")
 async def download_results(task_id: str):
-    """
-    下载爬虫结果
-    
-    Args:
-        task_id: 任务ID
-        
-    Returns:
-        FileResponse: 结果文件的响应
-        
-    Raises:
-        HTTPException: 当任务不存在、未完成或结果文件不存在时抛出
-    """
+    """下载爬虫结果"""
     if task_id not in tasks_status:
         raise HTTPException(status_code=404, detail="Task not found")
         
@@ -294,79 +278,72 @@ async def download_results(task_id: str):
         media_type="application/octet-stream"
     )
 
-# 新增产品API相关端点
-@app.post("/api/products", response_model=List[ProductInfo])
-async def get_products(request: ProductRequest):
-    """获取商品信息"""
+# 商品管理相关API
+@app.get("/api/products/discount", response_model=List[ProductInfo])
+async def list_discount_products(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    sort_by: Optional[str] = Query(None, description="排序字段"),
+    sort_order: str = Query("desc", description="排序方向"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品")
+):
+    """获取折扣商品列表"""
     try:
-        api = get_product_api(request.marketplace)
-        products = api.get_products_by_asins(request.asins)
-        
+        products = ProductService.list_discount_products(
+            db=db,
+            page=page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_prime_only=is_prime_only
+        )
         if not products:
-            raise HTTPException(
-                status_code=404,
-                detail="未找到商品信息"
-            )
-            
+            return []
         return products
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取商品信息时出错: {str(e)}")
+        logger.error(f"获取折扣商品列表失败: {str(e)}")
+        return []
 
-@app.post("/api/products/save")
-async def save_products(request: ProductRequest, output_file: str):
-    """获取并保存商品信息到文件"""
+@app.get("/api/products/coupon", response_model=List[ProductInfo])
+async def list_coupon_products(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    sort_by: Optional[str] = Query(None, description="排序字段"),
+    sort_order: str = Query("desc", description="排序方向"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    coupon_type: Optional[str] = Query(None, description="优惠券类型：percentage/fixed")
+):
+    """获取优惠券商品列表"""
     try:
-        api = get_product_api(request.marketplace)
-        products = api.get_products_by_asins(request.asins)
-        
+        products = ProductService.list_coupon_products(
+            db=db,
+            page=page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_prime_only=is_prime_only,
+            coupon_type=coupon_type
+        )
         if not products:
-            raise HTTPException(
-                status_code=404,
-                detail="未找到商品信息"
-            )
-        
-        api.save_products_info(products, output_file)
-        return {"status": "success", "message": f"商品信息已保存到: {output_file}"}
-        
+            return []
+        return products
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/health")
-async def health_check():
-    """健康检查端点"""
-    return {
-        "status": "healthy",
-        "service": "amazon-data-api",
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/api/cache/stats")
-async def get_cache_stats():
-    """获取缓存统计信息"""
-    try:
-        api = get_product_api()
-        return api.cache_manager.get_cache_stats()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取缓存统计信息失败: {str(e)}"
-        )
-
-@app.post("/api/cache/clear")
-async def clear_cache():
-    """清理过期缓存"""
-    try:
-        api = get_product_api()
-        api.cache_manager.clear_expired()
-        return {"status": "success", "message": "过期缓存已清理"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"清理缓存失败: {str(e)}"
-        )
+        logger.error(f"获取优惠券商品列表失败: {str(e)}")
+        return []
 
 @app.get("/api/products/list", response_model=List[ProductInfo])
 async def list_products(
@@ -395,47 +372,78 @@ async def list_products(
             is_prime_only=is_prime_only,
             product_type=product_type
         )
+        if not products:
+            return []
         return products
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"获取商品列表失败: {str(e)}")
+        return []
 
-@app.get("/api/products/stats")
-async def get_products_stats(db: Session = Depends(get_db)):
-    """
-    获取产品数据统计信息
-    """
+@app.post("/api/products/batch-delete")
+async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depends(get_db)):
+    """批量删除商品"""
     try:
-        stats = ProductService.get_stats(db)
-        return {
-            "total_products": stats["total_products"],
-            "avg_price": stats["avg_price"],
-            "avg_discount": stats["avg_discount"],
-            "prime_products": stats["prime_products"],
-            "last_update": stats["last_update"],
-            "price_range": {
-                "min": stats["min_price"],
-                "max": stats["max_price"]
+        result = ProductService.batch_delete_products(db, request.asins)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"批量删除完成",
+                "success_count": result["success_count"],
+                "fail_count": result["fail_count"]
             },
-            "discount_range": {
-                "min": stats["min_discount"],
-                "max": stats["max_discount"]
-            }
-        }
+            status_code=200
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"获取统计信息失败: {str(e)}"
+            detail=f"批量删除失败: {str(e)}"
         )
 
+@app.post("/api/products/save")
+async def save_products(request: ProductRequest, output_file: str):
+    """保存商品信息到文件"""
+    try:
+        api = get_product_api(request.marketplace)
+        products = api.get_products_by_asins(request.asins)
+        
+        if not products:
+            raise HTTPException(
+                status_code=404,
+                detail="未找到商品信息"
+            )
+        
+        api.save_products_info(products, output_file)
+        return {"status": "success", "message": f"商品信息已保存到: {output_file}"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/products", response_model=List[ProductInfo])
+async def get_products(request: ProductRequest):
+    """批量获取商品信息"""
+    try:
+        api = get_product_api(request.marketplace)
+        products = api.get_products_by_asins(request.asins)
+        
+        if not products:
+            raise HTTPException(
+                status_code=404,
+                detail="未找到商品信息"
+            )
+            
+        return products
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取商品信息时出错: {str(e)}")
 
 @app.get("/api/products/{asin}", response_model=ProductInfo)
 async def get_product(
     asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
     db: Session = Depends(get_db)
 ):
-    """
-    根据ASIN获取单个产品详情
-    """
+    """获取单个商品详情"""
     try:
         product = ProductService.get_product_by_asin(db, asin)
         if not product:
@@ -452,7 +460,68 @@ async def get_product(
             detail=f"获取产品信息失败: {str(e)}"
         )
 
-# 调度器相关端点
+# 缓存管理相关API
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """获取缓存统计信息"""
+    try:
+        # 获取API实例
+        api = get_product_api()
+        
+        # 获取原始缓存统计信息
+        raw_stats = api.cache_manager.get_stats()
+        
+        # 格式化统计信息
+        formatted_stats = {
+            # 将字节转换为MB，保留2位小数
+            "total_size_mb": round(raw_stats["total_size"] / (1024 * 1024), 2),
+            "total_files": raw_stats["total_files"],
+            "by_type": {},
+            "last_cleanup": raw_stats["last_cleanup"],
+            "status": "healthy"  # 默认状态
+        }
+        
+        # 格式化各类型的统计信息
+        for cache_type, type_stats in raw_stats["by_type"].items():
+            formatted_stats["by_type"][cache_type] = {
+                "size_mb": round(type_stats["size"] / (1024 * 1024), 2),
+                "count": type_stats["count"]
+            }
+            
+        # 添加额外的状态信息
+        formatted_stats["status_details"] = {
+            "is_cleanup_running": True,  # 清理线程状态
+            "cache_types": list(formatted_stats["by_type"].keys()),
+            "cache_health": "good" if formatted_stats["total_files"] > 0 else "empty"
+        }
+        
+        return formatted_stats
+        
+    except Exception as e:
+        # 如果发生错误，返回带有错误信息的500响应
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "获取缓存统计信息失败",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """清理过期缓存"""
+    try:
+        api = get_product_api()
+        api.cache_manager.clear_expired()
+        return {"status": "success", "message": "过期缓存已清理"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清理缓存失败: {str(e)}"
+        )
+
+# 调度器相关API
 @app.post("/api/scheduler/jobs")
 async def add_job(job_config: JobConfig):
     """添加新的定时任务"""
@@ -623,43 +692,6 @@ async def startup_event():
     # 确保数据库表已创建
     init_db()
     print("数据库初始化完成")
-
-# 在现有代码中添加新的端点
-
-class BatchDeleteRequest(BaseModel):
-    """批量删除请求模型"""
-    asins: List[str] = Field(..., description="要删除的商品ASIN列表")
-
-@app.post("/api/products/batch-delete")
-async def batch_delete_products(
-    request: BatchDeleteRequest,
-    db: Session = Depends(get_db)
-):
-    """批量删除商品
-    
-    Args:
-        request: 包含要删除的商品ASIN列表的请求体
-        db: 数据库会话
-        
-    Returns:
-        Dict: 删除操作的结果
-    """
-    try:
-        result = ProductService.batch_delete_products(db, request.asins)
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": f"批量删除完成",
-                "success_count": result["success_count"],
-                "fail_count": result["fail_count"]
-            },
-            status_code=200
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"批量删除失败: {str(e)}"
-        )
 
 if __name__ == "__main__":
     """
