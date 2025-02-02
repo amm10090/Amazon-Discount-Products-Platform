@@ -42,10 +42,26 @@ st.markdown(f"""
         color: #B12704;
         font-size: 1.2em;
         font-weight: bold;
+        margin-bottom: 8px;
+    }}
+    .original-price {{
+        color: #666;
+        text-decoration: line-through;
+        font-size: 0.9em;
+    }}
+    .current-price {{
+        color: #B12704;
+        font-size: 1.3em;
+        font-weight: bold;
     }}
     .discount-tag {{
         color: #067D62;
         font-weight: bold;
+        background-color: #E3F4F4;
+        padding: 4px 8px;
+        border-radius: 4px;
+        display: inline-block;
+        margin-top: 4px;
     }}
     .prime-tag {{
         color: #00A8E1;
@@ -386,37 +402,51 @@ def display_products(
                 with price_col:
                     try:
                         # 获取价格信息
-                        price = None
-                        original_price = None
-                        currency = "USD"
-                        
-                        # 从offers中获取价格信息
                         if isinstance(product.get("offers"), list) and len(product["offers"]) > 0:
                             offer = product["offers"][0]
-                            price = float(offer.get("price", 0))
-                            # 如果有优惠券，计算原价
-                            if offer.get("coupon_type") == "percentage" and offer.get("coupon_value"):
-                                original_price = price / (1 - float(offer["coupon_value"]) / 100)
-                            elif offer.get("coupon_type") == "fixed" and offer.get("coupon_value"):
-                                original_price = price + float(offer["coupon_value"])
-                            else:
-                                original_price = price
+                            price = offer.get("price")
+                            savings = offer.get("savings")
+                            savings_percentage = offer.get("savings_percentage")
                             currency = offer.get("currency", "USD")
-                        
-                        if price and price > 0:
-                            if original_price and original_price > price:
-                                st.markdown(
-                                    f'<p class="price-tag">'
-                                    f'<span style="text-decoration: line-through; color: #666;">${original_price:.2f}</span><br/>'
-                                    f'<span style="color: #B12704; font-size: 1.2em;">${price:.2f}</span> {currency}'
-                                    f'</p>',
-                                    unsafe_allow_html=True
-                                )
+                            
+                            if price is not None and price != "":
+                                try:
+                                    price = float(price)
+                                    savings = float(savings) if savings is not None else 0
+                                    savings_percentage = float(savings_percentage) if savings_percentage is not None else 0
+                                    
+                                    # 计算原价
+                                    original_price = price + savings if savings > 0 else price
+                                    
+                                    # 显示价格信息
+                                    if savings > 0 and savings_percentage > 0:
+                                        st.markdown(
+                                            f'''
+                                            <div class="price-tag">
+                                                <div class="original-price">${original_price:.2f} {currency}</div>
+                                                <div class="current-price">${price:.2f} {currency}</div>
+                                                <div class="discount-tag">-{savings_percentage:.0f}% OFF</div>
+                                            </div>
+                                            ''',
+                                            unsafe_allow_html=True
+                                        )
+                                    else:
+                                        st.markdown(
+                                            f'''
+                                            <div class="price-tag">
+                                                <div class="current-price">${price:.2f} {currency}</div>
+                                            </div>
+                                            ''',
+                                            unsafe_allow_html=True
+                                        )
+                                except (ValueError, TypeError):
+                                    st.markdown(
+                                        f'<p class="price-tag">{get_text("price_unavailable")}</p>',
+                                        unsafe_allow_html=True
+                                    )
                             else:
                                 st.markdown(
-                                    f'<p class="price-tag">'
-                                    f'<span style="color: #B12704; font-size: 1.2em;">${price:.2f}</span> {currency}'
-                                    f'</p>',
+                                    f'<p class="price-tag">{get_text("price_unavailable")}</p>',
                                     unsafe_allow_html=True
                                 )
                         else:
@@ -424,7 +454,7 @@ def display_products(
                                 f'<p class="price-tag">{get_text("price_unavailable")}</p>',
                                 unsafe_allow_html=True
                             )
-                    except (ValueError, TypeError, AttributeError) as e:
+                    except Exception as e:
                         st.markdown(
                             f'<p class="price-tag">{get_text("price_unavailable")}</p>',
                             unsafe_allow_html=True
@@ -501,7 +531,7 @@ def display_products(
                 
                 # 删除按钮
                 if st.button(
-                    f"🗑️ {get_text('delete')}",
+                    f"��️ {get_text('delete')}",
                     key=f"delete_{product['asin']}_{key_suffix}",
                     type="secondary"
                 ):
