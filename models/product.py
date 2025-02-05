@@ -10,6 +10,8 @@ class ProductOffer(BaseModel):
     savings: Optional[float] = None
     savings_percentage: Optional[int] = None
     is_prime: bool = False
+    is_amazon_fulfilled: bool = False  # 是否由亚马逊配送
+    is_free_shipping_eligible: bool = False  # 是否符合免运费资格
     availability: str
     merchant_name: str
     is_buybox_winner: bool = False

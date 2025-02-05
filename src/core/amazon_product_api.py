@@ -52,7 +52,6 @@ class AmazonProductAPI:
         region: AWS区域
         service: 服务名称
         cache_manager: 缓存管理器实例
-        _session: aiohttp会话对象
     """
     
     def __init__(self, access_key: str, secret_key: str, partner_tag: str, marketplace: str = "www.amazon.com", config_path: str = "config/cache_config.yaml"):
@@ -74,57 +73,27 @@ class AmazonProductAPI:
         self.region = "us-east-1"
         self.service = "ProductAdvertisingAPI"
         self.cache_manager = CacheManager(config_path)
-        self._session = None
         
     async def __aenter__(self):
         """
         异步上下文管理器入口
         
-        用于在异步with语句中初始化会话
-        
         Returns:
             self: 当前实例
         """
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """
         异步上下文管理器退出
         
-        用于在异步with语句结束时清理资源
-        
         Args:
             exc_type: 异常类型
             exc_val: 异常值
             exc_tb: 异常回溯
         """
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
-            
-    async def close(self):
-        """
-        手动关闭会话
-        
-        当不使用上下文管理器时，用于手动关闭aiohttp会话
-        """
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
-            
-    def _get_session(self) -> aiohttp.ClientSession:
-        """
-        获取当前会话或创建新会话
-        
-        Returns:
-            aiohttp.ClientSession: 当前活动的会话对象
-        """
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
-    
+        pass  # 不再需要关闭session，因为每个请求都会创建和关闭自己的session
+
     def _sign(self, key: bytes, msg: str) -> bytes:
         """
         计算HMAC-SHA256签名
@@ -215,9 +184,13 @@ class AmazonProductAPI:
             
             # 获取Prime资格信息
             is_prime = False
-            if 'ProgramEligibility' in listing:
-                program = listing['ProgramEligibility']
-                is_prime = program.get('IsPrimeEligible', False)
+            is_amazon_fulfilled = False
+            is_free_shipping_eligible = False
+            if 'DeliveryInfo' in listing:
+                delivery_info = listing['DeliveryInfo']
+                is_prime = delivery_info.get('IsPrimeEligible', False)
+                is_amazon_fulfilled = delivery_info.get('IsAmazonFulfilled', False)
+                is_free_shipping_eligible = delivery_info.get('IsFreeShippingEligible', False)
             
             # 创建优惠对象
             product_offer = ProductOffer(
@@ -227,6 +200,8 @@ class AmazonProductAPI:
                 savings=savings_amount,
                 savings_percentage=savings_percentage,
                 is_prime=is_prime,
+                is_amazon_fulfilled=is_amazon_fulfilled,
+                is_free_shipping_eligible=is_free_shipping_eligible,
                 availability=listing.get('Availability', {}).get('Message', 'Unknown'),
                 merchant_name=listing.get('MerchantInfo', {}).get('Name', 'Amazon'),
                 is_buybox_winner=listing.get('IsBuyBoxWinner', False),
@@ -286,6 +261,7 @@ class AmazonProductAPI:
             return products
             
         logger.info(f"开始从API获取未缓存商品: ASINs={uncached_asins}")
+        session = None
         try:
             # 准备请求数据
             payload = {
@@ -365,10 +341,8 @@ class AmazonProductAPI:
             # 发送异步请求
             url = f'https://{self.host}{canonical_uri}'
             
-            if not self._session:
-                self._session = aiohttp.ClientSession()
-                
-            async with self._session.post(url, headers=headers, data=payload_json) as response:
+            session = aiohttp.ClientSession()
+            async with session.post(url, headers=headers, data=payload_json) as response:
                 response.raise_for_status()
                 response_data = await response.json()
             
@@ -449,6 +423,10 @@ class AmazonProductAPI:
         except Exception as e:
             logger.error(f"获取商品信息时出错: {str(e)}")
             raise
+        finally:
+            # 确保session被关闭
+            if session:
+                await session.close()
             
         return products
 
