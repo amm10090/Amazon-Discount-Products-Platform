@@ -36,8 +36,11 @@ class CacheManager:
         Args:
             config_path: 配置文件路径
         """
+        # 获取项目根目录
+        self.root_dir = Path(__file__).parent.parent.parent
         self.config = self._load_config(config_path)
-        self.base_dir = Path(self.config["cache"]["base_dir"])
+        # 使用项目根目录作为基准
+        self.base_dir = self.root_dir / self.config["cache"]["base_dir"]
         self._ensure_cache_dirs()
         self._cleanup_thread = None
         self._start_cleanup_thread()
@@ -53,7 +56,11 @@ class CacheManager:
             Dict: 配置信息
         """
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
+            # 使用项目根目录拼接配置文件路径
+            full_config_path = self.root_dir / config_path
+            logger.info(f"尝试加载配置文件: {full_config_path}")
+            
+            with open(full_config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except Exception as e:
             logger.error(f"加载配置文件失败: {str(e)}")

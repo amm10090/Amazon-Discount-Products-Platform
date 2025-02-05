@@ -42,6 +42,10 @@ class ProductInfo(BaseModel):
     offers: List[ProductOffer] = []
     timestamp: datetime
     coupon_info: Optional[Dict] = None
+    binding: Optional[str] = None  # 商品绑定类型
+    product_group: Optional[str] = None  # 商品分组
+    categories: Optional[List[str]] = []  # 商品类别列表
+    browse_nodes: Optional[List[Dict]] = []  # 商品浏览节点信息
     
     class Config:
         json_encoders = {

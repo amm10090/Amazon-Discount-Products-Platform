@@ -60,6 +60,12 @@ class Product(Base):
     merchant_name = Column(String(200))
     is_buybox_winner = Column(Boolean)
     
+    # 分类信息
+    binding = Column(String(100))  # 商品绑定类型
+    product_group = Column(String(100))  # 商品分组
+    categories = Column(JSON)  # 商品类别列表
+    browse_nodes = Column(JSON)  # 商品浏览节点信息
+    
     # 其他信息
     deal_type = Column(String(50))
     features = Column(JSON)  # 存储商品特性列表

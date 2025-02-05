@@ -318,6 +318,11 @@ class AmazonProductAPI:
                     "ItemInfo.Title",
                     "ItemInfo.ByLineInfo",
                     "ItemInfo.Features",
+                    # 分类信息
+                    "ItemInfo.Classifications",
+                    "ItemInfo.ProductInfo",
+                    "BrowseNodeInfo.BrowseNodes",
+                    "BrowseNodeInfo.WebsiteSalesRank",
                     # 图片信息
                     "Images.Primary.Small",
                     "Images.Primary.Medium",
@@ -381,6 +386,37 @@ class AmazonProductAPI:
                             'Brand' in item['ItemInfo']['ByLineInfo']):
                             brand = item['ItemInfo']['ByLineInfo']['Brand'].get('DisplayValue')
                         
+                        # 提取分类信息
+                        binding = None
+                        product_group = None
+                        categories = []
+                        browse_nodes = []
+                        
+                        if 'ItemInfo' in item:
+                            # 获取绑定类型
+                            if 'Classifications' in item['ItemInfo']:
+                                binding = item['ItemInfo']['Classifications'].get('Binding', {}).get('DisplayValue')
+                                product_group = item['ItemInfo']['Classifications'].get('ProductGroup', {}).get('DisplayValue')
+                        
+                        # 获取浏览节点信息
+                        if 'BrowseNodeInfo' in item and 'BrowseNodes' in item['BrowseNodeInfo']:
+                            for node in item['BrowseNodeInfo']['BrowseNodes']:
+                                # 添加类别路径
+                                if 'Ancestor' in node:
+                                    category_path = []
+                                    for ancestor in node['Ancestor']:
+                                        if 'ContextFreeName' in ancestor:
+                                            category_path.append(ancestor['ContextFreeName'])
+                                    if category_path:
+                                        categories.append(' > '.join(category_path))
+                                
+                                # 添加浏览节点信息
+                                browse_nodes.append({
+                                    'id': node.get('Id'),
+                                    'name': node.get('ContextFreeName'),
+                                    'is_root': node.get('IsRoot', False)
+                                })
+                        
                         # 创建商品信息对象
                         product = ProductInfo(
                             asin=item['ASIN'],
@@ -389,7 +425,11 @@ class AmazonProductAPI:
                             brand=brand,
                             main_image=main_image,
                             offers=offers,
-                            timestamp=datetime.utcnow()
+                            timestamp=datetime.utcnow(),
+                            binding=binding,
+                            product_group=product_group,
+                            categories=categories,
+                            browse_nodes=browse_nodes
                         )
                         
                         # 缓存商品信息

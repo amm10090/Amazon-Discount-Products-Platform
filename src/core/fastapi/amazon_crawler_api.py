@@ -404,7 +404,8 @@ async def save_products(request: ProductRequest, output_file: str):
     """保存商品信息到文件"""
     try:
         api = get_product_api(request.marketplace)
-        products = api.get_products_by_asins(request.asins)
+        # 使用await调用异步方法
+        products = await api.get_products_by_asins(request.asins)
         
         if not products:
             raise HTTPException(
@@ -412,10 +413,12 @@ async def save_products(request: ProductRequest, output_file: str):
                 detail="未找到商品信息"
             )
         
-        api.save_products_info(products, output_file)
+        # 使用await调用异步方法
+        await api.save_products_info(products, output_file)
         return {"status": "success", "message": f"商品信息已保存到: {output_file}"}
         
     except Exception as e:
+        logger.error(f"保存商品信息时出错: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/products", response_model=List[ProductInfo])
@@ -423,7 +426,8 @@ async def get_products(request: ProductRequest):
     """批量获取商品信息"""
     try:
         api = get_product_api(request.marketplace)
-        products = api.get_products_by_asins(request.asins)
+        # 使用await调用异步方法
+        products = await api.get_products_by_asins(request.asins)
         
         if not products:
             raise HTTPException(
@@ -436,6 +440,7 @@ async def get_products(request: ProductRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"获取商品信息时出错: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取商品信息时出错: {str(e)}")
 
 @app.get("/api/products/{asin}", response_model=ProductInfo)
