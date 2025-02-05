@@ -245,6 +245,29 @@ with st.sidebar:
         key="sort_by"
     )
     
+    # 解析排序参数
+    sort_field = None
+    sort_direction = "desc"
+    if sort_by:
+        if sort_by == "price_asc":
+            sort_field = "current_price"
+            sort_direction = "asc"
+        elif sort_by == "price_desc":
+            sort_field = "current_price"
+            sort_direction = "desc"
+        elif sort_by == "discount_asc":
+            sort_field = "savings_percentage"
+            sort_direction = "asc"
+        elif sort_by == "discount_desc":
+            sort_field = "savings_percentage"
+            sort_direction = "desc"
+        elif sort_by == "time_asc":
+            sort_field = "timestamp"
+            sort_direction = "asc"
+        elif sort_by == "time_desc":
+            sort_field = "timestamp"
+            sort_direction = "desc"
+    
     # 每页显示数量
     page_size = st.selectbox(
         get_text("items_per_page"),
@@ -273,6 +296,7 @@ def load_products(
     min_discount: int,
     prime_only: bool,
     sort_by: str,
+    sort_order: str,
     coupon_type: Optional[str] = None
 ) -> List[Dict]:
     """加载商品数据
@@ -287,6 +311,7 @@ def load_products(
         min_discount: 最低折扣率
         prime_only: 是否只显示Prime商品
         sort_by: 排序方式
+        sort_order: 排序顺序
         coupon_type: 优惠券类型
         
     Returns:
@@ -301,7 +326,8 @@ def load_products(
             "max_price": max_price if max_price > 0 else None,
             "min_discount": min_discount if min_discount > 0 else None,
             "is_prime_only": prime_only,
-            "sort_by": sort_by
+            "sort_by": sort_by,
+            "sort_order": sort_order
         }
         
         # 根据商品类型选择不同的API端点
@@ -531,7 +557,7 @@ def display_products(
                 
                 # 删除按钮
                 if st.button(
-                    f"��️ {get_text('delete')}",
+                    f"🗑️ {get_text('delete')}",
                     key=f"delete_{product['asin']}_{key_suffix}",
                     type="secondary"
                 ):
@@ -734,7 +760,8 @@ with tab_discount:
         max_price=price_range[1],
         min_discount=min_discount,
         prime_only=prime_only,
-        sort_by=sort_by
+        sort_by=sort_field,
+        sort_order=sort_direction
     )
     
     # 显示折扣商品
@@ -772,7 +799,8 @@ with tab_coupon:
         max_price=price_range[1],
         min_discount=min_discount,
         prime_only=prime_only,
-        sort_by=sort_by
+        sort_by=sort_field,
+        sort_order=sort_direction
     )
     
     # 显示优惠券商品
