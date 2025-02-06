@@ -190,7 +190,8 @@ async def crawl_bestseller_products(
                             db, 
                             products,
                             source="bestseller",  # 数据来源渠道
-                            api_provider="pa-api"  # API提供者
+                            api_provider="pa-api",  # API提供者
+                            include_metadata=True  # 包含元数据（分类信息等）
                         )
                         total_success += len(saved_products)
                         log_success(f"成功保存 {len(saved_products)} 个产品信息")
@@ -259,7 +260,8 @@ async def crawl_coupon_products(
                             products,
                             include_coupon=True,
                             source="coupon",  # 数据来源渠道
-                            api_provider="pa-api"  # API提供者
+                            api_provider="pa-api",  # API提供者
+                            include_metadata=True  # 包含元数据（分类信息等）
                         )
                         total_success += len(saved_products)
                         log_success(f"成功保存 {len(saved_products)} 个优惠券商品信息")

@@ -30,7 +30,7 @@ from ..amazon_bestseller import crawl_deals, save_results
 import os
 from fastapi.responses import FileResponse, JSONResponse
 from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
-from models.product import ProductInfo
+from models.product import ProductInfo, ProductOffer
 from pydantic import BaseModel, Field
 from ..amazon_product_api import AmazonProductAPI
 from dotenv import load_dotenv
@@ -108,6 +108,13 @@ class SortOrder(str, Enum):
     """
     asc = "asc"
     desc = "desc"
+
+class CategoryStats(BaseModel):
+    """类别统计响应模型"""
+    main_categories: Dict[str, int]
+    sub_categories: Dict[str, int]
+    bindings: Dict[str, int]
+    product_groups: Dict[str, int]
 
 def get_db():
     """
@@ -279,7 +286,7 @@ async def download_results(task_id: str):
     )
 
 # 商品管理相关API
-@app.get("/api/products/discount", response_model=List[ProductInfo])
+@app.get("/api/products/discount")
 async def list_discount_products(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1, description="页码"),
@@ -304,14 +311,12 @@ async def list_discount_products(
             sort_order=sort_order,
             is_prime_only=is_prime_only
         )
-        if not products:
-            return []
-        return products
+        return products if products else []
     except Exception as e:
         logger.error(f"获取折扣商品列表失败: {str(e)}")
         return []
 
-@app.get("/api/products/coupon", response_model=List[ProductInfo])
+@app.get("/api/products/coupon")
 async def list_coupon_products(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1, description="页码"),
@@ -338,14 +343,12 @@ async def list_coupon_products(
             is_prime_only=is_prime_only,
             coupon_type=coupon_type
         )
-        if not products:
-            return []
-        return products
+        return products if products else []
     except Exception as e:
         logger.error(f"获取优惠券商品列表失败: {str(e)}")
         return []
 
-@app.get("/api/products/list", response_model=List[ProductInfo])
+@app.get("/api/products/list")
 async def list_products(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1, description="页码"),
@@ -356,25 +359,58 @@ async def list_products(
     sort_by: Optional[str] = Query(None, description="排序字段"),
     sort_order: str = Query("desc", description="排序方向"),
     is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
-    product_type: str = Query("all", description="商品类型：discount/coupon/all")
+    product_type: str = Query("all", description="商品类型：discount/coupon/all"),
+    main_categories: Optional[List[str]] = Query(None, description="主要类别筛选列表"),
+    sub_categories: Optional[List[str]] = Query(None, description="子类别筛选列表"),
+    bindings: Optional[List[str]] = Query(None, description="商品绑定类型筛选列表"),
+    product_groups: Optional[List[str]] = Query(None, description="商品组筛选列表"),
+    coupon_type: Optional[str] = Query(None, description="优惠券类型：percentage/fixed")
 ):
     """获取商品列表，支持分页、筛选和排序"""
     try:
-        products = ProductService.list_products(
-            db=db,
-            page=page,
-            page_size=page_size,
-            min_price=min_price,
-            max_price=max_price,
-            min_discount=min_discount,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            is_prime_only=is_prime_only,
-            product_type=product_type
-        )
-        if not products:
-            return []
-        return products
+        # 根据product_type调用不同的服务方法
+        if product_type == "discount":
+            products = ProductService.list_discount_products(
+                db=db,
+                page=page,
+                page_size=page_size,
+                min_price=min_price,
+                max_price=max_price,
+                min_discount=min_discount,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                is_prime_only=is_prime_only
+            )
+        elif product_type == "coupon":
+            products = ProductService.list_coupon_products(
+                db=db,
+                page=page,
+                page_size=page_size,
+                min_price=min_price,
+                max_price=max_price,
+                min_discount=min_discount,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                is_prime_only=is_prime_only,
+                coupon_type=coupon_type
+            )
+        else:
+            products = ProductService.list_products(
+                db=db,
+                page=page,
+                page_size=page_size,
+                min_price=min_price,
+                max_price=max_price,
+                min_discount=min_discount,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                is_prime_only=is_prime_only,
+                main_categories=main_categories,
+                sub_categories=sub_categories,
+                bindings=bindings,
+                product_groups=product_groups
+            )
+        return products if products else []
     except Exception as e:
         logger.error(f"获取商品列表失败: {str(e)}")
         return []
@@ -689,6 +725,18 @@ async def execute_job_now(job_id: str):
         raise HTTPException(
             status_code=500,
             detail=str(e)
+        )
+
+@app.get("/api/categories/stats", response_model=CategoryStats)
+async def get_category_stats(db: Session = Depends(get_db)):
+    """获取类别统计信息"""
+    try:
+        stats = ProductService.get_category_stats(db)
+        return CategoryStats(**stats)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取类别统计信息失败: {str(e)}"
         )
 
 @app.on_event("startup")

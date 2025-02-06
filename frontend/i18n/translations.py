@@ -230,6 +230,15 @@ TRANSLATIONS = {
         "loading_failed": "加载数据失败",
         "size": "大小",
         "files": "文件数",
+        
+        # 商品分类相关
+        "product_category": "商品分类",
+        "product_binding": "商品类型",
+        "product_group": "商品分组",
+        "categories": "分类",
+        "browse_nodes": "浏览节点",
+        "category_path": "分类路径",
+        "category_breadcrumb": "分类导航",
     },
     
     "en": {
@@ -459,5 +468,14 @@ TRANSLATIONS = {
         "loading_failed": "Failed to load data",
         "size": "Size",
         "files": "Files",
+        
+        # 商品分类相关
+        "product_category": "Product Category",
+        "product_binding": "Product Type",
+        "product_group": "Product Group",
+        "categories": "Categories",
+        "browse_nodes": "Browse Nodes",
+        "category_path": "Category Path",
+        "category_breadcrumb": "Category Navigation",
     }
 } 

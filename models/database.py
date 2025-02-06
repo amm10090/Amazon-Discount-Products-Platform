@@ -111,8 +111,10 @@ class Offer(Base):
     merchant_name = Column(String(200))
     is_buybox_winner = Column(Boolean, default=False)
     
-    # Prime信息
+    # Prime和配送信息
     is_prime = Column(Boolean, default=False)
+    is_amazon_fulfilled = Column(Boolean, default=False)  # 是否由亚马逊配送
+    is_free_shipping_eligible = Column(Boolean, default=False)  # 是否符合免运费资格
     deal_type = Column(String(50))
     
     # 关联商品

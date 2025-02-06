@@ -1,5 +1,7 @@
 from typing import List, Optional, Dict, Any
 import logging
+import os
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey, or_, cast
 
 # 配置logger
 logger = logging.getLogger(__name__)
@@ -162,7 +164,8 @@ class ProductService:
         products: List[ProductInfo], 
         include_coupon: bool = False,
         source: Optional[str] = None,  # 数据来源渠道：bestseller/coupon
-        api_provider: str = "pa-api"  # API提供者
+        api_provider: str = "pa-api",  # API提供者
+        include_metadata: bool = False  # 是否包含元数据（分类信息等）
     ) -> List[ProductInfo]:
         """
         批量创建或更新产品信息
@@ -173,6 +176,7 @@ class ProductService:
             include_coupon: 是否包含优惠券信息
             source: 数据来源渠道（bestseller/coupon）
             api_provider: API提供者（pa-api等）
+            include_metadata: 是否包含元数据（分类信息等）
         """
         saved_products = []
         current_time = datetime.utcnow()
@@ -224,6 +228,14 @@ class ProductService:
                     api_provider=api_provider,
                     raw_data=product_info.dict()
                 )
+                
+                # 添加分类相关信息
+                if include_metadata:
+                    product.binding = product_info.binding
+                    product.product_group = product_info.product_group
+                    product.categories = product_info.categories
+                    product.browse_nodes = product_info.browse_nodes
+                    
                 db.add(product)
             else:
                 # 更新现有产品
@@ -250,6 +262,13 @@ class ProductService:
                     product.is_buybox_winner = best_offer.is_buybox_winner
                     product.deal_type = best_offer.deal_type
                 
+                # 更新分类相关信息
+                if include_metadata:
+                    product.binding = product_info.binding
+                    product.product_group = product_info.product_group
+                    product.categories = product_info.categories
+                    product.browse_nodes = product_info.browse_nodes
+                
                 # 更新时间和元数据
                 product.updated_at = current_time
                 product.timestamp = current_time
@@ -271,6 +290,8 @@ class ProductService:
                     savings=offer_info.savings,
                     savings_percentage=offer_info.savings_percentage,
                     is_prime=offer_info.is_prime,
+                    is_amazon_fulfilled=offer_info.is_amazon_fulfilled,  # 新增：是否由亚马逊配送
+                    is_free_shipping_eligible=offer_info.is_free_shipping_eligible,  # 新增：是否符合免运费资格
                     availability=offer_info.availability,
                     merchant_name=offer_info.merchant_name,
                     is_buybox_winner=offer_info.is_buybox_winner,
@@ -304,6 +325,67 @@ class ProductService:
         return saved_products
 
     @staticmethod
+    def get_category_stats(db: Session) -> Dict[str, Any]:
+        """获取类别统计信息
+        
+        返回:
+            Dict[str, Any]: 包含以下信息:
+            - main_categories: 主要类别统计
+            - sub_categories: 子类别统计
+            - bindings: 商品绑定类型统计
+            - product_groups: 商品组统计
+        """
+        try:
+            # 获取所有商品的类别信息
+            products = db.query(Product).all()
+            
+            # 初始化统计字典
+            stats = {
+                "main_categories": {},  # 主要类别统计
+                "sub_categories": {},   # 子类别统计
+                "bindings": {},         # 商品绑定类型统计
+                "product_groups": {},   # 商品组统计
+            }
+            
+            for product in products:
+                # 处理categories (商品分类路径)
+                if product.categories:
+                    for category_path in product.categories:
+                        if isinstance(category_path, list) and len(category_path) > 0:
+                            # 主要类别统计
+                            main_category = category_path[0]
+                            stats["main_categories"][main_category] = stats["main_categories"].get(main_category, 0) + 1
+                            
+                            # 子类别统计
+                            if len(category_path) > 1:
+                                sub_category = category_path[1]
+                                parent_key = f"{main_category}:{sub_category}"
+                                stats["sub_categories"][parent_key] = stats["sub_categories"].get(parent_key, 0) + 1
+                
+                # 处理binding (商品绑定类型)
+                if product.binding:
+                    stats["bindings"][product.binding] = stats["bindings"].get(product.binding, 0) + 1
+                
+                # 处理product_group (商品组)
+                if product.product_group:
+                    stats["product_groups"][product.product_group] = stats["product_groups"].get(product.product_group, 0) + 1
+            
+            # 对每个统计结果按数量降序排序
+            for key in stats:
+                stats[key] = dict(sorted(stats[key].items(), key=lambda x: x[1], reverse=True))
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取类别统计信息失败: {str(e)}")
+            return {
+                "main_categories": {},
+                "sub_categories": {},
+                "bindings": {},
+                "product_groups": {}
+            }
+
+    @staticmethod
     def list_products(
         db: Session,
         page: int = 1,
@@ -314,14 +396,25 @@ class ProductService:
         sort_by: Optional[str] = None,
         sort_order: str = "desc",
         is_prime_only: bool = False,
-        product_type: str = "all"
+        product_type: str = "all",
+        main_categories: Optional[List[str]] = None,
+        sub_categories: Optional[List[str]] = None,
+        bindings: Optional[List[str]] = None,
+        product_groups: Optional[List[str]] = None
     ) -> List[ProductInfo]:
-        """获取产品列表，支持分页、价格范围、折扣率筛选和排序"""
+        """获取商品列表，支持分页、筛选和排序
+        
+        新增参数:
+            main_categories: 主要类别筛选列表
+            sub_categories: 子类别筛选列表
+            bindings: 商品绑定类型筛选列表
+            product_groups: 商品组筛选列表
+        """
         try:
             # 构建基础查询
             query = db.query(Product)
 
-            # 应用过滤条件
+            # 应用价格和折扣筛选
             if min_price is not None:
                 query = query.filter(Product.current_price >= min_price)
             if max_price is not None:
@@ -331,19 +424,42 @@ class ProductService:
             if is_prime_only:
                 query = query.filter(Product.is_prime == True)
 
-            # 根据商品类型过滤
+            # 根据商品类型筛选
             if product_type == "discount":
                 query = query.filter(Product.savings_percentage > 0)
             elif product_type == "coupon":
-                # 使用左连接查询优惠券商品
                 query = query.join(
                     CouponHistory,
                     Product.asin == CouponHistory.product_id,
-                    isouter=True  # 使用左连接
-                ).filter(CouponHistory.id.isnot(None))  # 确保有优惠券记录
-                
-                # 添加distinct避免重复
+                    isouter=True
+                ).filter(CouponHistory.id.isnot(None))
                 query = query.distinct(Product.asin)
+
+            # 应用类别筛选
+            if main_categories:
+                # 使用JSON操作符筛选主要类别
+                conditions = []
+                for category in main_categories:
+                    # 检查categories数组中是否存在以指定主类别开头的路径
+                    conditions.append(Product.categories.cast(String).like(f'%["{category}"%'))
+                if conditions:
+                    query = query.filter(or_(*conditions))
+
+            if sub_categories:
+                # 使用JSON操作符筛选子类别
+                conditions = []
+                for category_path in sub_categories:
+                    main_cat, sub_cat = category_path.split(":")
+                    # 检查categories数组中是否存在指定的类别路径
+                    conditions.append(Product.categories.cast(String).like(f'%["{main_cat}", "{sub_cat}"%'))
+                if conditions:
+                    query = query.filter(or_(*conditions))
+
+            if bindings:
+                query = query.filter(Product.binding.in_(bindings))
+
+            if product_groups:
+                query = query.filter(Product.product_group.in_(product_groups))
 
             # 应用排序
             if sort_by:
@@ -353,7 +469,6 @@ class ProductService:
                 else:
                     query = query.order_by(asc(sort_column))
             else:
-                # 默认按更新时间倒序排序
                 query = query.order_by(desc(Product.timestamp))
 
             # 应用分页
@@ -378,6 +493,11 @@ class ProductService:
                         brand=product.brand,
                         main_image=product.main_image,
                         timestamp=product.timestamp or datetime.utcnow(),
+                        # 添加分类相关信息
+                        binding=product.binding,
+                        product_group=product.product_group,
+                        categories=product.categories,
+                        browse_nodes=product.browse_nodes,
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -397,12 +517,14 @@ class ProductService:
                     )
                     result.append(product_info)
                 except Exception as e:
+                    logger.error(f"处理商品 {product.asin} 时出错: {str(e)}")
                     continue
 
             return result
 
         except Exception as e:
-            raise e
+            logger.error(f"获取商品列表失败: {str(e)}")
+            return []
 
     @staticmethod
     def get_stats(db: Session) -> Dict[str, Any]:
@@ -505,23 +627,7 @@ class ProductService:
         is_prime_only: bool = False,
         coupon_type: Optional[str] = None
     ) -> List[ProductInfo]:
-        """获取优惠券商品列表
-        
-        Args:
-            db: 数据库会话
-            page: 页码
-            page_size: 每页数量
-            min_price: 最低价格
-            max_price: 最高价格
-            min_discount: 最低折扣率
-            sort_by: 排序字段
-            sort_order: 排序方向
-            is_prime_only: 是否只显示Prime商品
-            coupon_type: 优惠券类型（percentage/fixed）
-            
-        Returns:
-            List[ProductInfo]: 商品信息列表
-        """
+        """获取优惠券商品列表"""
         try:
             # 构建基础查询
             query = db.query(Product).distinct(Product.asin)
@@ -576,6 +682,11 @@ class ProductService:
                     brand=product.brand,
                     main_image=product.main_image,
                     timestamp=product.timestamp or datetime.utcnow(),
+                    # 添加分类相关信息
+                    binding=product.binding or None,
+                    product_group=product.product_group or None,
+                    categories=product.categories or [],
+                    browse_nodes=product.browse_nodes or [],
                     offers=[
                         ProductOffer(
                             condition=offer.condition or "New",
@@ -613,22 +724,7 @@ class ProductService:
         sort_order: str = "desc",
         is_prime_only: bool = False
     ) -> List[ProductInfo]:
-        """获取折扣商品列表
-        
-        Args:
-            db: 数据库会话
-            page: 页码
-            page_size: 每页数量
-            min_price: 最低价格
-            max_price: 最高价格
-            min_discount: 最低折扣率
-            sort_by: 排序字段
-            sort_order: 排序方向
-            is_prime_only: 是否只显示Prime商品
-            
-        Returns:
-            List[ProductInfo]: 商品信息列表
-        """
+        """获取折扣商品列表"""
         try:
             # 构建基础查询
             query = db.query(Product).distinct(Product.asin)
@@ -679,6 +775,11 @@ class ProductService:
                     brand=product.brand,
                     main_image=product.main_image,
                     timestamp=product.timestamp or datetime.utcnow(),
+                    # 添加分类相关信息
+                    binding=product.binding or None,
+                    product_group=product.product_group or None,
+                    categories=product.categories or [],
+                    browse_nodes=product.browse_nodes or [],
                     offers=[
                         ProductOffer(
                             condition=offer.condition or "New",

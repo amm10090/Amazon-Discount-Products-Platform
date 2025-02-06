@@ -38,6 +38,71 @@ st.markdown(f"""
         max-width: 200px;
         height: auto;
     }}
+    .category-breadcrumb {{
+        font-size: 0.9em;
+        color: #666;
+        margin-bottom: 10px;
+        padding: 5px 10px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+    }}
+    .category-breadcrumb .category-link {{
+        color: #0066c0;
+        text-decoration: none;
+        padding: 2px 8px;
+        background-color: #fff;
+        border-radius: 12px;
+        border: 1px solid #e0e0e0;
+        transition: all 0.2s ease;
+    }}
+    .category-breadcrumb .category-link:hover {{
+        text-decoration: none;
+        background-color: #f0f2f6;
+        border-color: #0066c0;
+    }}
+    .category-breadcrumb .category-separator {{
+        color: #666;
+        margin: 0 4px;
+    }}
+    .category-tag {{
+        display: inline-block;
+        background-color: #f0f2f6;
+        color: #666;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.85em;
+        margin: 4px;
+        border: 1px solid #e0e0e0;
+        transition: all 0.2s ease;
+    }}
+    .category-tag:hover {{
+        background-color: #e9ecef;
+        border-color: #0066c0;
+        color: #0066c0;
+    }}
+    .category-section {{
+        margin: 10px 0;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        border: 1px solid #e0e0e0;
+    }}
+    .category-title {{
+        font-size: 0.95em;
+        color: #333;
+        margin-bottom: 10px;
+        font-weight: 500;
+    }}
+    .category-content {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: flex-start;
+    }}
     .price-tag {{
         color: #B12704;
         font-size: 1.2em;
@@ -197,90 +262,6 @@ with st.sidebar:
     # 语言选择器
     language_selector()
     st.markdown("---")
-    
-    st.subheader(get_text("filter_conditions"))
-    
-    # 价格范围
-    price_range = st.slider(
-        get_text("price_range") + " ($)",
-        min_value=0,
-        max_value=1000,
-        value=(0, 1000),
-        step=10,
-        key="price_range"
-    )
-    
-    # 最低折扣率
-    min_discount = st.slider(
-        get_text("min_discount_rate") + " (%)",
-        min_value=0,
-        max_value=100,
-        value=0,
-        step=5,
-        key="min_discount"
-    )
-    
-    # 是否只显示Prime商品
-    prime_only = st.checkbox(
-        get_text("prime_only"),
-        key="prime_only"
-    )
-    
-    # 排序方式
-    sort_by = st.selectbox(
-        get_text("sort_by"),
-        options=[
-            "price_asc", "price_desc",
-            "discount_asc", "discount_desc",
-            "time_asc", "time_desc"
-        ],
-        format_func=lambda x: {
-            "price_asc": get_text("price_low_to_high"),
-            "price_desc": get_text("price_high_to_low"),
-            "discount_asc": get_text("discount_low_to_high"),
-            "discount_desc": get_text("discount_high_to_low"),
-            "time_asc": get_text("time_old_to_new"),
-            "time_desc": get_text("time_new_to_old")
-        }[x],
-        key="sort_by"
-    )
-    
-    # 解析排序参数
-    sort_field = None
-    sort_direction = "desc"
-    if sort_by:
-        if sort_by == "price_asc":
-            sort_field = "current_price"
-            sort_direction = "asc"
-        elif sort_by == "price_desc":
-            sort_field = "current_price"
-            sort_direction = "desc"
-        elif sort_by == "discount_asc":
-            sort_field = "savings_percentage"
-            sort_direction = "asc"
-        elif sort_by == "discount_desc":
-            sort_field = "savings_percentage"
-            sort_direction = "desc"
-        elif sort_by == "time_asc":
-            sort_field = "timestamp"
-            sort_direction = "asc"
-        elif sort_by == "time_desc":
-            sort_field = "timestamp"
-            sort_direction = "desc"
-    
-    # 每页显示数量
-    page_size = st.selectbox(
-        get_text("items_per_page"),
-        options=[10, 20, 50, 100],
-        index=1,
-        key="page_size"
-    )
-
-# 创建标签页
-tab_discount, tab_coupon = st.tabs([
-    "🏷️ " + get_text("discount_products"),
-    "🎫 " + get_text("coupon_products")
-])
 
 @cache_manager.data_cache(
     ttl=300,
@@ -288,93 +269,99 @@ tab_discount, tab_coupon = st.tabs([
 )
 def load_products(
     api_url: str,
-    product_type: str,
-    page: int,
-    page_size: int,
-    min_price: float,
-    max_price: float,
-    min_discount: int,
-    prime_only: bool,
-    sort_by: str,
-    sort_order: str,
-    coupon_type: Optional[str] = None
-) -> List[Dict]:
-    """加载商品数据
-    
-    Args:
-        api_url: API服务地址
-        product_type: 商品类型
-        page: 页码
-        page_size: 每页数量
-        min_price: 最低价格
-        max_price: 最高价格
-        min_discount: 最低折扣率
-        prime_only: 是否只显示Prime商品
-        sort_by: 排序方式
-        sort_order: 排序顺序
-        coupon_type: 优惠券类型
-        
-    Returns:
-        List[Dict]: 商品列表
-    """
+    product_type: str = "all",
+    page: int = 1,
+    page_size: int = 20,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    min_discount: Optional[int] = None,
+    prime_only: bool = False,
+    sort_by: Optional[str] = None,
+    sort_order: str = "desc",
+    selected_categories: Optional[Dict[str, List[str]]] = None
+) -> Dict:
+    """加载商品数据"""
     try:
-        # 基本参数
+        # 构建请求参数
         params = {
             "page": page,
             "page_size": page_size,
-            "min_price": min_price if min_price > 0 else None,
-            "max_price": max_price if max_price > 0 else None,
-            "min_discount": min_discount if min_discount > 0 else None,
+            "min_price": min_price,
+            "max_price": max_price,
+            "min_discount": min_discount,
             "is_prime_only": prime_only,
+            "product_type": product_type,
             "sort_by": sort_by,
             "sort_order": sort_order
         }
+        
+        # 添加类别筛选参数
+        if selected_categories:
+            if selected_categories.get("main_categories"):
+                params["main_categories"] = selected_categories["main_categories"]
+            if selected_categories.get("sub_categories"):
+                params["sub_categories"] = selected_categories["sub_categories"]
+            if selected_categories.get("bindings"):
+                params["bindings"] = selected_categories["bindings"]
+            if selected_categories.get("product_groups"):
+                params["product_groups"] = selected_categories["product_groups"]
+        
+        # 移除None值的参数
+        params = {k: v for k, v in params.items() if v is not None}
         
         # 根据商品类型选择不同的API端点
         if product_type == "discount":
             endpoint = "/api/products/discount"
         elif product_type == "coupon":
             endpoint = "/api/products/coupon"
-            if coupon_type:
-                params["coupon_type"] = coupon_type
         else:
             endpoint = "/api/products/list"
-            params["product_type"] = product_type
-        
-        # 移除None值的参数
-        params = {k: v for k, v in params.items() if v is not None}
         
         response = requests.get(f"{api_url}{endpoint}", params=params)
+        response.raise_for_status()
         
-        if response.status_code == 200:
-            return response.json()
-        return []
+        data = response.json()
+        if isinstance(data, dict):
+            return data
+        else:
+            return {
+                "items": data,
+                "total": len(data),
+                "page": page,
+                "page_size": page_size
+            }
+        
     except Exception as e:
-        st.error(f"{get_text('loading_failed')}: {str(e)}")
-        return []
+        st.error(f"加载商品列表失败: {str(e)}")
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
 def display_products(
-    products: List[Dict],
+    products_data: Dict,
     api_url: str,
     key_suffix: str = ""
 ):
     """显示商品列表
     
     Args:
-        products: 商品列表
+        products_data: 包含商品列表和分页信息的字典
         api_url: API服务地址
         key_suffix: 状态键后缀
     """
-    if not products:
+    if not products_data or not isinstance(products_data, dict):
         st.warning(get_text("no_matching_products"))
         return
+    
+    products = products_data.get("items", [])
+    total = products_data.get("total", 0)
+    current_page = products_data.get("page", 1)
+    page_size = products_data.get("page_size", 20)
     
     if len(products) == 0:
         st.info(get_text("no_products"))
         return
     
     # 显示商品总数
-    st.success(f"{get_text('total_items')}: {len(products)}")
+    st.success(f"{get_text('total_items')}: {total}")
     
     # 添加批量删除功能
     st.markdown("### " + get_text("product_list"))
@@ -403,6 +390,81 @@ def display_products(
     # 显示商品列表
     for product in products:
         with st.container():
+            # 显示分类导航
+            breadcrumb_html = '<div class="category-breadcrumb">'
+            
+            # 优先使用browse_nodes，因为它包含完整的层级结构
+            if product.get("browse_nodes") and len(product.get("browse_nodes", [])) > 0:
+                # 获取第一个浏览节点
+                browse_node = product["browse_nodes"][0]
+                breadcrumb_categories = []
+                
+                # 递归获取祖先节点
+                def get_ancestors(node):
+                    if not node:
+                        return
+                    # 检查不同的名称字段
+                    node_name = (
+                        node.get("display_name") or 
+                        node.get("DisplayName") or 
+                        node.get("context_free_name") or 
+                        node.get("ContextFreeName") or 
+                        node.get("name")
+                    )
+                    if node_name:
+                        breadcrumb_categories.insert(0, node_name)
+                    # 检查祖先节点
+                    ancestor = node.get("ancestor") or node.get("Ancestor")
+                    if ancestor:
+                        get_ancestors(ancestor)
+                
+                # 添加当前节点
+                current_name = (
+                    browse_node.get("display_name") or 
+                    browse_node.get("DisplayName") or 
+                    browse_node.get("context_free_name") or 
+                    browse_node.get("ContextFreeName") or 
+                    browse_node.get("name")
+                )
+                if current_name:
+                    breadcrumb_categories.append(current_name)
+                
+                # 获取所有祖先节点
+                ancestor = browse_node.get("ancestor") or browse_node.get("Ancestor")
+                if ancestor:
+                    get_ancestors(ancestor)
+                
+                # 生成面包屑导航
+                if breadcrumb_categories:
+                    for i, cat in enumerate(breadcrumb_categories):
+                        breadcrumb_html += f'<span class="category-link">{cat.strip()}</span>'
+                        if i < len(breadcrumb_categories) - 1:
+                            breadcrumb_html += '<span class="category-separator">›</span>'
+            
+            # 如果没有browse_nodes，使用categories字段
+            elif product.get("categories") and len(product["categories"]) > 0:
+                categories = product["categories"][0].split(" > ") if isinstance(product["categories"][0], str) else []
+                if categories:
+                    for i, cat in enumerate(categories):
+                        breadcrumb_html += f'<span class="category-link">{cat.strip()}</span>'
+                        if i < len(categories) - 1:
+                            breadcrumb_html += '<span class="category-separator">›</span>'
+            
+            # 如果前两者都没有，使用binding和product_group组合
+            elif product.get("binding") or product.get("product_group"):
+                if product.get("product_group"):
+                    breadcrumb_html += f'<span class="category-link">{product["product_group"]}</span>'
+                    if product.get("binding"):
+                        breadcrumb_html += '<span class="category-separator">›</span>'
+                if product.get("binding"):
+                    breadcrumb_html += f'<span class="category-link">{product["binding"]}</span>'
+            
+            breadcrumb_html += '</div>'
+            
+            # 只有当有分类信息时才显示面包屑
+            if '>' in breadcrumb_html or 'category-link' in breadcrumb_html:
+                st.markdown(breadcrumb_html, unsafe_allow_html=True)
+            
             col1, col2, col3 = st.columns([1, 2, 1])
             
             with col1:
@@ -421,6 +483,46 @@ def display_products(
                 # 品牌信息
                 if product.get("brand"):
                     st.markdown(f"**{get_text('brand')}:** {product['brand']}")
+                
+                # 商品分类信息
+                with st.expander(get_text("product_category")):
+                    st.markdown('<div class="category-section">', unsafe_allow_html=True)
+                    
+                    # 显示绑定类型和产品组
+                    if product.get("binding") or product.get("product_group"):
+                        st.markdown('<div class="category-title">基本分类</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="category-content">', unsafe_allow_html=True)
+                        if product.get("binding"):
+                            st.markdown(f'<span class="category-tag">📦 {product["binding"]}</span>', unsafe_allow_html=True)
+                        if product.get("product_group"):
+                            st.markdown(f'<span class="category-tag">🏷️ {product["product_group"]}</span>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # 显示分类路径
+                    if product.get("categories") and len(product["categories"]) > 0:
+                        st.markdown('<div class="category-title">详细分类</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="category-content">', unsafe_allow_html=True)
+                        for category_path in product["categories"]:
+                            categories = category_path.split(" > ") if isinstance(category_path, str) else []
+                            for category in categories:
+                                st.markdown(f'<span class="category-tag">📑 {category.strip()}</span>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # 显示浏览节点信息
+                    if product.get("browse_nodes"):
+                        st.markdown('<div class="category-title">浏览节点</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="category-content">', unsafe_allow_html=True)
+                        for node in product["browse_nodes"]:
+                            node_name = node.get('name', '')
+                            node_id = node.get('id', '')
+                            if node_name and node_id:
+                                st.markdown(
+                                    f'<span class="category-tag">🔍 {node_name} ({node_id})</span>',
+                                    unsafe_allow_html=True
+                                )
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
                 
                 # 价格和折扣信息
                 price_col, discount_col, prime_col = st.columns(3)
@@ -739,80 +841,215 @@ def batch_delete_products(api_url: str, products: List[Dict]) -> Dict[str, int]:
         st.error(f"{get_text('delete_failed')}: {str(e)}")
         return {"success_count": 0, "fail_count": len(asins)}
 
-# 处理折扣商品标签页
-with tab_discount:
-    # 分页控制
-    discount_page = st.number_input(
-        get_text("page"),
-        min_value=1,
-        value=1,
-        step=1,
-        key="page_discount"
-    )
-    
-    # 加载折扣商品数据
-    discount_products = load_products(
-        api_url=f"http://{config['api']['host']}:{config['api']['port']}",
-        product_type="discount",
-        page=discount_page,
-        page_size=page_size,
-        min_price=price_range[0],
-        max_price=price_range[1],
-        min_discount=min_discount,
-        prime_only=prime_only,
-        sort_by=sort_field,
-        sort_order=sort_direction
-    )
-    
-    # 显示折扣商品
-    display_products(discount_products, f"http://{config['api']['host']}:{config['api']['port']}", "discount")
-    
-    # 处理分页
-    discount_page = handle_pagination(
-        len(discount_products),
-        discount_page,
-        page_size,
-        "discount"
-    )
-    
-    # 处理导出
-    handle_export(discount_products, "discount")
+def load_category_stats() -> Dict[str, Dict[str, int]]:
+    """加载类别统计信息"""
+    try:
+        response = requests.get("http://localhost:8000/api/categories/stats")
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"加载类别统计信息失败: {str(e)}")
+        return {
+            "main_categories": {},
+            "sub_categories": {},
+            "bindings": {},
+            "product_groups": {}
+        }
 
-# 处理优惠券商品标签页
-with tab_coupon:
-    # 分页控制
-    coupon_page = st.number_input(
-        get_text("page"),
-        min_value=1,
-        value=1,
-        step=1,
-        key="page_coupon"
-    )
+def render_category_filter(category_stats: Dict[str, Dict[str, int]]) -> Dict[str, List[str]]:
+    """渲染类别筛选组件"""
+    selected_categories = {
+        "main_categories": [],
+        "sub_categories": [],
+        "bindings": [],
+        "product_groups": []
+    }
     
-    # 加载优惠券商品数据
-    coupon_products = load_products(
-        api_url=f"http://{config['api']['host']}:{config['api']['port']}",
-        product_type="coupon",
-        page=coupon_page,
-        page_size=page_size,
-        min_price=price_range[0],
-        max_price=price_range[1],
-        min_discount=min_discount,
-        prime_only=prime_only,
-        sort_by=sort_field,
-        sort_order=sort_direction
-    )
+    with st.sidebar:
+        st.subheader("类别筛选")
+        
+        # 主要类别多选
+        if category_stats["main_categories"]:
+            with st.expander("主要类别", expanded=True):
+                for category, count in category_stats["main_categories"].items():
+                    if st.checkbox(f"{category} ({count})", key=f"main_{category}"):
+                        selected_categories["main_categories"].append(category)
+        
+        # 子类别多选（按主类别分组显示）
+        if category_stats["sub_categories"]:
+            with st.expander("子类别", expanded=True):
+                # 按主类别分组
+                sub_categories_by_main = {}
+                for sub_path, count in category_stats["sub_categories"].items():
+                    main_cat, sub_cat = sub_path.split(":")
+                    if main_cat not in sub_categories_by_main:
+                        sub_categories_by_main[main_cat] = []
+                    sub_categories_by_main[main_cat].append((sub_cat, count))
+                
+                # 显示分组的子类别
+                for main_cat, sub_cats in sub_categories_by_main.items():
+                    with st.expander(main_cat):
+                        for sub_cat, count in sub_cats:
+                            if st.checkbox(f"{sub_cat} ({count})", key=f"sub_{main_cat}_{sub_cat}"):
+                                selected_categories["sub_categories"].append(f"{main_cat}:{sub_cat}")
+        
+        # 商品绑定类型多选
+        if category_stats["bindings"]:
+            with st.expander("商品绑定类型"):
+                for binding, count in category_stats["bindings"].items():
+                    if st.checkbox(f"{binding} ({count})", key=f"binding_{binding}"):
+                        selected_categories["bindings"].append(binding)
+        
+        # 商品组多选
+        if category_stats["product_groups"]:
+            with st.expander("商品组"):
+                for group, count in category_stats["product_groups"].items():
+                    if st.checkbox(f"{group} ({count})", key=f"group_{group}"):
+                        selected_categories["product_groups"].append(group)
     
-    # 显示优惠券商品
-    display_products(coupon_products, f"http://{config['api']['host']}:{config['api']['port']}", "coupon")
+    return selected_categories
+
+def render_products_page():
+    """渲染商品列表页面"""
+    st.title("商品列表")
     
-    # 处理分页
-    coupon_page = handle_pagination(
-        len(coupon_products),
-        coupon_page,
-        page_size,
-        "coupon"
-    )
+    # 加载类别统计信息
+    category_stats = load_category_stats()
     
-    # 处理导出
-    handle_export(coupon_products, "coupon") 
+    # 渲染类别筛选组件
+    selected_categories = render_category_filter(category_stats)
+    
+    # 其他筛选条件
+    with st.sidebar:
+        st.subheader("筛选条件")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            min_price = st.number_input("最低价格", min_value=0.0, value=0.0)
+        with col2:
+            max_price = st.number_input("最高价格", min_value=0.0, value=1000.0)
+            
+        min_discount = st.slider("最低折扣率", min_value=0, max_value=100, value=0)
+        is_prime_only = st.checkbox("只显示Prime商品")
+        
+        sort_by = st.selectbox(
+            "排序方式",
+            options=[None, "price", "discount", "timestamp"],
+            format_func=lambda x: {
+                None: "默认排序",
+                "price": "按价格",
+                "discount": "按折扣",
+                "timestamp": "按时间"
+            }[x]
+        )
+        
+        sort_order = st.selectbox(
+            "排序方向",
+            options=["desc", "asc"],
+            format_func=lambda x: "降序" if x == "desc" else "升序"
+        )
+        
+        page_size = st.selectbox(
+            "每页显示数量",
+            options=[10, 20, 50, 100],
+            index=1
+        )
+    
+    # 创建标签页
+    tab_discount, tab_coupon = st.tabs([
+        "🏷️ 折扣商品",
+        "🎫 优惠券商品"
+    ])
+    
+    # 处理折扣商品标签页
+    with tab_discount:
+        # 分页控制
+        if "discount_page" not in st.session_state:
+            st.session_state.discount_page = 1
+        
+        # 加载折扣商品数据
+        discount_products = load_products(
+            api_url="http://localhost:8000",
+            product_type="discount",  # 指定为折扣商品
+            page=st.session_state.discount_page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            prime_only=is_prime_only,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            selected_categories=selected_categories
+        )
+        
+        # 显示折扣商品
+        display_products(discount_products, "http://localhost:8000", "discount")
+        
+        # 处理分页
+        if discount_products and discount_products.get("total", 0) > 0:
+            total_pages = (discount_products["total"] + page_size - 1) // page_size
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col1:
+                if st.session_state.discount_page > 1:
+                    if st.button("上一页", key="discount_prev"):
+                        st.session_state.discount_page -= 1
+                        st.rerun()
+            
+            with col2:
+                st.write(f"第 {st.session_state.discount_page} 页 / 共 {total_pages} 页")
+            
+            with col3:
+                if st.session_state.discount_page < total_pages:
+                    if st.button("下一页", key="discount_next"):
+                        st.session_state.discount_page += 1
+                        st.rerun()
+    
+    # 处理优惠券商品标签页
+    with tab_coupon:
+        # 分页控制
+        if "coupon_page" not in st.session_state:
+            st.session_state.coupon_page = 1
+        
+        # 加载优惠券商品数据
+        coupon_products = load_products(
+            api_url="http://localhost:8000",
+            product_type="coupon",  # 指定为优惠券商品
+            page=st.session_state.coupon_page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            prime_only=is_prime_only,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            selected_categories=selected_categories
+        )
+        
+        # 显示优惠券商品
+        display_products(coupon_products, "http://localhost:8000", "coupon")
+        
+        # 处理分页
+        if coupon_products and coupon_products.get("total", 0) > 0:
+            total_pages = (coupon_products["total"] + page_size - 1) // page_size
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col1:
+                if st.session_state.coupon_page > 1:
+                    if st.button("上一页", key="coupon_prev"):
+                        st.session_state.coupon_page -= 1
+                        st.rerun()
+            
+            with col2:
+                st.write(f"第 {st.session_state.coupon_page} 页 / 共 {total_pages} 页")
+            
+            with col3:
+                if st.session_state.coupon_page < total_pages:
+                    if st.button("下一页", key="coupon_next"):
+                        st.session_state.coupon_page += 1
+                        st.rerun()
+
+if __name__ == "__main__":
+    render_products_page() 
