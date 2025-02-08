@@ -382,6 +382,54 @@ class ProductService:
             }
 
     @staticmethod
+    def _apply_sorting(query, sort_by: Optional[str], sort_order: str = "desc"):
+        """
+        应用排序逻辑的通用方法
+        
+        Args:
+            query: SQLAlchemy查询对象
+            sort_by: 排序字段
+            sort_order: 排序方向 ('asc' 或 'desc')
+            
+        Returns:
+            SQLAlchemy查询对象
+        """
+        if not sort_by:
+            # 默认按更新时间倒序排序
+            return query.order_by(desc(Product.timestamp))
+            
+        # 定义排序字段映射
+        sort_field_mapping = {
+            "price": Product.current_price,
+            "discount": Product.savings_percentage,
+            "timestamp": Product.timestamp,
+            "commission": Offer.commission
+        }
+        
+        # 获取排序字段
+        sort_field = sort_field_mapping.get(sort_by)
+        if not sort_field:
+            # 如果没有找到对应的排序字段，使用默认排序
+            return query.order_by(desc(Product.timestamp))
+            
+        # 如果是按佣金排序，需要确保已经连接了Offer表
+        if sort_by == "commission":
+            if "offer" not in str(query):
+                query = query.outerjoin(Offer)
+            
+        # 应用排序
+        if sort_order == "desc":
+            query = query.order_by(desc(sort_field))
+        else:
+            query = query.order_by(asc(sort_field))
+            
+        # 添加第二排序字段（按时间戳倒序）
+        if sort_by != "timestamp":
+            query = query.order_by(desc(Product.timestamp))
+            
+        return query
+
+    @staticmethod
     def list_products(
         db: Session,
         page: int = 1,
@@ -397,15 +445,15 @@ class ProductService:
         sub_categories: Optional[List[str]] = None,
         bindings: Optional[List[str]] = None,
         product_groups: Optional[List[str]] = None,
-        source: Optional[str] = None,  # 新增：数据来源筛选
-        min_commission: Optional[int] = None  # 新增：最低佣金筛选
+        source: Optional[str] = None,
+        min_commission: Optional[int] = None
     ) -> List[ProductInfo]:
         """获取商品列表"""
         try:
             # 构建基础查询
-            query = db.query(Product)
-
-            # 应用价格和折扣筛选
+            query = db.query(Product).distinct(Product.asin)
+            
+            # 应用过滤条件
             if min_price is not None:
                 query = query.filter(Product.current_price >= min_price)
             if max_price is not None:
@@ -414,18 +462,11 @@ class ProductService:
                 query = query.filter(Product.savings_percentage >= min_discount)
             if is_prime_only:
                 query = query.filter(Product.is_prime == True)
-
-            # 根据商品类型筛选
-            if product_type == "discount":
-                query = query.filter(Product.savings_percentage > 0)
-            elif product_type == "coupon":
-                query = query.join(
-                    CouponHistory,
-                    Product.asin == CouponHistory.product_id,
-                    isouter=True
-                ).filter(CouponHistory.id.isnot(None))
-                query = query.distinct(Product.asin)
-
+                
+            # 根据product_type筛选
+            if product_type == "cj":
+                query = query.filter(Product.source == "cj")
+                
             # 应用数据来源筛选
             if source:
                 if source == "cj":
@@ -435,129 +476,106 @@ class ProductService:
                         Product.source == "bestseller",
                         Product.source == "coupon",
                         Product.source == "pa-api",
-                        Product.source.is_(None)  # 兼容旧数据
+                        Product.source.is_(None)
                     ))
-                # 当source为"all"时，不添加筛选条件，显示所有来源的商品
-
+                    
             # 应用佣金筛选
             if min_commission is not None:
-                # 只对CJ商品应用佣金筛选
                 if source == "cj":
                     query = query.join(Offer).filter(
                         cast(Offer.commission, Float) >= min_commission
                     )
                 elif source == "all":
-                    # 对于所有来源，只对CJ商品应用佣金筛选
                     query = query.outerjoin(Offer).filter(or_(
                         and_(Product.source == "cj", cast(Offer.commission, Float) >= min_commission),
                         Product.source != "cj"
                     ))
-
+                    
             # 应用类别筛选
             if main_categories:
-                # 使用JSON操作符筛选主要类别
                 conditions = []
                 for category in main_categories:
-                    # 检查categories数组中是否存在以指定主类别开头的路径
                     conditions.append(Product.categories.cast(String).like(f'%["{category}"%'))
                 if conditions:
                     query = query.filter(or_(*conditions))
-
+                    
             if sub_categories:
-                # 使用JSON操作符筛选子类别
                 conditions = []
                 for category_path in sub_categories:
                     main_cat, sub_cat = category_path.split(":")
-                    # 检查categories数组中是否存在指定的类别路径
                     conditions.append(Product.categories.cast(String).like(f'%["{main_cat}", "{sub_cat}"%'))
                 if conditions:
                     query = query.filter(or_(*conditions))
-
+                    
             if bindings:
                 query = query.filter(Product.binding.in_(bindings))
-
+                
             if product_groups:
                 query = query.filter(Product.product_group.in_(product_groups))
-
+                
             # 应用排序
-            if sort_by:
-                if sort_by == "commission":
-                    # 按佣金排序需要特殊处理
-                    query = query.join(Offer).order_by(
-                        desc(cast(Offer.commission, Float))
-                        if sort_order == "desc"
-                        else asc(cast(Offer.commission, Float))
-                    )
-                else:
-                    sort_column = getattr(Product, sort_by, Product.timestamp)
-                    if sort_order == "desc":
-                        query = query.order_by(desc(sort_column))
-                    else:
-                        query = query.order_by(asc(sort_column))
-            else:
-                query = query.order_by(desc(Product.timestamp))
-
+            query = ProductService._apply_sorting(query, sort_by, sort_order)
+            
             # 应用分页
+            total = query.count()  # 获取总数
             offset = (page - 1) * page_size
             query = query.offset(offset).limit(page_size)
-
-            try:
-                # 执行查询
-                products = query.all()
+            
+            # 执行查询
+            products = query.all()
+            
+            # 转换为ProductInfo对象
+            result = []
+            for product in products:
+                offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                 
-                # 转换为ProductInfo对象
-                result = []
-                for product in products:
-                    try:
-                        # 获取商品的所有优惠信息
-                        offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
-
-                        # 构建ProductInfo对象
-                        product_info = ProductInfo(
-                            asin=product.asin,
-                            title=product.title,
-                            url=product.url,
-                            brand=product.brand,
-                            main_image=product.main_image,
-                            timestamp=product.timestamp or datetime.utcnow(),
-                            # 添加分类相关信息
-                            binding=product.binding,
-                            product_group=product.product_group,
-                            categories=product.categories,
-                            browse_nodes=product.browse_nodes,
-                            # 添加CJ相关信息
-                            cj_url=product.cj_url if product.source == "cj" else None,
-                            offers=[
-                                ProductOffer(
-                                    condition=offer.condition or "New",
-                                    price=offer.price or 0.0,
-                                    currency=offer.currency or "USD",
-                                    savings=offer.savings,
-                                    savings_percentage=offer.savings_percentage,
-                                    is_prime=offer.is_prime or False,
-                                    availability=offer.availability or "Available",
-                                    merchant_name=offer.merchant_name or "Amazon",
-                                    is_buybox_winner=offer.is_buybox_winner or False,
-                                    deal_type=offer.deal_type,
-                                    coupon_type=getattr(offer, 'coupon_type', None),
-                                    coupon_value=getattr(offer, 'coupon_value', None),
-                                    commission=offer.commission if product.source == "cj" else None
-                                ) for offer in offers
-                            ]
-                        )
-                        result.append(product_info)
-                    except Exception as e:
-                        logger.error(f"处理商品 {product.asin} 时出错: {str(e)}")
-                        continue
-
-                return result
-            except Exception as e:
-                logger.error(f"获取商品列表失败: {str(e)}")
-                return []
-
+                product_info = ProductInfo(
+                    asin=product.asin,
+                    title=product.title,
+                    url=product.url,
+                    brand=product.brand,
+                    main_image=product.main_image,
+                    timestamp=product.timestamp or datetime.utcnow(),
+                    binding=product.binding,
+                    product_group=product.product_group,
+                    categories=product.categories,
+                    browse_nodes=product.browse_nodes,
+                    cj_url=product.cj_url if product.source == "cj" else None,
+                    offers=[
+                        ProductOffer(
+                            condition=offer.condition or "New",
+                            price=offer.price or 0.0,
+                            currency=offer.currency or "USD",
+                            savings=offer.savings,
+                            savings_percentage=offer.savings_percentage,
+                            is_prime=offer.is_prime or False,
+                            availability=offer.availability or "Available",
+                            merchant_name=offer.merchant_name or "Amazon",
+                            is_buybox_winner=offer.is_buybox_winner or False,
+                            deal_type=offer.deal_type,
+                            coupon_type=getattr(offer, 'coupon_type', None),
+                            coupon_value=getattr(offer, 'coupon_value', None),
+                            commission=offer.commission if product.source == "cj" else None
+                        ) for offer in offers
+                    ]
+                )
+                result.append(product_info)
+                
+            return {
+                "items": result,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
+            
         except Exception as e:
             logger.error(f"获取商品列表失败: {str(e)}")
-            return []
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size
+            }
 
     @staticmethod
     def get_stats(db: Session) -> Dict[str, Any]:
@@ -649,9 +667,9 @@ class ProductService:
         sort_order: str = "desc",
         is_prime_only: bool = False,
         coupon_type: Optional[str] = None,
-        source: Optional[str] = None,  # 新增：数据来源筛选
-        min_commission: Optional[int] = None  # 新增：最低佣金筛选
-    ) -> List[ProductInfo]:
+        source: Optional[str] = None,
+        min_commission: Optional[int] = None
+    ) -> Dict[str, Any]:
         """获取优惠券商品列表"""
         try:
             # 构建基础查询
@@ -672,19 +690,16 @@ class ProductService:
                         Product.source == "bestseller",
                         Product.source == "coupon",
                         Product.source == "pa-api",
-                        Product.source.is_(None)  # 兼容旧数据
+                        Product.source.is_(None)
                     ))
-                # 当source为"all"时，不添加筛选条件，显示所有来源的商品
             
             # 应用佣金筛选
             if min_commission is not None:
-                # 只对CJ商品应用佣金筛选
                 if source == "cj":
                     query = query.join(Offer).filter(
                         cast(Offer.commission, Float) >= min_commission
                     )
                 elif source == "all":
-                    # 对于所有来源，只对CJ商品应用佣金筛选
                     query = query.outerjoin(Offer).filter(or_(
                         and_(Product.source == "cj", cast(Offer.commission, Float) >= min_commission),
                         Product.source != "cj"
@@ -703,25 +718,10 @@ class ProductService:
                 query = query.filter(CouponHistory.coupon_type == coupon_type)
                 
             # 应用排序
-            if sort_by:
-                if sort_by == "commission":
-                    # 按佣金排序需要特殊处理
-                    query = query.join(Offer).order_by(
-                        desc(cast(Offer.commission, Float))
-                        if sort_order == "desc"
-                        else asc(cast(Offer.commission, Float))
-                    )
-                else:
-                    sort_column = getattr(Product, sort_by, Product.timestamp)
-                    if sort_order == "desc":
-                        query = query.order_by(desc(sort_column))
-                    else:
-                        query = query.order_by(asc(sort_column))
-            else:
-                # 默认按更新时间倒序排序
-                query = query.order_by(desc(Product.timestamp))
-                
+            query = ProductService._apply_sorting(query, sort_by, sort_order)
+            
             # 应用分页
+            total = query.count()
             offset = (page - 1) * page_size
             query = query.offset(offset).limit(page_size)
             
@@ -731,10 +731,8 @@ class ProductService:
             # 转换为ProductInfo对象
             result = []
             for product in products:
-                # 获取商品的所有优惠信息
                 offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                 
-                # 构建ProductInfo对象
                 product_info = ProductInfo(
                     asin=product.asin,
                     title=product.title,
@@ -742,12 +740,10 @@ class ProductService:
                     brand=product.brand,
                     main_image=product.main_image,
                     timestamp=product.timestamp or datetime.utcnow(),
-                    # 添加分类相关信息
                     binding=product.binding or None,
                     product_group=product.product_group or None,
                     categories=product.categories or [],
                     browse_nodes=product.browse_nodes or [],
-                    # 添加CJ相关信息
                     cj_url=product.cj_url if product.source == "cj" else None,
                     offers=[
                         ProductOffer(
@@ -769,11 +765,21 @@ class ProductService:
                 )
                 result.append(product_info)
                 
-            return result
+            return {
+                "items": result,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
             
         except Exception as e:
             logger.error(f"获取优惠券商品列表失败: {str(e)}")
-            return []
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size
+            }
 
     @staticmethod
     def list_discount_products(
@@ -786,9 +792,9 @@ class ProductService:
         sort_by: Optional[str] = None,
         sort_order: str = "desc",
         is_prime_only: bool = False,
-        source: Optional[str] = None,  # 新增：数据来源筛选
-        min_commission: Optional[int] = None  # 新增：最低佣金筛选
-    ) -> List[ProductInfo]:
+        source: Optional[str] = None,
+        min_commission: Optional[int] = None
+    ) -> Dict[str, Any]:
         """获取折扣商品列表"""
         try:
             # 构建基础查询
@@ -806,19 +812,16 @@ class ProductService:
                         Product.source == "bestseller",
                         Product.source == "coupon",
                         Product.source == "pa-api",
-                        Product.source.is_(None)  # 兼容旧数据
+                        Product.source.is_(None)
                     ))
-                # 当source为"all"时，不添加筛选条件，显示所有来源的商品
             
             # 应用佣金筛选
             if min_commission is not None:
-                # 只对CJ商品应用佣金筛选
                 if source == "cj":
                     query = query.join(Offer).filter(
                         cast(Offer.commission, Float) >= min_commission
                     )
                 elif source == "all":
-                    # 对于所有来源，只对CJ商品应用佣金筛选
                     query = query.outerjoin(Offer).filter(or_(
                         and_(Product.source == "cj", cast(Offer.commission, Float) >= min_commission),
                         Product.source != "cj"
@@ -835,25 +838,10 @@ class ProductService:
                 query = query.filter(Product.is_prime == True)
                 
             # 应用排序
-            if sort_by:
-                if sort_by == "commission":
-                    # 按佣金排序需要特殊处理
-                    query = query.join(Offer).order_by(
-                        desc(cast(Offer.commission, Float))
-                        if sort_order == "desc"
-                        else asc(cast(Offer.commission, Float))
-                    )
-                else:
-                    sort_column = getattr(Product, sort_by, Product.timestamp)
-                    if sort_order == "desc":
-                        query = query.order_by(desc(sort_column))
-                    else:
-                        query = query.order_by(asc(sort_column))
-            else:
-                # 默认按折扣率倒序排序
-                query = query.order_by(desc(Product.savings_percentage))
+            query = ProductService._apply_sorting(query, sort_by, sort_order)
                 
             # 应用分页
+            total = query.count()
             offset = (page - 1) * page_size
             query = query.offset(offset).limit(page_size)
             
@@ -863,10 +851,8 @@ class ProductService:
             # 转换为ProductInfo对象
             result = []
             for product in products:
-                # 获取商品的所有优惠信息
                 offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                 
-                # 构建ProductInfo对象
                 product_info = ProductInfo(
                     asin=product.asin,
                     title=product.title,
@@ -874,12 +860,10 @@ class ProductService:
                     brand=product.brand,
                     main_image=product.main_image,
                     timestamp=product.timestamp or datetime.utcnow(),
-                    # 添加分类相关信息
                     binding=product.binding or None,
                     product_group=product.product_group or None,
                     categories=product.categories or [],
                     browse_nodes=product.browse_nodes or [],
-                    # 添加CJ相关信息
                     cj_url=product.cj_url if product.source == "cj" else None,
                     offers=[
                         ProductOffer(
@@ -901,8 +885,18 @@ class ProductService:
                 )
                 result.append(product_info)
                 
-            return result
+            return {
+                "items": result,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
             
         except Exception as e:
             logger.error(f"获取折扣商品列表失败: {str(e)}")
-            return [] 
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size
+            } 
