@@ -6,13 +6,19 @@ import json
 from i18n import init_language, get_text, language_selector
 import sys
 from pathlib import Path
+import yaml
 sys.path.append(str(Path(__file__).parent.parent))
 from main import load_config
 from utils.cache_manager import cache_manager
 from typing import List, Dict, Optional
 
 # 加载配置
-config = load_config()
+def load_yaml_config():
+    config_path = Path(__file__).parent.parent.parent / "config" / "production.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+config = load_yaml_config()
 
 # 初始化语言设置
 init_language()
@@ -43,7 +49,7 @@ st.markdown(f"""
         color: #666;
         margin-bottom: 10px;
         padding: 5px 10px;
-        background-color: #f8f9fa;
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
         border-radius: 4px;
         display: flex;
         align-items: center;
@@ -51,27 +57,27 @@ st.markdown(f"""
         gap: 4px;
     }}
     .category-breadcrumb .category-link {{
-        color: #0066c0;
+        color: {config["frontend"]["theme"]["primaryColor"]};
         text-decoration: none;
         padding: 2px 8px;
-        background-color: #fff;
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
         border-radius: 12px;
         border: 1px solid #e0e0e0;
         transition: all 0.2s ease;
     }}
     .category-breadcrumb .category-link:hover {{
         text-decoration: none;
-        background-color: #f0f2f6;
-        border-color: #0066c0;
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+        border-color: {config["frontend"]["theme"]["primaryColor"]};
     }}
     .category-breadcrumb .category-separator {{
-        color: #666;
+        color: {config["frontend"]["theme"]["textColor"]};
         margin: 0 4px;
     }}
     .category-tag {{
         display: inline-block;
-        background-color: #f0f2f6;
-        color: #666;
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+        color: {config["frontend"]["theme"]["textColor"]};
         padding: 4px 12px;
         border-radius: 12px;
         font-size: 0.85em;
@@ -80,20 +86,20 @@ st.markdown(f"""
         transition: all 0.2s ease;
     }}
     .category-tag:hover {{
-        background-color: #e9ecef;
-        border-color: #0066c0;
-        color: #0066c0;
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+        border-color: {config["frontend"]["theme"]["primaryColor"]};
+        color: {config["frontend"]["theme"]["primaryColor"]};
     }}
     .category-section {{
         margin: 10px 0;
         padding: 15px;
-        background-color: #f8f9fa;
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
         border-radius: 8px;
         border: 1px solid #e0e0e0;
     }}
     .category-title {{
         font-size: 0.95em;
-        color: #333;
+        color: {config["frontend"]["theme"]["textColor"]};
         margin-bottom: 10px;
         font-weight: 500;
     }}
@@ -133,7 +139,7 @@ st.markdown(f"""
         font-weight: bold;
     }}
     .coupon-tag {{
-        background: #FF9900;
+        background: {config["frontend"]["theme"]["primaryColor"]};
         color: white;
         padding: 8px 16px;
         border-radius: 4px;
@@ -141,33 +147,6 @@ st.markdown(f"""
         position: relative;
         margin: 10px 0;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }}
-    .coupon-tag::before,
-    .coupon-tag::after {{
-        content: '';
-        position: absolute;
-        top: 0;
-        width: 10px;
-        height: 100%;
-        background: radial-gradient(circle at 0 50%, transparent 8px, white 8px) repeat-y;
-        background-size: 10px 16px;
-    }}
-    .coupon-tag::before {{
-        left: -10px;
-        transform: translateX(1px);
-    }}
-    .coupon-tag::after {{
-        right: -10px;
-        transform: translateX(-1px) scaleX(-1);
-    }}
-    .coupon-value {{
-        font-size: 1.2em;
-        display: block;
-        margin-top: 4px;
-    }}
-    .coupon-type {{
-        font-size: 0.9em;
-        opacity: 0.9;
     }}
     .stButton>button {{
         background-color: {config["frontend"]["theme"]["primaryColor"]};
@@ -184,91 +163,17 @@ st.markdown(f"""
     body {{
         color: {config["frontend"]["theme"]["textColor"]};
     }}
-    .stTabs [data-baseweb="tab-list"] {{
-        gap: 24px;
-    }}
-    .stTabs [data-baseweb="tab"] {{
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: {config["frontend"]["theme"]["backgroundColor"]};
-        border-radius: 4px;
-        padding: 10px 20px;
-        font-weight: 500;
-    }}
-    .stTabs [aria-selected="true"] {{
-        background-color: {config["frontend"]["theme"]["primaryColor"]};
-        color: white;
-    }}
-    .coupon-card {{
-        display: flex;
-        width: 180px;
-        height: 28px;
-        margin: 5px 0;
-        position: relative;
-        border-radius: 2px;
-        overflow: hidden;
-    }}
-    
-    .coupon-left {{
-        width: 70px;
-        text-align: center;
-        font-size: 15px;
-        font-weight: 500;
-        color: white;
-        background: #FF9900;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-    }}
-    
-    .coupon-right {{
-        flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-size: 13px;
-        font-weight: 400;
-        background: #FF5722;
-        position: relative;
-        margin-left: 1px;
-    }}
-    
-    .coupon-right::before {{
-        content: "";
-        position: absolute;
-        left: -4px;
-        top: 0;
-        bottom: 0;
-        width: 8px;
-        background: linear-gradient(90deg, transparent 0%, #FF5722 100%);
-    }}
-    
-    .coupon-left::after {{
-        content: "";
-        position: absolute;
-        right: -4px;
-        top: 0;
-        bottom: 0;
-        width: 8px;
-        background: linear-gradient(90deg, #FF9900 0%, transparent 100%);
-    }}
 </style>
 """, unsafe_allow_html=True)
 
-# 侧边栏
-with st.sidebar:
-    # 语言选择器
-    language_selector()
-    st.markdown("---")
+# 定义API基础URL
+API_BASE_URL = f"http://{config['api']['host']}:{config['api']['port']}"
 
 @cache_manager.data_cache(
-    ttl=300,
+    ttl=config["frontend"]["cache"]["ttl"],
     show_spinner="正在加载商品数据..."
 )
 def load_products(
-    api_url: str,
     product_type: str = "all",
     page: int = 1,
     page_size: int = 20,
@@ -317,7 +222,7 @@ def load_products(
         else:
             endpoint = "/api/products/list"
         
-        response = requests.get(f"{api_url}{endpoint}", params=params)
+        response = requests.get(f"{API_BASE_URL}{endpoint}", params=params)
         response.raise_for_status()
         
         data = response.json()
@@ -372,7 +277,7 @@ def display_products(
             key=f"delete_all_{key_suffix}"
         ):
             if st.warning(get_text("confirm_delete_all")):
-                result = batch_delete_products(api_url, products)
+                result = batch_delete_products(products)
                 if result["success_count"] > 0:
                     st.success(
                         get_text("batch_delete_success").format(
@@ -711,7 +616,7 @@ def display_products(
                     type="secondary"
                 ):
                     if st.warning(get_text("confirm_delete")):
-                        if delete_product(api_url, product["asin"]):
+                        if delete_product(product["asin"]):
                             st.success(get_text("delete_success"))
                             st.rerun()
                 
@@ -840,18 +745,10 @@ def handle_export(
         else:
             st.warning(get_text("no_data"))
 
-def delete_product(api_url: str, asin: str) -> bool:
-    """删除商品
-    
-    Args:
-        api_url: API服务地址
-        asin: 商品ASIN
-        
-    Returns:
-        bool: 是否删除成功
-    """
+def delete_product(asin: str) -> bool:
+    """删除商品"""
     try:
-        response = requests.delete(f"{api_url}/api/products/{asin}")
+        response = requests.delete(f"{API_BASE_URL}/api/products/{asin}")
         success = response.status_code == 200
         if success:
             # 清除相关缓存
@@ -861,20 +758,12 @@ def delete_product(api_url: str, asin: str) -> bool:
         st.error(f"{get_text('delete_failed')}: {str(e)}")
         return False
 
-def batch_delete_products(api_url: str, products: List[Dict]) -> Dict[str, int]:
-    """批量删除商品
-    
-    Args:
-        api_url: API服务地址
-        products: 商品列表
-        
-    Returns:
-        Dict[str, int]: 删除结果统计
-    """
+def batch_delete_products(products: List[Dict]) -> Dict[str, int]:
+    """批量删除商品"""
     try:
         asins = [product["asin"] for product in products]
         response = requests.post(
-            f"{api_url}/api/products/batch-delete",
+            f"{API_BASE_URL}/api/products/batch-delete",
             json={"asins": asins}
         )
         
@@ -891,7 +780,7 @@ def batch_delete_products(api_url: str, products: List[Dict]) -> Dict[str, int]:
 def load_category_stats() -> Dict[str, Dict[str, int]]:
     """加载类别统计信息"""
     try:
-        response = requests.get("http://localhost:8000/api/categories/stats")
+        response = requests.get(f"{API_BASE_URL}/api/categories/stats")
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -1016,7 +905,6 @@ def render_products_page():
         
         # 加载折扣商品数据
         discount_products = load_products(
-            api_url="http://localhost:8000",
             product_type="discount",  # 指定为折扣商品
             page=st.session_state.discount_page,
             page_size=page_size,
@@ -1030,7 +918,7 @@ def render_products_page():
         )
         
         # 显示折扣商品
-        display_products(discount_products, "http://localhost:8000", "discount")
+        display_products(discount_products, API_BASE_URL, "discount")
         
         # 处理分页
         if discount_products and discount_products.get("total", 0) > 0:
@@ -1061,7 +949,6 @@ def render_products_page():
         
         # 加载优惠券商品数据
         coupon_products = load_products(
-            api_url="http://localhost:8000",
             product_type="coupon",  # 指定为优惠券商品
             page=st.session_state.coupon_page,
             page_size=page_size,
@@ -1075,7 +962,7 @@ def render_products_page():
         )
         
         # 显示优惠券商品
-        display_products(coupon_products, "http://localhost:8000", "coupon")
+        display_products(coupon_products, API_BASE_URL, "coupon")
         
         # 处理分页
         if coupon_products and coupon_products.get("total", 0) > 0:
