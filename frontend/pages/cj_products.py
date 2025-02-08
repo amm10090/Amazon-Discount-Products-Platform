@@ -5,134 +5,147 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import sys
 from pathlib import Path
+import yaml
 sys.path.append(str(Path(__file__).parent.parent))
 from main import load_config
 from utils.cache_manager import cache_manager
 from i18n import init_language, get_text, language_selector
 
 # 加载配置
-config = load_config()
+def load_yaml_config():
+    config_path = Path(__file__).parent.parent.parent / "config" / "production.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+config = load_yaml_config()
 
 # 初始化语言设置
 init_language()
 
 st.set_page_config(
-    page_title="CJ商品列表",
+    page_title=get_text("products_title"),
     page_icon="🛍️",
     layout=config["frontend"]["page"]["layout"],
     initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"]
 )
 
 # 自定义CSS
-st.markdown("""
+st.markdown(f"""
 <style>
-    .variant-card {
+    .variant-card {{
         border: 1px solid #ddd;
         border-radius: 8px;
         padding: 10px;
         margin: 5px 0;
-        background-color: #f8f9fa;
-    }
-    .variant-image {
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .variant-image {{
         max-width: 100px;
         height: auto;
         border-radius: 4px;
-    }
-    .variant-title {
+    }}
+    .variant-title {{
         font-size: 0.9em;
         font-weight: 500;
         margin: 5px 0;
-    }
-    .variant-price {
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
+    .variant-price {{
         color: #B12704;
         font-weight: bold;
-    }
-    .variant-original-price {
+    }}
+    .variant-original-price {{
         text-decoration: line-through;
-        color: #666;
+        color: {config["frontend"]["theme"]["textColor"]};
         font-size: 0.9em;
-    }
-    .variant-discount {
-        background-color: #067D62;
+    }}
+    .variant-discount {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
         color: white;
         padding: 2px 6px;
         border-radius: 3px;
         font-size: 0.8em;
         display: inline-block;
-    }
-    .product-card {
+    }}
+    .product-card {{
         border: 1px solid #ddd;
         border-radius: 8px;
         padding: 15px;
         margin: 10px 0;
-        background-color: white;
-    }
-    .product-image {
+        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    .product-image {{
         max-width: 200px;
         height: auto;
         border-radius: 8px;
-    }
-    .product-title {
+    }}
+    .product-title {{
         font-size: 1.2em;
         font-weight: 500;
         margin: 10px 0;
-    }
-    .product-brand {
-        color: #666;
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
+    .product-brand {{
+        color: {config["frontend"]["theme"]["textColor"]};
         font-size: 0.9em;
-    }
-    .product-price {
+    }}
+    .product-price {{
         color: #B12704;
         font-size: 1.3em;
         font-weight: bold;
         margin: 10px 0;
-    }
-    .product-original-price {
+    }}
+    .product-original-price {{
         text-decoration: line-through;
-        color: #666;
-    }
-    .product-discount {
-        background-color: #067D62;
+        color: {config["frontend"]["theme"]["textColor"]};
+    }}
+    .product-discount {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
         color: white;
         padding: 4px 8px;
         border-radius: 4px;
         margin-left: 10px;
-    }
-    .product-rating {
-        color: #FF9900;
-    }
-    .product-reviews {
-        color: #666;
+    }}
+    .product-rating {{
+        color: {config["frontend"]["theme"]["primaryColor"]};
+    }}
+    .product-reviews {{
+        color: {config["frontend"]["theme"]["textColor"]};
         font-size: 0.9em;
-    }
-    .product-category {
-        background-color: #f0f2f6;
+    }}
+    .product-category {{
+        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
         padding: 4px 8px;
         border-radius: 4px;
         font-size: 0.9em;
-        color: #666;
+        color: {config["frontend"]["theme"]["textColor"]};
         display: inline-block;
         margin: 5px;
-    }
-    .product-commission {
-        color: #067D62;
+    }}
+    .product-commission {{
+        color: {config["frontend"]["theme"]["primaryColor"]};
         font-weight: bold;
-    }
-    .product-coupon {
-        background-color: #FF9900;
+    }}
+    .product-coupon {{
+        background-color: {config["frontend"]["theme"]["primaryColor"]};
         color: white;
         padding: 4px 8px;
         border-radius: 4px;
         font-weight: bold;
         margin: 5px 0;
         display: inline-block;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-@cache_manager.data_cache(ttl=300, show_spinner="正在加载CJ商品数据...")
+# 定义API基础URL
+API_BASE_URL = f"http://{config['api']['host']}:{config['api']['port']}"
+
+@cache_manager.data_cache(
+    ttl=config["frontend"]["cache"]["ttl"],
+    show_spinner=get_text("loading_products")
+)
 def load_cj_products(
-    api_url: str,
     page: int = 1,
     page_size: int = 20,
     category: Optional[str] = None,
@@ -159,18 +172,18 @@ def load_cj_products(
             "discount_min": discount_min
         }
         
-        response = requests.get(f"{api_url}/api/cj/products", params=params)
+        response = requests.get(f"{API_BASE_URL}/api/cj/products", params=params)
         response.raise_for_status()
         return response.json()
         
     except Exception as e:
-        st.error(f"加载CJ商品列表失败: {str(e)}")
+        st.error(f"{get_text('loading_failed')}: {str(e)}")
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
 def display_cj_products(products_data: Dict):
     """显示CJ商品列表"""
     if not products_data or not isinstance(products_data, dict):
-        st.warning("没有找到匹配的商品")
+        st.warning(get_text("no_matching_products"))
         return
     
     products = products_data.get("items", [])
@@ -179,11 +192,11 @@ def display_cj_products(products_data: Dict):
     page_size = products_data.get("page_size", 20)
     
     if len(products) == 0:
-        st.info("暂无商品数据")
+        st.info(get_text("no_products"))
         return
     
     # 显示商品总数
-    st.success(f"共找到 {total} 个商品")
+    st.success(f"{get_text('total_items')}: {total}")
     
     # 显示商品列表
     for product in products:
@@ -204,21 +217,21 @@ def display_cj_products(products_data: Dict):
                     )
                 if product.get("reviews"):
                     st.markdown(
-                        f'<div class="product-reviews">{product["reviews"]} 条评论</div>',
+                        f'<div class="product-reviews">{product["reviews"]} {get_text("reviews")}</div>',
                         unsafe_allow_html=True
                     )
             
             with cols[1]:
                 # 商品标题
                 st.markdown(
-                    f'<div class="product-title">{product.get("product_name", "未知商品")}</div>',
+                    f'<div class="product-title">{product.get("product_name", get_text("unknown_product"))}</div>',
                     unsafe_allow_html=True
                 )
                 
                 # 品牌信息
                 if product.get("brand_name"):
                     st.markdown(
-                        f'<div class="product-brand">品牌: {product["brand_name"]}</div>',
+                        f'<div class="product-brand">{get_text("brand")}: {product["brand_name"]}</div>',
                         unsafe_allow_html=True
                     )
                 
@@ -247,14 +260,14 @@ def display_cj_products(products_data: Dict):
                 # 佣金信息
                 if product.get("commission"):
                     st.markdown(
-                        f'<div class="product-commission">佣金: {product["commission"]}</div>',
+                        f'<div class="product-commission">{get_text("commission")}: {product["commission"]}</div>',
                         unsafe_allow_html=True
                     )
                 
                 # 优惠券信息
                 if product.get("coupon"):
                     st.markdown(
-                        f'<div class="product-coupon">优惠券: {product["coupon"]}</div>',
+                        f'<div class="product-coupon">{get_text("coupon")}: {product["coupon"]}</div>',
                         unsafe_allow_html=True
                     )
                 
@@ -277,14 +290,14 @@ def display_cj_products(products_data: Dict):
                 cols2 = st.columns(2)
                 with cols2[0]:
                     if product.get("url"):
-                        st.markdown(f"[🔗 查看商品详情]({product['url']})")
+                        st.markdown(f"[🔗 {get_text('view_details')}]({product['url']})")
                 with cols2[1]:
                     if product.get("affiliate_url"):
-                        st.markdown(f"[🔗 复制推广链接]({product['affiliate_url']})")
+                        st.markdown(f"[🔗 {get_text('affiliate_link')}]({product['affiliate_url']})")
             
             # 显示变体信息
             if product.get("variants") and len(product["variants"]) > 0:
-                with st.expander("查看商品变体"):
+                with st.expander(get_text("view_variants")):
                     for variant in product["variants"]:
                         st.markdown('<div class="variant-card">', unsafe_allow_html=True)
                         vcols = st.columns([1, 2, 1])
@@ -295,7 +308,7 @@ def display_cj_products(products_data: Dict):
                         
                         with vcols[1]:
                             st.markdown(
-                                f'<div class="variant-title">{variant.get("product_name", "未知变体")}</div>',
+                                f'<div class="variant-title">{variant.get("product_name", get_text("unknown_variant"))}</div>',
                                 unsafe_allow_html=True
                             )
                             
@@ -323,9 +336,9 @@ def display_cj_products(products_data: Dict):
                         
                         with vcols[2]:
                             if variant.get("url"):
-                                st.markdown(f"[🔗 查看详情]({variant['url']})")
+                                st.markdown(f"[🔗 {get_text('view_details')}]({variant['url']})")
                             if variant.get("affiliate_url"):
-                                st.markdown(f"[🔗 推广链接]({variant['affiliate_url']})")
+                                st.markdown(f"[🔗 {get_text('affiliate_link')}]({variant['affiliate_url']})")
                         
                         st.markdown('</div>', unsafe_allow_html=True)
             
@@ -334,7 +347,7 @@ def display_cj_products(products_data: Dict):
 
 def render_cj_products_page():
     """渲染CJ商品列表页面"""
-    st.title("CJ商品列表")
+    st.title(get_text("cj_products_title"))
     
     # 侧边栏筛选条件
     with st.sidebar:
@@ -342,44 +355,44 @@ def render_cj_products_page():
         language_selector()
         st.markdown("---")
         
-        st.subheader("筛选条件")
+        st.subheader(get_text("filter_conditions"))
         
         # 分类筛选
         category = st.selectbox(
-            "选择主分类",
+            get_text("select_main_category"),
             options=[None, "Home & Kitchen", "Pet Supplies", "Clothing, Shoes & Jewelry"],
-            format_func=lambda x: "全部分类" if x is None else x
+            format_func=lambda x: get_text("all_categories") if x is None else x
         )
         
         subcategory = st.selectbox(
-            "选择子分类",
+            get_text("select_subcategory"),
             options=[None, "Chairs", "Storage Cabinets", "Trees", "Basic Crates"],
-            format_func=lambda x: "全部子分类" if x is None else x
+            format_func=lambda x: get_text("all_subcategories") if x is None else x
         )
         
         # 其他筛选条件
         is_featured = st.selectbox(
-            "精选商品",
+            get_text("featured_products"),
             options=[2, 1, 0],
-            format_func=lambda x: "全部" if x == 2 else ("是" if x == 1 else "否")
+            format_func=lambda x: get_text("all") if x == 2 else (get_text("yes") if x == 1 else get_text("no"))
         )
         
         is_amazon_choice = st.selectbox(
-            "亚马逊之选",
+            get_text("amazon_choice"),
             options=[2, 1, 0],
-            format_func=lambda x: "全部" if x == 2 else ("是" if x == 1 else "否")
+            format_func=lambda x: get_text("all") if x == 2 else (get_text("yes") if x == 1 else get_text("no"))
         )
         
         have_coupon = st.selectbox(
-            "优惠券",
+            get_text("coupon"),
             options=[2, 1, 0],
-            format_func=lambda x: "全部" if x == 2 else ("有" if x == 1 else "无")
+            format_func=lambda x: get_text("all") if x == 2 else (get_text("has_coupon") if x == 1 else get_text("no_coupon"))
         )
         
-        discount_min = st.slider("最低折扣率", 0, 100, 0)
+        discount_min = st.slider(get_text("min_discount_rate"), 0, 100, 0)
         
         page_size = st.selectbox(
-            "每页显示数量",
+            get_text("items_per_page"),
             options=[10, 20, 50],
             index=1
         )
@@ -390,7 +403,6 @@ def render_cj_products_page():
     
     # 加载商品数据
     products_data = load_cj_products(
-        api_url="http://localhost:8000",
         page=st.session_state.cj_page,
         page_size=page_size,
         category=category,
@@ -412,16 +424,16 @@ def render_cj_products_page():
         
         with col1:
             if st.session_state.cj_page > 1:
-                if st.button("上一页"):
+                if st.button(get_text("prev_page")):
                     st.session_state.cj_page -= 1
                     st.rerun()
         
         with col2:
-            st.write(f"第 {st.session_state.cj_page} 页 / 共 {total_pages} 页")
+            st.write(get_text("page_info").format(current=st.session_state.cj_page, total=total_pages))
         
         with col3:
             if st.session_state.cj_page < total_pages:
-                if st.button("下一页"):
+                if st.button(get_text("next_page")):
                     st.session_state.cj_page += 1
                     st.rerun()
 

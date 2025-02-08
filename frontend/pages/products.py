@@ -163,6 +163,102 @@ st.markdown(f"""
     body {{
         color: {config["frontend"]["theme"]["textColor"]};
     }}
+    .coupon-card {{
+        display: flex;
+        width: 180px;
+        height: 28px;
+        margin: 5px 0;
+        position: relative;
+        border-radius: 2px;
+        overflow: hidden;
+    }}
+    
+    .coupon-left {{
+        width: 70px;
+        text-align: center;
+        font-size: 15px;
+        font-weight: 500;
+        color: white;
+        background: {config["frontend"]["theme"]["primaryColor"]};
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }}
+    
+    .coupon-right {{
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 13px;
+        font-weight: 400;
+        background: #FF5722;
+        position: relative;
+        margin-left: 1px;
+    }}
+    
+    .coupon-right::before {{
+        content: "";
+        position: absolute;
+        left: -4px;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        background: linear-gradient(90deg, transparent 0%, #FF5722 100%);
+    }}
+    
+    .coupon-left::after {{
+        content: "";
+        position: absolute;
+        right: -4px;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        background: linear-gradient(90deg, {config["frontend"]["theme"]["primaryColor"]} 0%, transparent 100%);
+    }}
+    
+    .coupon-left::before,
+    .coupon-right::after {{
+        content: "";
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: {config["frontend"]["theme"]["backgroundColor"]};
+    }}
+    
+    .coupon-left::before {{
+        right: -4px;
+        top: -4px;
+    }}
+    
+    .coupon-left::after {{
+        right: -4px;
+        bottom: -4px;
+    }}
+    
+    .coupon-right::before {{
+        left: -4px;
+        top: -4px;
+    }}
+    
+    .coupon-right::after {{
+        left: -4px;
+        bottom: -4px;
+    }}
+    
+    .coupon-value {{
+        font-size: 1.2em;
+        display: block;
+        margin-top: 4px;
+    }}
+    
+    .coupon-type {{
+        font-size: 0.9em;
+        opacity: 0.9;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
