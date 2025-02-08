@@ -22,6 +22,10 @@ A comprehensive platform for fetching Amazon deals and product information, feat
 - Implementation of intelligent caching mechanism for optimization and stability
 - Support for product discount and promotional information crawling
 - YAML configuration support for flexible crawler control
+- Clear distinction between data sources and API providers
+  - Data sources: bestseller/coupon crawlers
+  - API providers: PA-API (extensible for future APIs)
+- Separate endpoints for discount and coupon products
 
 ### Project Structure
 ```
@@ -352,6 +356,10 @@ DEBUG_MODE=True     # Enable debug mode
 - 支持多种输出格式（JSON、CSV、TXT）
 - 健康监控接口
 - YAML配置文件支持，灵活控制爬虫行为
+- 清晰区分数据来源和API提供者
+  - 数据来源：bestseller/coupon爬虫
+  - API提供者：PA-API（可扩展支持其他API）
+- 独立的折扣和优惠券商品接口
 
 ### 项目结构
 ```
@@ -683,3 +691,30 @@ uvicorn amazon_crawler_api:app --host 0.0.0.0 --port 8000
 
 ### License
 MIT
+
+### Data Model
+The system implements a clear separation between data sources and API providers:
+
+1. Data Sources:
+- `bestseller`: Products discovered through bestseller deals crawler
+- `coupon`: Products discovered through coupon deals crawler
+
+2. API Providers:
+- `pa-api`: Amazon Product Advertising API
+- Extensible for future API integrations
+
+3. API Behavior:
+- `/api/products/discount`: Returns only products from bestseller source
+- `/api/products/coupon`: Returns only products from coupon source
+- Both endpoints may use the same API provider (pa-api) for detailed product information
+
+4. 数据更新策略：
+- 新增商品时记录来源和API提供者
+- 更新商品时保留原始来源
+- 始终更新API提供者信息
+
+5. 最佳实践：
+- 使用source字段标记数据来源（bestseller/coupon）
+- 使用api_provider字段记录数据提供者
+- 基于source字段进行API过滤
+- 支持未来扩展其他API提供者

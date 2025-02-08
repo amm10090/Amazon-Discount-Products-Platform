@@ -3,6 +3,7 @@ import sys
 import signal
 import subprocess
 import psutil
+import threading
 from typing import List, Optional
 import time
 import yaml
@@ -79,12 +80,12 @@ class DevServiceManager:
             "environment": "development",
             "api": {
                 "host": "localhost",
-                "port": 8000,
+                "port": 5001,
                 "reload": True,
                 "workers": 1
             },
             "frontend": {
-                "port": 8501,
+                "port": 5002,
                 "host": "localhost"
             },
             "logging": {
@@ -116,25 +117,59 @@ class DevServiceManager:
         
         功能：
         1. 创建日志目录
-        2. 配置日志格式和处理器
-        3. 设置日志轮转
+        2. 配置控制台和文件日志
+        3. 设置不同模块的日志级别
+        4. 优化日志格式和输出
         """
         log_dir = project_root / "logs"
         log_dir.mkdir(exist_ok=True)
         
-        # 配置根日志记录器
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                RotatingFileHandler(
-                    log_dir / "dev_service.log",
-                    maxBytes=10*1024*1024,  # 10MB
-                    backupCount=5
-                ),
-                logging.StreamHandler()
-            ]
+        # 获取日志配置
+        log_config = self.config.get("logging", {})
+        log_level = getattr(logging, log_config.get("level", "DEBUG"))
+        
+        # 创建格式化器
+        console_formatter = logging.Formatter(
+            fmt=log_config.get("console", {}).get("format", "%(asctime)s [%(levelname)s] %(message)s"),
+            datefmt=log_config.get("console", {}).get("date_format", "%H:%M:%S")
         )
+        
+        file_formatter = logging.Formatter(
+            fmt=log_config.get("file", {}).get("format", "%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+        )
+        
+        # 配置根日志记录器
+        root_logger = logging.getLogger()
+        root_logger.setLevel(log_level)
+        
+        # 清除现有的处理器
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # 添加控制台处理器
+        if log_config.get("console", {}).get("enabled", True):
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(console_formatter)
+            console_handler.setLevel(log_level)
+            root_logger.addHandler(console_handler)
+        
+        # 添加文件处理器
+        if log_config.get("file", {}).get("enabled", True):
+            file_handler = RotatingFileHandler(
+                log_dir / "development.log",
+                maxBytes=log_config.get("file", {}).get("max_size", 10*1024*1024),
+                backupCount=log_config.get("file", {}).get("backup_count", 5)
+            )
+            file_handler.setFormatter(file_formatter)
+            file_handler.setLevel(log_level)
+            root_logger.addHandler(file_handler)
+        
+        # 配置各模块的日志级别
+        loggers_config = log_config.get("loggers", {})
+        for logger_name, level in loggers_config.items():
+            logging.getLogger(logger_name).setLevel(getattr(logging, level))
+        
+        # 创建开发服务管理器的日志记录器
         self.logger = logging.getLogger("DevServiceManager")
         
     def setup_signal_handlers(self):
@@ -160,18 +195,7 @@ class DevServiceManager:
         sys.exit(0)
         
     def start_api(self):
-        """
-        启动FastAPI服务
-        
-        功能：
-        1. 设置必要的环境变量
-        2. 配置Python路径
-        3. 启动uvicorn服务器
-        4. 设置日志重定向
-        
-        Returns:
-            subprocess.Popen: 启动的进程实例
-        """
+        """启动FastAPI服务"""
         config = self.config["api"]
         
         # 设置环境变量
@@ -181,33 +205,21 @@ class DevServiceManager:
         else:
             env["CONFIG_PATH"] = str(project_root / "config" / "development.yaml")
             
-        # 添加项目根目录到PYTHONPATH
         env["PYTHONPATH"] = str(project_root)
         
-        # 确保API服务使用正确的数据库路径
-        if "SCHEDULER_DB_PATH" in os.environ:
-            env["SCHEDULER_DB_PATH"] = os.environ["SCHEDULER_DB_PATH"]
-        if "PRODUCTS_DB_PATH" in os.environ:
-            env["PRODUCTS_DB_PATH"] = os.environ["PRODUCTS_DB_PATH"]
-            
         # 切换到src目录
         os.chdir(str(project_root / "src"))
         
-        # 构建uvicorn启动命令
         cmd = [
-            sys.executable,  # 使用当前Python解释器
+            sys.executable,
             "-m", "uvicorn",
-            "core.fastapi.amazon_crawler_api:app",  # 使用正确的模块路径
+            "core.fastapi.amazon_crawler_api:app",
             "--host", config['host'],
             "--port", str(config['port']),
-            "--reload",  # 开发环境始终启用热重载
-            "--reload-dir", str(project_root / "src"),  # 监视src目录的变化
-            "--log-level", "debug"  # 开发环境使用debug日志级别
+            "--reload",
+            "--reload-dir", str(project_root / "src"),
+            "--log-level", "error"
         ]
-        
-        self.logger.info(f"启动命令: {' '.join(cmd)}")
-        self.logger.info(f"工作目录: {os.getcwd()}")
-        self.logger.info(f"PYTHONPATH: {env.get('PYTHONPATH')}")
         
         process = subprocess.Popen(
             cmd,
@@ -215,24 +227,33 @@ class DevServiceManager:
             stderr=subprocess.PIPE,
             universal_newlines=True,
             env=env,
-            bufsize=1  # 行缓冲
+            bufsize=1
         )
         
-        # 创建日志线程
         def log_output(pipe, prefix):
             for line in pipe:
-                self.logger.info(f"{prefix}: {line.strip()}")
-                
-        import threading
+                # 过滤不必要的日志信息
+                if any(skip in line for skip in [
+                    "INFO:     Started server process",
+                    "INFO:     Waiting for application startup",
+                    "INFO:     Uvicorn running on",
+                    "INFO:     Application startup complete"
+                ]):
+                    continue
+                if "ERROR" in line:
+                    self.logger.error(f"{line.strip()}")
+                elif "WARNING" in line:
+                    self.logger.warning(f"{line.strip()}")
+                else:
+                    self.logger.info(f"{line.strip()}")
+        
         threading.Thread(target=log_output, args=(process.stdout, "FastAPI"), daemon=True).start()
         threading.Thread(target=log_output, args=(process.stderr, "FastAPI Error"), daemon=True).start()
         
         self.processes.append(process)
-        self.logger.info(f"FastAPI 开发服务已启动: http://{config['host']}:{config['port']}")
+        self.logger.info(f"✓ FastAPI开发服务已启动: http://{config['host']}:{config['port']}")
         
-        # 切回项目根目录
         os.chdir(str(project_root))
-        
         return process
         
     def is_port_in_use(self, port: int) -> bool:
@@ -259,61 +280,49 @@ class DevServiceManager:
         frontend_path = project_root / "frontend" / "main.py"
         
         if not frontend_path.exists():
-            print(f"错误: 找不到前端入口文件 {frontend_path}")
+            self.logger.error(f"错误: 找不到前端入口文件 {frontend_path}")
             return None
-            
-        # 查找可用端口
-        try:
-            port = self.find_available_port(config['port'])
-            if port != config['port']:
-                self.logger.warning(f"端口 {config['port']} 已被占用，使用端口 {port}")
-        except RuntimeError as e:
-            self.logger.error(str(e))
-            return None
-            
-        # 设置环境变量
-        env = os.environ.copy()
-        if self.config_path:
-            env["CONFIG_PATH"] = str(self.config_path)
-        else:
-            env["CONFIG_PATH"] = str(project_root / "config" / "development.yaml")
-            
-        # 添加项目根目录到PYTHONPATH
-        env["PYTHONPATH"] = str(project_root)
             
         cmd = [
-            sys.executable,  # 使用当前Python解释器
-            "-m", "streamlit",
+            "streamlit",
             "run",
             str(frontend_path),
-            "--server.port", str(port),
-            "--server.address", config['host']
+            "--server.port", str(config['port']),
+            "--server.address", config['host'],
+            "--logger.level=error",
+            "--logger.messageFormat=%(message)s"
         ]
-        
-        self.logger.info(f"启动命令: {' '.join(cmd)}")
-        self.logger.info(f"工作目录: {os.getcwd()}")
-        self.logger.info(f"PYTHONPATH: {env.get('PYTHONPATH')}")
         
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
-            env=env,
-            bufsize=1  # 行缓冲
+            universal_newlines=True
         )
         
-        # 创建日志线程
         def log_output(pipe, prefix):
             for line in pipe:
-                self.logger.info(f"{prefix}: {line.strip()}")
-                
-        import threading
+                # 过滤Streamlit的启动信息
+                if any(skip in line for skip in [
+                    "You can now view your Streamlit app in your browser",
+                    "Local URL:",
+                    "Network URL:",
+                    "For better performance, install the Watchdog module:",
+                    "  $ pip install watchdog"
+                ]):
+                    continue
+                if "error" in line.lower():
+                    self.logger.error(f"{line.strip()}")
+                elif "warning" in line.lower():
+                    self.logger.warning(f"{line.strip()}")
+                else:
+                    self.logger.info(f"{line.strip()}")
+        
         threading.Thread(target=log_output, args=(process.stdout, "Streamlit"), daemon=True).start()
         threading.Thread(target=log_output, args=(process.stderr, "Streamlit Error"), daemon=True).start()
         
         self.processes.append(process)
-        self.logger.info(f"Streamlit 开发前端已启动: http://{config['host']}:{port}")
+        self.logger.info(f"✓ Streamlit开发前端已启动: http://{config['host']}:{config['port']}")
         return process
         
     def stop_process(self, process: subprocess.Popen):
@@ -385,62 +394,46 @@ class DevServiceManager:
             self.logger.error(f"重启进程失败: {e}")
             
     async def start_all(self):
-        """
-        启动所有服务
+        """启动所有服务"""
+        self.logger.info("正在启动开发环境服务...")
         
-        启动顺序：
-        1. 初始化并启动调度器
-        2. 启动API服务
-        3. 等待API服务就绪
-        4. 启动前端服务
-        5. 开始进程监控
-        
-        错误处理：
-        - 任何服务启动失败都会导致所有服务关闭
-        - 自动重启异常退出的服务
-        """
-        print("正在启动开发环境服务...")
-        
-        # 启动调度器
         try:
             await self.init_scheduler()
-            print("调度器服务已启动")
+            self.logger.info("✓ 调度器服务已启动")
+            
+            api_process = self.start_api()
+            if not api_process:
+                self.logger.error("✗ API服务启动失败")
+                if self.scheduler:
+                    self.scheduler.stop()
+                self.stop_all()
+                return False
+            
+            await asyncio.sleep(2)
+            
+            frontend_process = self.start_frontend()
+            if not frontend_process:
+                self.logger.error("✗ 前端服务启动失败")
+                if self.scheduler:
+                    self.scheduler.stop()
+                self.stop_all()
+                return False
+            
+            self.logger.info("\n✓ 所有开发服务启动完成!")
+            self.logger.info("按 Ctrl+C 停止服务\n")
+            
+            while True:
+                for process in self.processes[:]:
+                    if process.poll() is not None:
+                        self.logger.warning("检测到服务异常退出，正在重启...")
+                        self.restart_process(process)
+                await asyncio.sleep(1)
         except Exception as e:
-            print(f"启动调度器失败: {e}")
-            return False
-        
-        # 启动API服务
-        api_process = self.start_api()
-        if not api_process:
-            print("启动API服务失败")
+            self.logger.error(f"启动服务时发生错误: {e}")
             if self.scheduler:
                 self.scheduler.stop()
             self.stop_all()
             return False
-            
-        # 等待API服务启动
-        await asyncio.sleep(2)
-        
-        # 启动前端服务
-        frontend_process = self.start_frontend()
-        if not frontend_process:
-            print("启动前端服务失败")
-            if self.scheduler:
-                self.scheduler.stop()
-            self.stop_all()
-            return False
-            
-        print("\n所有开发服务已启动!")
-        print("使用 Ctrl+C 可以停止所有服务")
-        
-        # 监控进程
-        while True:
-            for process in self.processes[:]:
-                if process.poll() is not None:
-                    self.logger.warning(f"进程 {process.pid} 已退出，退出码: {process.returncode}")
-                    self.logger.info("正在重启进程...")
-                    self.restart_process(process)
-            await asyncio.sleep(1)
 
 async def main():
     """

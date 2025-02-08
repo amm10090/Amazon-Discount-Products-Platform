@@ -21,8 +21,13 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from loguru import logger
-from core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
-from core.amazon_product_api import AmazonProductAPI
+import sys
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
+from src.core.amazon_product_api import AmazonProductAPI
+from models.database import SessionLocal
+from models.scheduler import JobHistoryModel
 
 class SchedulerManager:
     """定时任务管理器
@@ -164,7 +169,8 @@ class SchedulerManager:
             partner_tag=partner_tag
         )
         
-    async def _execute_crawler(self, job_id: str, crawler_type: str, max_items: int):
+    @staticmethod
+    async def _execute_crawler(job_id: str, crawler_type: str, max_items: int):
         """执行爬虫任务
         
         根据指定的爬虫类型执行相应的数据采集任务。
@@ -181,18 +187,31 @@ class SchedulerManager:
             logger.info(f"开始执行任务 {job_id} - {crawler_type}")
             start_time = datetime.now()
             
+            # 从环境变量获取配置
+            headless = os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
+            timeout = int(os.getenv("CRAWLER_TIMEOUT", "30"))
+            batch_size = int(os.getenv("CRAWLER_BATCH_SIZE", "10"))
+            
             # 创建任务配置
             config = Config(
                 max_items=max_items,
-                batch_size=10,
-                timeout=30,
-                headless=True
+                batch_size=batch_size,
+                timeout=timeout,
+                headless=headless,
+                crawler_types=[crawler_type]  # 设置爬虫类型
+            )
+            
+            # 初始化API客户端
+            api = AmazonProductAPI(
+                access_key=os.getenv("AMAZON_ACCESS_KEY"),
+                secret_key=os.getenv("AMAZON_SECRET_KEY"),
+                partner_tag=os.getenv("AMAZON_PARTNER_TAG")
             )
             
             # 根据类型执行不同的爬虫
             if crawler_type == "bestseller":
                 result = await crawl_bestseller_products(
-                    self.api,
+                    api,
                     config.max_items,
                     config.batch_size,
                     config.timeout,
@@ -200,7 +219,7 @@ class SchedulerManager:
                 )
             elif crawler_type == "coupon":
                 result = await crawl_coupon_products(
-                    self.api,
+                    api,
                     config.max_items,
                     config.batch_size,
                     config.timeout,
@@ -216,8 +235,31 @@ class SchedulerManager:
                 f"耗时: {duration:.2f}秒"
             )
             
+            # 记录任务执行状态
+            with SessionLocal() as db:
+                job_history = JobHistoryModel(
+                    job_id=job_id,
+                    start_time=start_time,
+                    end_time=datetime.now(),
+                    status="success",
+                    items_collected=result
+                )
+                db.add(job_history)
+                db.commit()
+            
         except Exception as e:
             logger.error(f"任务 {job_id} 执行失败: {str(e)}")
+            # 记录失败状态
+            with SessionLocal() as db:
+                job_history = JobHistoryModel(
+                    job_id=job_id,
+                    start_time=start_time if 'start_time' in locals() else datetime.now(),
+                    end_time=datetime.now(),
+                    status="failed",
+                    error=str(e)
+                )
+                db.add(job_history)
+                db.commit()
             
     def add_job(self, job_config: Dict[str, Any]):
         """添加定时任务
@@ -249,9 +291,9 @@ class SchedulerManager:
         else:
             raise ValueError(f"不支持的任务类型: {job_type}")
             
-        # 添加任务
+        # 添加任务，使用静态方法
         self.scheduler.add_job(
-            self._execute_crawler,
+            SchedulerManager._execute_crawler,
             trigger=trigger,
             id=job_id,
             args=[

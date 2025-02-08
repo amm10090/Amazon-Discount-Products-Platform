@@ -4,13 +4,13 @@ environment: development
 
 api:
   host: "localhost"
-  port: 8000
+  port: 5001
   reload: true
   workers: 1  # 开发环境使用单个worker便于调试
 
 frontend:
   host: "localhost"
-  port: 8501
+  port: 5002
   theme:
     primaryColor: "#ff9900"
     backgroundColor: "#ffffff"
@@ -30,10 +30,25 @@ frontend:
 # 日志配置
 logging:
   level: DEBUG  # 开发环境使用DEBUG级别
-  max_size: 10485760  # 10MB
-  backup_count: 5
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/development.log"
+  console:
+    enabled: true
+    format: "%(asctime)s [%(levelname)s] %(message)s"
+    date_format: "%H:%M:%S"
+  file:
+    enabled: true
+    path: "logs/development.log"
+    max_size: 10485760  # 10MB
+    backup_count: 5
+    format: "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+  # 各模块日志级别单独配置
+  loggers:
+    uvicorn: WARNING
+    uvicorn.access: WARNING
+    uvicorn.error: WARNING
+    apscheduler: WARNING
+    fastapi: INFO
+    streamlit: WARNING
+    sqlalchemy: WARNING
 
 # 数据库配置
 database:

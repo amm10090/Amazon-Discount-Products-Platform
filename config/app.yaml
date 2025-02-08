@@ -1,51 +1,77 @@
-# API服务配置
-api:
-  host: "localhost"
-  port: 8000
-  reload: true  # 开发模式下启用热重载
+# 生产环境配置
 
-# 前端服务配置
+environment: production
+
+api:
+  host: "0.0.0.0"
+  port: 5001
+  reload: false
+  workers: 4  # 根据CPU核心数调整
+
 frontend:
-  host: "localhost"
-  port: 8501
+  host: "0.0.0.0"
+  port: 5002
+  theme:
+    primaryColor: "#ff9900"
+    backgroundColor: "#ffffff"
+    secondaryBackgroundColor: "#f0f2f6"
+    textColor: "#31333F"
+  page:
+    layout: "wide"
+    initial_sidebar_state: "expanded"
+  cache:
+    ttl: 300  # 缓存过期时间（秒）
+    max_entries: 1000  # 最大缓存条目数
+  menu_items:
+    get_help_url: "https://github.com/yourusername/amazon-deals-platform"
+    report_bug_url: "https://github.com/yourusername/amazon-deals-platform/issues"
+    about: "Amazon优惠商品平台 - 帮助用户发现和追踪Amazon平台上的优惠商品"
+
+# 日志配置
+logging:
+  level: INFO
+  use_colors: true
+  
+  file:
+    enabled: true
+    path: logs
+    max_size: 10485760  # 10MB
+    backup_count: 5
+    filename: service.log
+    format: "[%(asctime)s] %(name)s - %(levelname)s: %(message)s"
+    date_format: "%Y-%m-%d %H:%M:%S"
+  
+  console:
+    enabled: true
+    format: "%(message)s"
+  
+  buffer:
+    size: 1000
+    flush_interval: 5
+  
+  components:
+    crawler:
+      file: logs/crawler.log
+      level: DEBUG
+    api:
+      file: logs/api.log
+      level: INFO
+    frontend:
+      file: logs/frontend.log
+      level: INFO
+    scheduler:
+      file: logs/scheduler.log
+      level: INFO
 
 # 数据库配置
 database:
-  url: "sqlite:///amazon_products.db"
+  url: "sqlite:///scheduler.db"  # 生产环境建议使用PostgreSQL
+  pool_size: 20
+  max_overflow: 10
 
 # 缓存配置
 cache:
+  type: "redis"
+  url: "redis://localhost:6379/0"
   ttl: 3600  # 缓存过期时间（秒）
-  max_size: 1000  # 最大缓存条目数
-
-# 爬虫配置
-crawler:
-  max_items: 100
-  batch_size: 10
-  timeout: 30
-  headless: true
-
-# 调度器配置
-scheduler:
-  timezone: "Asia/Shanghai"
-  job_store:
-    url: "sqlite:///jobs.db"
-  jobs:
-    - id: "bestseller_daily"
-      type: "cron"
-      hour: "*/4"  # 每4小时执行一次
-      crawler_type: "bestseller"
-      max_items: 100
-      
-    - id: "coupon_hourly"
-      type: "interval"
-      hours: 1  # 每小时执行一次
-      crawler_type: "coupon"
-      max_items: 50
-      
-    - id: "full_sync_daily"
-      type: "cron"
-      hour: "2"  # 每天凌晨2点
-      minute: "30"
-      crawler_type: "all"
-      max_items: 200 
+  prefix: "amazon_platform:"  # 缓存键前缀 

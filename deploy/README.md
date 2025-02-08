@@ -8,6 +8,8 @@
 - PostgreSQL（可选）
 - Nginx
 - pnpm（用于前端依赖管理）
+- Chrome/Chromium
+- ChromeDriver
 
 ### 安装系统依赖
 ```bash
@@ -18,8 +20,54 @@ sudo apt upgrade -y
 # 安装必要的系统依赖
 sudo apt install -y python3-pip python3-dev build-essential libssl-dev libffi-dev python3-setuptools nginx postgresql postgresql-contrib
 
+# 安装 Chrome 和相关依赖
+sudo apt install -y chromium-browser chromium-chromedriver
+# 或者如果需要安装 Google Chrome
+wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y ./google-chrome-stable_current_amd64.deb
+
 # 安装pnpm
 curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# 验证 Chrome 和 ChromeDriver 安装
+google-chrome --version  # 或 chromium-browser --version
+chromedriver --version
+
+# 确保 ChromeDriver 在系统路径中
+sudo ln -s /usr/lib/chromium-browser/chromedriver /usr/local/bin/chromedriver
+```
+
+### ChromeDriver 配置
+```bash
+# 创建 ChromeDriver 配置目录
+sudo mkdir -p /opt/selenium
+sudo chown -R your_user:your_user /opt/selenium
+
+# 设置 ChromeDriver 环境变量（添加到 .env 文件）
+echo "CHROME_DRIVER_PATH=/usr/local/bin/chromedriver" >> .env
+echo "CHROME_BINARY_PATH=/usr/bin/google-chrome" >> .env  # 或 /usr/bin/chromium-browser
+```
+
+注意：确保 ChromeDriver 版本与已安装的 Chrome/Chromium 版本匹配。如果版本不匹配，可能需要手动下载对应版本的 ChromeDriver：
+
+```bash
+# 查看 Chrome 版本
+google-chrome --version  # 或 chromium-browser --version
+
+# 下载对应版本的 ChromeDriver（替换 VERSION 为对应版本号）
+wget https://chromedriver.storage.googleapis.com/VERSION/chromedriver_linux64.zip
+unzip chromedriver_linux64.zip
+sudo mv chromedriver /usr/local/bin/
+sudo chmod +x /usr/local/bin/chromedriver
+```
+
+### 爬虫相关配置
+在 supervisor 配置文件中添加必要的环境变量：
+
+```ini
+[program:amazon_platform]
+# ... 其他配置 ...
+environment=CHROME_DRIVER_PATH="/usr/local/bin/chromedriver",CHROME_BINARY_PATH="/usr/bin/google-chrome",CONFIG_PATH="/path/to/your/project/config/production.yaml"
 ```
 
 ## 2. 项目部署
@@ -69,86 +117,10 @@ sudo apt install supervisor
 sudo nano /etc/supervisor/conf.d/amazon_platform.conf
 ```
 
-添加以下配置：
-```ini
-[group:amazon_platform]
-programs=fastapi_server,streamlit_frontend,scheduler_server
+# 复制新的配置文件到 supervisor 配置目录
+sudo cp deploy/supervisor/amazon_platform.conf /etc/supervisor/conf.d/
 
-; FastAPI服务
-[program:fastapi_server]
-directory=/root/Amazon-Discount-Products-Platform
-command=/root/Amazon-Discount-Products-Platform/venv/bin/uvicorn amazon_crawler_api:app --host 0.0.0.0 --port 5001 --workers 4
-user=root
-autostart=true
-autorestart=true
-startsecs=10
-stopwaitsecs=10
-startretries=3
-redirect_stderr=true
-stdout_logfile=/var/log/amazon_platform/fastapi.log
-stdout_logfile_maxbytes=20MB
-stdout_logfile_backups=10
-stderr_logfile=/var/log/amazon_platform/fastapi_err.log
-stderr_logfile_maxbytes=20MB
-stderr_logfile_backups=10
-environment=PYTHONPATH="/root/Amazon-Discount-Products-Platform",PATH="/root/Amazon-Discount-Products-Platform/venv/bin:%(ENV_PATH)s",CONFIG_PATH="/root/Amazon-Discount-Products-Platform/config/production.yaml"
-
-; Streamlit前端服务
-[program:streamlit_frontend]
-directory=/root/Amazon-Discount-Products-Platform
-command=/root/Amazon-Discount-Products-Platform/venv/bin/streamlit run frontend/main.py --server.port 5002 --server.address 0.0.0.0
-user=root
-autostart=true
-autorestart=true
-startsecs=10
-stopwaitsecs=10
-startretries=3
-redirect_stderr=true
-stdout_logfile=/var/log/amazon_platform/streamlit.log
-stdout_logfile_maxbytes=20MB
-stdout_logfile_backups=10
-stderr_logfile=/var/log/amazon_platform/streamlit_err.log
-stderr_logfile_maxbytes=20MB
-stderr_logfile_backups=10
-environment=PYTHONPATH="/root/Amazon-Discount-Products-Platform",PATH="/root/Amazon-Discount-Products-Platform/venv/bin:%(ENV_PATH)s",CONFIG_PATH="/root/Amazon-Discount-Products-Platform/config/production.yaml"
-
-; 调度器服务
-[program:scheduler_server]
-directory=/root/Amazon-Discount-Products-Platform
-command=/root/Amazon-Discount-Products-Platform/venv/bin/python run.py --config config/production.yaml
-user=root
-autostart=true
-autorestart=true
-startsecs=10
-stopwaitsecs=10
-startretries=3
-redirect_stderr=true
-stdout_logfile=/var/log/amazon_platform/scheduler.log
-stdout_logfile_maxbytes=20MB
-stdout_logfile_backups=10
-stderr_logfile=/var/log/amazon_platform/scheduler_err.log
-stderr_logfile_maxbytes=20MB
-stderr_logfile_backups=10
-environment=PYTHONPATH="/root/Amazon-Discount-Products-Platform",PATH="/root/Amazon-Discount-Products-Platform/venv/bin:%(ENV_PATH)s",CONFIG_PATH="/root/Amazon-Discount-Products-Platform/config/production.yaml"
-
-[supervisord]
-logfile=/var/log/supervisor/supervisord.log
-logfile_maxbytes=50MB
-logfile_backups=10
-loglevel=info
-pidfile=/var/run/supervisord.pid
-nodaemon=false
-minfds=1024
-minprocs=200
-
-; 内存监控
-[eventlistener:memmon]
-command=memmon -p fastapi_server=500MB streamlit_frontend=300MB scheduler_server=200MB
-events=TICK_60 
-
-```
-
-### 配置Nginx
+### 配置Nginx(可选)
 ```bash
 sudo nano /etc/nginx/sites-available/amazon_platform
 ```
@@ -183,11 +155,35 @@ sudo systemctl restart nginx
 # 重启Supervisor服务
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl restart amazon_platform
+sudo supervisorctl restart amazon_platform all
 
 # 检查服务状态
 sudo supervisorctl status amazon_platform
 ```
+## 4.1更新和重启服务
+# 重新加载supervisor配置
+sudo supervisorctl reread
+
+# 更新配置
+sudo supervisorctl update
+
+# 重启所有服务
+sudo supervisorctl restart amazon_platform:*
+
+# 检查状态
+sudo supervisorctl status
+## 4.2相关指令
+关闭单个进程：sudo supervisorctl stop <进程名>
+
+关闭整个组：sudo supervisorctl stop <组名>:*
+
+关闭所有进程：sudo supervisorctl stop all
+
+停止 supervisor 服务：sudo systemctl stop supervisor
+
+禁用 supervisor 服务：sudo systemctl disable supervisor
+
+重启 supervisor 服务：sudo systemctl restart supervisor
 
 ## 5. 定时任务配置
 
@@ -274,4 +270,179 @@ sudo supervisorctl restart amazon_platform
    - 监控系统资源使用
    - 检查日志文件大小
    - 清理临时文件
-   - 更新SSL证书 
+   - 更新SSL证书
+
+## 使用 Supervisor 部署
+
+### 1. 安装 Supervisor
+
+```bash
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install supervisor
+
+# CentOS/RHEL
+sudo yum install supervisor
+sudo systemctl enable supervisord
+sudo systemctl start supervisord
+```
+
+### 2. 创建 Supervisor 配置文件
+
+在 `/etc/supervisor/conf.d/` 目录下创建配置文件：
+
+```bash
+sudo nano /etc/supervisor/conf.d/amazon_platform.conf
+```
+
+配置文件内容：
+
+```ini
+[program:amazon_platform]
+directory=/path/to/your/project
+command=/path/to/your/venv/bin/python run.py
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/supervisor/amazon_platform.err.log
+stdout_logfile=/var/log/supervisor/amazon_platform.out.log
+environment=CONFIG_PATH="/path/to/your/project/config/production.yaml"
+
+user=your_user  # 运行服务的用户
+numprocs=1
+process_name=%(program_name)s_%(process_num)02d
+```
+
+### 3. 创建日志目录
+
+```bash
+sudo mkdir -p /var/log/supervisor
+sudo chown -R your_user:your_user /var/log/supervisor
+```
+
+### 4. 更新 Supervisor 配置
+
+```bash
+# 重新加载配置
+sudo supervisorctl reread
+
+# 更新配置
+sudo supervisorctl update
+
+# 启动服务
+sudo supervisorctl start amazon_platform:*
+```
+
+### 5. 查看服务状态
+
+```bash
+# 查看所有服务状态
+sudo supervisorctl status
+
+# 查看特定服务状态
+sudo supervisorctl status amazon_platform:*
+```
+
+### 6. 常用管理命令
+
+```bash
+# 启动服务
+sudo supervisorctl start amazon_platform:*
+
+# 停止服务
+sudo supervisorctl stop amazon_platform:*
+
+# 重启服务
+sudo supervisorctl restart amazon_platform:*
+
+# 查看日志
+sudo tail -f /var/log/supervisor/amazon_platform.out.log
+sudo tail -f /var/log/supervisor/amazon_platform.err.log
+```
+
+### 7. 注意事项
+
+1. 确保配置文件中的路径都是绝对路径
+2. 确保运行服务的用户有足够的权限
+3. 确保环境变量正确设置
+4. 建议在生产环境使用虚拟环境
+5. 定期检查日志文件大小，必要时进行日志轮转
+
+### 8. 日志轮转配置
+
+创建日志轮转配置文件：
+
+```bash
+sudo nano /etc/logrotate.d/supervisor
+```
+
+添加以下内容：
+
+```
+/var/log/supervisor/*.log {
+    weekly
+    missingok
+    rotate 52
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+}
+```
+
+### 9. 故障排查
+
+1. 检查服务状态：
+```bash
+sudo supervisorctl status
+```
+
+2. 检查日志文件：
+```bash
+sudo tail -f /var/log/supervisor/amazon_platform.out.log
+sudo tail -f /var/log/supervisor/amazon_platform.err.log
+```
+
+3. 检查 Supervisor 系统日志：
+```bash
+sudo tail -f /var/log/supervisor/supervisord.log
+```
+
+4. 常见问题解决：
+
+- 如果服务无法启动，检查：
+  - 配置文件路径是否正确
+  - 用户权限是否足够
+  - 虚拟环境路径是否正确
+  - 项目依赖是否安装完整
+
+- 如果服务频繁重启：
+  - 检查错误日志
+  - 确认内存使用情况
+  - 检查磁盘空间
+
+### 10. 生产环境配置建议
+
+1. 内存管理：
+```ini
+[program:amazon_platform]
+# ... 其他配置 ...
+stopasgroup=true
+killasgroup=true
+```
+
+2. 环境变量设置：
+```ini
+environment=CONFIG_PATH="/path/to/your/project/config/production.yaml",PYTHONPATH="/path/to/your/project"
+```
+
+3. 启动重试设置：
+```ini
+startretries=3
+startsecs=10
+```
+
+4. 进程控制：
+```ini
+stopwaitsecs=60
+stopsignal=TERM
+``` 

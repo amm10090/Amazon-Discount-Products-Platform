@@ -1,30 +1,55 @@
+"""
+Amazon爬虫和产品API FastAPI服务
+
+这个模块提供了一个FastAPI应用，用于：
+1. 爬取Amazon商品信息
+2. 管理产品数据
+3. 调度定时任务
+4. 提供RESTful API接口
+
+主要功能：
+- 爬虫任务管理
+- 产品信息查询和管理
+- 定时任务调度
+- 缓存管理
+"""
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, Depends
 from typing import Dict, List, Optional
 from datetime import datetime
 import asyncio
 import uvicorn
 import sys
-from pathlib import Path
-
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.append(str(project_root))
-
-from ..amazon_bestseller import crawl_deals, save_results
 import os
+from pathlib import Path as PathLib
+import aiohttp
+from sqlalchemy import or_, and_
 from fastapi.responses import FileResponse, JSONResponse
 from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
-from models.product import ProductInfo
-from pydantic import BaseModel
-from ..amazon_product_api import AmazonProductAPI
+from models.product import ProductInfo, ProductOffer
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
-from models.database import SessionLocal, init_db
+from models.database import SessionLocal, init_db, Product, ProductVariant
 from models.product_service import ProductService
 from enum import Enum
 from models.scheduler import SchedulerManager
 from models.scheduler_models import JobConfig, JobStatus, SchedulerStatus, JobHistory
 import pytz
+import logging
+
+# 添加项目根目录到Python路径
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+try:
+    from src.core.amazon_bestseller import crawl_deals, save_results
+    from src.core.amazon_product_api import AmazonProductAPI
+    from src.core.cj_api_client import CJAPIClient
+except ImportError as e:
+    logging.error(f"导入错误: {str(e)}")
+    raise
 
 # 加载环境变量
 load_dotenv()
@@ -39,32 +64,76 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 存储任务状态
+# 存储任务状态的字典
 tasks_status: Dict[str, Dict] = {}
 
-# 产品API请求模型
+logger = logging.getLogger(__name__)
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求模型"""
+    asins: List[str] = Field(..., description="要删除的商品ASIN列表")
+
 class ProductRequest(BaseModel):
+    """
+    产品API请求模型
+    
+    属性:
+        asins: ASIN列表
+        marketplace: 亚马逊市场域名，默认为美国站
+    """
     asins: List[str]
     marketplace: Optional[str] = "www.amazon.com"
 
-# 时区更新请求模型
 class TimezoneUpdate(BaseModel):
+    """
+    时区更新请求模型
+    
+    属性:
+        timezone: 新的时区字符串
+    """
     timezone: str
 
-# 排序字段枚举
 class SortField(str, Enum):
+    """
+    排序字段枚举
+    
+    可选值:
+        price: 按价格排序
+        discount: 按折扣排序
+        timestamp: 按时间戳排序
+    """
     price = "price"
     discount = "discount"
     timestamp = "timestamp"
 
-# 排序方向枚举
 class SortOrder(str, Enum):
+    """
+    排序方向枚举
+    
+    可选值:
+        asc: 升序
+        desc: 降序
+    """
     asc = "asc"
     desc = "desc"
 
-# 数据库会话依赖
+class CategoryStats(BaseModel):
+    """类别统计响应模型"""
+    main_categories: Dict[str, int]
+    sub_categories: Dict[str, int]
+    bindings: Dict[str, int]
+    product_groups: Dict[str, int]
+
 def get_db():
-    """获取数据库会话"""
+    """
+    数据库会话依赖函数
+    
+    用于FastAPI依赖注入，确保每个请求都有独立的数据库会话，
+    并在请求结束后正确关闭会话
+    
+    Yields:
+        Session: SQLAlchemy会话对象
+    """
     db = SessionLocal()
     try:
         yield db
@@ -72,11 +141,21 @@ def get_db():
         try:
             db.close()
         except Exception:
-            pass  # 忽略关闭时的错误
+            pass
 
-# 初始化AmazonProductAPI
 def get_product_api(marketplace: str = "www.amazon.com") -> AmazonProductAPI:
-    """获取AmazonProductAPI实例"""
+    """
+    获取AmazonProductAPI实例
+    
+    Args:
+        marketplace: 亚马逊市场域名，默认为美国站
+        
+    Returns:
+        AmazonProductAPI: API实例
+        
+    Raises:
+        HTTPException: 当缺少必要的API凭证时抛出
+    """
     access_key = os.getenv("AMAZON_ACCESS_KEY")
     secret_key = os.getenv("AMAZON_SECRET_KEY")
     partner_tag = os.getenv("AMAZON_PARTNER_TAG")
@@ -95,12 +174,20 @@ def get_product_api(marketplace: str = "www.amazon.com") -> AmazonProductAPI:
     )
 
 async def crawl_task(task_id: str, params: CrawlerRequest):
-    """后台爬虫任务"""
+    """
+    后台爬虫任务
+    
+    Args:
+        task_id: 任务ID
+        params: 爬虫请求参数
+        
+    执行爬虫任务并更新任务状态。任务完成后，结果将保存到文件系统。
+    """
     try:
         start_time = datetime.now()
         
         # 创建输出目录
-        output_dir = Path("crawler_results")
+        output_dir = PathLib("crawler_results")
         output_dir.mkdir(exist_ok=True)
         
         # 执行爬虫
@@ -131,11 +218,19 @@ async def crawl_task(task_id: str, params: CrawlerRequest):
             "timestamp": datetime.now()
         }
 
+# 系统状态相关API
+@app.get("/api/health")
+async def health_check():
+    """健康检查端点"""
+    return {
+        "status": "healthy",
+        "service": "amazon-data-api",
+        "timestamp": datetime.now().isoformat()
+    }
+
+# 爬虫任务相关API
 @app.post("/api/crawl", response_model=CrawlerResponse)
-async def start_crawler(
-    params: CrawlerRequest,
-    background_tasks: BackgroundTasks
-):
+async def start_crawler(params: CrawlerRequest, background_tasks: BackgroundTasks):
     """启动爬虫任务"""
     task_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -188,7 +283,7 @@ async def download_results(task_id: str):
     if task_info["status"] != "completed":
         raise HTTPException(status_code=400, detail="Task not completed yet")
         
-    output_file = Path("crawler_results") / f"{task_id}.{task_info.get('output_format', 'json')}"
+    output_file = PathLib("crawler_results") / f"{task_id}.{task_info.get('output_format', 'json')}"
     if not output_file.exists():
         raise HTTPException(status_code=404, detail="Result file not found")
         
@@ -198,13 +293,191 @@ async def download_results(task_id: str):
         media_type="application/octet-stream"
     )
 
-# 新增产品API相关端点
-@app.post("/api/products", response_model=List[ProductInfo])
-async def get_products(request: ProductRequest):
-    """获取商品信息"""
+# 商品管理相关API
+@app.get("/api/products/discount")
+async def list_discount_products(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    sort_by: Optional[str] = Query(None, description="排序字段"),
+    sort_order: str = Query("desc", description="排序方向"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    source: Optional[str] = Query(None, description="数据来源：pa-api/cj/all"),
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
+):
+    """获取折扣商品列表"""
+    try:
+        products = ProductService.list_discount_products(
+            db=db,
+            page=page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_prime_only=is_prime_only,
+            source=source,  # 添加数据来源筛选
+            min_commission=min_commission  # 添加佣金筛选
+        )
+        return products if products else []
+    except Exception as e:
+        logger.error(f"获取折扣商品列表失败: {str(e)}")
+        return []
+
+@app.get("/api/products/coupon")
+async def list_coupon_products(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    sort_by: Optional[str] = Query(None, description="排序字段"),
+    sort_order: str = Query("desc", description="排序方向"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    coupon_type: Optional[str] = Query(None, description="优惠券类型：percentage/fixed"),
+    source: Optional[str] = Query(None, description="数据来源：pa-api/cj/all"),
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
+):
+    """获取优惠券商品列表"""
+    try:
+        products = ProductService.list_coupon_products(
+            db=db,
+            page=page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_prime_only=is_prime_only,
+            coupon_type=coupon_type,
+            source=source,  # 添加数据来源筛选
+            min_commission=min_commission  # 添加佣金筛选
+        )
+        return products if products else []
+    except Exception as e:
+        logger.error(f"获取优惠券商品列表失败: {str(e)}")
+        return []
+
+@app.get("/api/products/list")
+async def list_products(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    sort_by: Optional[str] = Query(None, description="排序字段"),
+    sort_order: str = Query("desc", description="排序方向"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    product_type: str = Query("all", description="商品类型：discount/coupon/cj/all"),
+    main_categories: Optional[List[str]] = Query(None, description="主要类别筛选列表"),
+    sub_categories: Optional[List[str]] = Query(None, description="子类别筛选列表"),
+    bindings: Optional[List[str]] = Query(None, description="商品绑定类型筛选列表"),
+    product_groups: Optional[List[str]] = Query(None, description="商品组筛选列表"),
+    source: Optional[str] = Query(None, description="数据来源：pa-api/cj/all"),
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
+):
+    """获取商品列表，支持分页、筛选和排序"""
+    try:
+        # 根据product_type调用不同的服务方法
+        if product_type == "cj":
+            # 只返回CJ来源的商品
+            products = ProductService.list_products(
+                db=db,
+                page=page,
+                page_size=page_size,
+                min_price=min_price,
+                max_price=max_price,
+                min_discount=min_discount,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                is_prime_only=is_prime_only,
+                main_categories=main_categories,
+                sub_categories=sub_categories,
+                bindings=bindings,
+                product_groups=product_groups,
+                source="cj",  # 只返回CJ来源的商品
+                min_commission=min_commission  # 添加佣金筛选
+            )
+        else:
+            # 使用现有的逻辑处理其他类型，但添加source和min_commission参数
+            products = ProductService.list_products(
+                db=db,
+                page=page,
+                page_size=page_size,
+                min_price=min_price,
+                max_price=max_price,
+                min_discount=min_discount,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                is_prime_only=is_prime_only,
+                main_categories=main_categories,
+                sub_categories=sub_categories,
+                bindings=bindings,
+                product_groups=product_groups,
+                source=source,  # 添加数据来源筛选
+                min_commission=min_commission  # 添加佣金筛选
+            )
+        return products if products else []
+    except Exception as e:
+        logger.error(f"获取商品列表失败: {str(e)}")
+        return []
+
+@app.post("/api/products/batch-delete")
+async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depends(get_db)):
+    """批量删除商品"""
+    try:
+        result = ProductService.batch_delete_products(db, request.asins)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"批量删除完成",
+                "success_count": result["success_count"],
+                "fail_count": result["fail_count"]
+            },
+            status_code=200
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"批量删除失败: {str(e)}"
+        )
+
+@app.post("/api/products/save")
+async def save_products(request: ProductRequest, output_file: str):
+    """保存商品信息到文件"""
     try:
         api = get_product_api(request.marketplace)
-        products = api.get_products_by_asins(request.asins)
+        # 使用await调用异步方法
+        products = await api.get_products_by_asins(request.asins)
+        
+        if not products:
+            raise HTTPException(
+                status_code=404,
+                detail="未找到商品信息"
+            )
+        
+        # 使用await调用异步方法
+        await api.save_products_info(products, output_file)
+        return {"status": "success", "message": f"商品信息已保存到: {output_file}"}
+        
+    except Exception as e:
+        logger.error(f"保存商品信息时出错: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/products", response_model=List[ProductInfo])
+async def get_products(request: ProductRequest):
+    """批量获取商品信息"""
+    try:
+        api = get_product_api(request.marketplace)
+        # 使用await调用异步方法
+        products = await api.get_products_by_asins(request.asins)
         
         if not products:
             raise HTTPException(
@@ -217,132 +490,15 @@ async def get_products(request: ProductRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"获取商品信息时出错: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取商品信息时出错: {str(e)}")
-
-@app.post("/api/products/save")
-async def save_products(request: ProductRequest, output_file: str):
-    """获取并保存商品信息到文件"""
-    try:
-        api = get_product_api(request.marketplace)
-        products = api.get_products_by_asins(request.asins)
-        
-        if not products:
-            raise HTTPException(
-                status_code=404,
-                detail="未找到商品信息"
-            )
-        
-        api.save_products_info(products, output_file)
-        return {"status": "success", "message": f"商品信息已保存到: {output_file}"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/health")
-async def health_check():
-    """健康检查端点"""
-    return {
-        "status": "healthy",
-        "service": "amazon-data-api",
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/api/cache/stats")
-async def get_cache_stats():
-    """获取缓存统计信息"""
-    try:
-        api = get_product_api()
-        return api.cache_manager.get_cache_stats()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取缓存统计信息失败: {str(e)}"
-        )
-
-@app.post("/api/cache/clear")
-async def clear_cache():
-    """清理过期缓存"""
-    try:
-        api = get_product_api()
-        api.cache_manager.clear_expired()
-        return {"status": "success", "message": "过期缓存已清理"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"清理缓存失败: {str(e)}"
-        )
-
-@app.get("/api/products/list", response_model=List[ProductInfo])
-async def list_products(
-    db: Session = Depends(get_db),
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
-    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
-    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
-    sort_by: Optional[SortField] = Query(None, description="排序字段"),
-    sort_order: SortOrder = Query(SortOrder.desc, description="排序方向"),
-    is_prime_only: bool = Query(False, description="是否只显示Prime商品")
-):
-    """
-    获取产品列表，支持分页、价格范围、折扣率筛选和排序
-    """
-    try:
-        products = ProductService.list_products(
-            db,
-            page=page,
-            page_size=page_size,
-            min_price=min_price,
-            max_price=max_price,
-            min_discount=min_discount,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            is_prime_only=is_prime_only
-        )
-        return products
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取产品列表失败: {str(e)}"
-        )
-
-@app.get("/api/products/stats")
-async def get_products_stats(db: Session = Depends(get_db)):
-    """
-    获取产品数据统计信息
-    """
-    try:
-        stats = ProductService.get_stats(db)
-        return {
-            "total_products": stats["total_products"],
-            "avg_price": stats["avg_price"],
-            "avg_discount": stats["avg_discount"],
-            "prime_products": stats["prime_products"],
-            "last_update": stats["last_update"],
-            "price_range": {
-                "min": stats["min_price"],
-                "max": stats["max_price"]
-            },
-            "discount_range": {
-                "min": stats["min_discount"],
-                "max": stats["max_discount"]
-            }
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取统计信息失败: {str(e)}"
-        )
-
 
 @app.get("/api/products/{asin}", response_model=ProductInfo)
 async def get_product(
     asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
     db: Session = Depends(get_db)
 ):
-    """
-    根据ASIN获取单个产品详情
-    """
+    """获取单个商品详情"""
     try:
         product = ProductService.get_product_by_asin(db, asin)
         if not product:
@@ -359,7 +515,81 @@ async def get_product(
             detail=f"获取产品信息失败: {str(e)}"
         )
 
-# 调度器相关端点
+# 缓存管理相关API
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """获取缓存统计信息"""
+    try:
+        # 获取API实例
+        api = get_product_api()
+        
+        # 获取原始缓存统计信息
+        raw_stats = api.cache_manager.get_stats()
+        
+        # 格式化统计信息
+        formatted_stats = {
+            # 将字节转换为MB，保留2位小数
+            "total_size_mb": round(raw_stats["total_size"] / (1024 * 1024), 2),
+            "total_files": raw_stats["total_files"],
+            "by_type": {},
+            "last_cleanup": raw_stats["last_cleanup"],
+            "status": "healthy"  # 默认状态
+        }
+        
+        # 格式化各类型的统计信息
+        for cache_type, type_stats in raw_stats["by_type"].items():
+            formatted_stats["by_type"][cache_type] = {
+                "size_mb": round(type_stats["size"] / (1024 * 1024), 2),
+                "count": type_stats["count"]
+            }
+            
+        # 添加额外的状态信息
+        formatted_stats["status_details"] = {
+            "is_cleanup_running": True,  # 清理线程状态
+            "cache_types": list(formatted_stats["by_type"].keys()),
+            "cache_health": "good" if formatted_stats["total_files"] > 0 else "empty"
+        }
+        
+        return formatted_stats
+        
+    except Exception as e:
+        # 如果发生错误，返回带有错误信息的500响应
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "获取缓存统计信息失败",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """清理过期缓存"""
+    try:
+        api = get_product_api()
+        api.cache_manager.clear_expired()
+        return {"status": "success", "message": "过期缓存已清理"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清理缓存失败: {str(e)}"
+        )
+
+@app.post("/api/cache/clear-all")
+async def clear_all_cache():
+    """清理所有缓存"""
+    try:
+        api = get_product_api()
+        api.cache_manager.clear_all()
+        return {"status": "success", "message": "所有缓存已清理"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清理所有缓存失败: {str(e)}"
+        )
+
+# 调度器相关API
 @app.post("/api/scheduler/jobs")
 async def add_job(job_config: JobConfig):
     """添加新的定时任务"""
@@ -524,14 +754,80 @@ async def execute_job_now(job_id: str):
             detail=str(e)
         )
 
+@app.get("/api/categories/stats", response_model=CategoryStats)
+async def get_category_stats(db: Session = Depends(get_db)):
+    """获取类别统计信息"""
+    try:
+        stats = ProductService.get_category_stats(db)
+        return CategoryStats(**stats)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取类别统计信息失败: {str(e)}"
+        )
+
+@app.post("/api/cj/check-products")
+async def check_cj_products(request: ProductRequest):
+    """检查商品在CJ平台的可用性
+    
+    Args:
+        request: 包含ASIN列表的请求对象
+        
+    Returns:
+        Dict[str, bool]: 商品可用性字典，key为ASIN，value为是否可用
+    """
+    try:
+        cj_client = CJAPIClient()
+        availability = await cj_client.check_products_availability(request.asins)
+        return availability
+    except Exception as e:
+        logger.error(f"检查CJ商品可用性失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"检查商品可用性失败: {str(e)}"
+        )
+
+@app.get("/api/cj/generate-link/{asin}")
+async def generate_cj_link(asin: str = Path(..., description="商品ASIN")):
+    """生成CJ推广链接
+    
+    Args:
+        asin: 商品ASIN
+        
+    Returns:
+        Dict: 包含生成的推广链接
+    """
+    try:
+        cj_client = CJAPIClient()
+        url = await cj_client.generate_product_link(asin)
+        return {"url": url}
+    except Exception as e:
+        logger.error(f"生成CJ推广链接失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"生成推广链接失败: {str(e)}"
+        )
+
 @app.on_event("startup")
-async def startup_event():
-    """应用启动时的事件处理"""
-    # 确保数据库表已创建
-    init_db()
-    print("数据库初始化完成")
+def startup_event():
+    """应用启动时的初始化操作"""
+    # 创建并启动调度器
+    scheduler_manager = SchedulerManager()
+    scheduler_manager.start()
+    logger.info("调度器已启动")
 
 if __name__ == "__main__":
+    """
+    FastAPI开发服务器启动入口
+    
+    支持的命令行参数：
+    --host: 绑定的主机地址
+    --port: 绑定的端口
+    --reload: 是否启用自动重载
+    --workers: 工作进程数
+    --reload-dir: 监视变更的目录
+    --log-level: 日志级别
+    """
     import argparse
     
     parser = argparse.ArgumentParser(description="FastAPI Development Server")
