@@ -304,7 +304,9 @@ async def list_discount_products(
     min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
     sort_by: Optional[str] = Query(None, description="排序字段"),
     sort_order: str = Query("desc", description="排序方向"),
-    is_prime_only: bool = Query(False, description="是否只显示Prime商品")
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    source: Optional[str] = Query(None, description="数据来源：pa-api/cj/all"),
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
 ):
     """获取折扣商品列表"""
     try:
@@ -317,7 +319,9 @@ async def list_discount_products(
             min_discount=min_discount,
             sort_by=sort_by,
             sort_order=sort_order,
-            is_prime_only=is_prime_only
+            is_prime_only=is_prime_only,
+            source=source,  # 添加数据来源筛选
+            min_commission=min_commission  # 添加佣金筛选
         )
         return products if products else []
     except Exception as e:
@@ -335,7 +339,9 @@ async def list_coupon_products(
     sort_by: Optional[str] = Query(None, description="排序字段"),
     sort_order: str = Query("desc", description="排序方向"),
     is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
-    coupon_type: Optional[str] = Query(None, description="优惠券类型：percentage/fixed")
+    coupon_type: Optional[str] = Query(None, description="优惠券类型：percentage/fixed"),
+    source: Optional[str] = Query(None, description="数据来源：pa-api/cj/all"),
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
 ):
     """获取优惠券商品列表"""
     try:
@@ -349,7 +355,9 @@ async def list_coupon_products(
             sort_by=sort_by,
             sort_order=sort_order,
             is_prime_only=is_prime_only,
-            coupon_type=coupon_type
+            coupon_type=coupon_type,
+            source=source,  # 添加数据来源筛选
+            min_commission=min_commission  # 添加佣金筛选
         )
         return products if products else []
     except Exception as e:
@@ -371,7 +379,9 @@ async def list_products(
     main_categories: Optional[List[str]] = Query(None, description="主要类别筛选列表"),
     sub_categories: Optional[List[str]] = Query(None, description="子类别筛选列表"),
     bindings: Optional[List[str]] = Query(None, description="商品绑定类型筛选列表"),
-    product_groups: Optional[List[str]] = Query(None, description="商品组筛选列表")
+    product_groups: Optional[List[str]] = Query(None, description="商品组筛选列表"),
+    source: Optional[str] = Query(None, description="数据来源：pa-api/cj/all"),
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
 ):
     """获取商品列表，支持分页、筛选和排序"""
     try:
@@ -392,10 +402,11 @@ async def list_products(
                 sub_categories=sub_categories,
                 bindings=bindings,
                 product_groups=product_groups,
-                source="cj"  # 只返回CJ来源的商品
+                source="cj",  # 只返回CJ来源的商品
+                min_commission=min_commission  # 添加佣金筛选
             )
         else:
-            # 使用现有的逻辑处理其他类型
+            # 使用现有的逻辑处理其他类型，但添加source和min_commission参数
             products = ProductService.list_products(
                 db=db,
                 page=page,
@@ -409,7 +420,9 @@ async def list_products(
                 main_categories=main_categories,
                 sub_categories=sub_categories,
                 bindings=bindings,
-                product_groups=product_groups
+                product_groups=product_groups,
+                source=source,  # 添加数据来源筛选
+                min_commission=min_commission  # 添加佣金筛选
             )
         return products if products else []
     except Exception as e:

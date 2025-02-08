@@ -64,6 +64,9 @@ class Product(Base):
     brand = Column(String(200))  # 品牌名称
     main_image = Column(String(1000))  # 主图链接
     
+    # CJ特有信息
+    cj_url = Column(String(1000))  # CJ推广链接
+    
     # 价格信息
     current_price = Column(Float)  # 当前价格
     original_price = Column(Float)  # 原始价格
@@ -97,8 +100,8 @@ class Product(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)  # 数据采集时间
     
     # 元数据
-    source = Column(String(50))  # 数据来源：bestseller/coupon
-    api_provider = Column(String(50))  # API提供者：pa-api等
+    source = Column(String(50))  # 数据来源：bestseller/coupon/cj
+    api_provider = Column(String(50))  # API提供者：pa-api/cj-api
     raw_data = Column(JSON)  # 原始API响应数据，用于数据追溯
 
     # 关联关系定义
@@ -133,6 +136,9 @@ class Offer(Base):
     # 优惠券信息
     coupon_type = Column(String(50))  # 优惠券类型：percentage(百分比)/fixed(固定金额)
     coupon_value = Column(Float)  # 优惠券面值
+    
+    # CJ特有信息
+    commission = Column(String(50))  # CJ佣金信息
     
     # 商品状态
     condition = Column(String(50))  # 商品状态

@@ -19,6 +19,7 @@ class ProductOffer(BaseModel):
     coupon_type: Optional[str] = None      # 优惠券类型（percentage/fixed）
     coupon_value: Optional[float] = None   # 优惠券值（百分比或固定金额）
     coupon_history: Optional[List[Dict]] = None  # 优惠券历史记录
+    commission: Optional[str] = None  # CJ佣金信息
     
     class Config:
         json_encoders = {
@@ -32,6 +33,8 @@ class ProductOffer(BaseModel):
             del d['coupon_type']
         if 'coupon_value' in d and d['coupon_value'] is None:
             del d['coupon_value']
+        if 'commission' in d and d['commission'] is None:
+            del d['commission']
         return d
 
 class ProductInfo(BaseModel):
@@ -48,6 +51,7 @@ class ProductInfo(BaseModel):
     product_group: Optional[str] = None  # 商品分组
     categories: Optional[List[str]] = []  # 商品类别列表
     browse_nodes: Optional[List[Dict]] = []  # 商品浏览节点信息
+    cj_url: Optional[str] = None  # CJ推广链接
     
     class Config:
         json_encoders = {
@@ -58,6 +62,8 @@ class ProductInfo(BaseModel):
         """重写dict方法以支持datetime序列化"""
         d = super().dict(*args, **kwargs)
         d['timestamp'] = self.timestamp.isoformat()
+        if 'cj_url' in d and d['cj_url'] is None:
+            del d['cj_url']
         return d
 
     def to_cache_dict(self) -> dict:
@@ -74,5 +80,6 @@ class ProductInfo(BaseModel):
             "brand": self.brand,
             "main_image": self.main_image,
             "offers": [offer.dict() for offer in self.offers],
-            "timestamp": self.timestamp.isoformat()
+            "timestamp": self.timestamp.isoformat(),
+            "cj_url": self.cj_url
         } 

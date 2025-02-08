@@ -407,7 +407,7 @@ def is_element_fully_visible(driver, element) -> bool:
 
 def extract_coupon_info(card_element) -> Optional[Dict]:
     """
-    从商品卡片中提取优惠券信息
+    从商品卡片中提取优惠券信息，支持多语言格式
     
     Args:
         card_element: Selenium WebElement对象，表示商品卡片元素
@@ -431,25 +431,42 @@ def extract_coupon_info(card_element) -> Optional[Dict]:
         log_success(f"成功找到优惠券: {coupon_text}")
         
         # 提取优惠券值和类型
-        # 处理百分比优惠券 (例如: "节省 20%")
-        if "%" in coupon_text:
-            match = re.search(r'(\d+)%', coupon_text)
-            if match:
-                value = float(match.group(1))
+        # 处理百分比优惠券 (例如: "节省 20%" 或 "Save 20%")
+        percentage_match = re.search(r'(\d+)%', coupon_text)
+        if percentage_match:
+            value = float(percentage_match.group(1))
+            return {
+                "type": "percentage",
+                "value": value
+            }
+            
+        # 处理固定金额优惠券 (例如: "节省 $30" 或 "Save $30" 或 "Save US$30")
+        # 移除所有空格，以便更好地匹配
+        normalized_text = coupon_text.replace(" ", "")
+        amount_match = re.search(r'(?:US)?\$(\d+(?:\.\d{2})?)', normalized_text)
+        if amount_match:
+            value = float(amount_match.group(1))
+            return {
+                "type": "fixed",
+                "value": value
+            }
+            
+        # 尝试匹配纯数字（针对某些特殊格式）
+        number_match = re.search(r'(?:Save|节省)\s*(\d+(?:\.\d{2})?)', coupon_text)
+        if number_match:
+            value = float(number_match.group(1))
+            # 如果文本中包含%，则认为是百分比优惠券
+            if "%" in coupon_text:
                 return {
                     "type": "percentage",
                     "value": value
                 }
-        # 处理固定金额优惠券 (例如: "节省 US$30")
-        elif "US$" in coupon_text:
-            match = re.search(r'US\$(\d+)', coupon_text)
-            if match:
-                value = float(match.group(1))
+            else:
                 return {
                     "type": "fixed",
                     "value": value
                 }
-            
+        
         log_warning(f"无法解析优惠券格式: {coupon_text}")
         return None
         

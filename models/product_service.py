@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 import logging
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey, or_, cast
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey, or_, cast, and_
 
 # 配置logger
 logger = logging.getLogger(__name__)
@@ -164,8 +164,9 @@ class ProductService:
         db: Session, 
         products: List[ProductInfo], 
         include_coupon: bool = False,
-        source: Optional[str] = None,  # 数据来源渠道：bestseller/coupon
-        api_provider: str = "pa-api",  # API提供者
+        include_cj_data: bool = False,  # 新增参数：是否包含CJ数据
+        source: Optional[str] = None,  # 数据来源渠道：bestseller/coupon/cj
+        api_provider: str = "pa-api",  # API提供者：pa-api/cj-api
         include_metadata: bool = False  # 是否包含元数据（分类信息等）
     ) -> List[ProductInfo]:
         """批量创建或更新商品信息"""
@@ -227,6 +228,10 @@ class ProductService:
                     product.categories = product_info.categories
                     product.browse_nodes = product_info.browse_nodes
                     
+                # 添加CJ相关信息
+                if include_cj_data and hasattr(product_info, 'cj_url'):
+                    product.cj_url = product_info.cj_url
+                    
                 db.add(product)
             else:
                 # 更新现有产品
@@ -260,6 +265,10 @@ class ProductService:
                     product.categories = product_info.categories
                     product.browse_nodes = product_info.browse_nodes
                 
+                # 更新CJ相关信息
+                if include_cj_data and hasattr(product_info, 'cj_url'):
+                    product.cj_url = product_info.cj_url
+                
                 # 更新时间和元数据
                 product.updated_at = current_time
                 product.timestamp = current_time
@@ -281,8 +290,8 @@ class ProductService:
                     savings=offer_info.savings,
                     savings_percentage=offer_info.savings_percentage,
                     is_prime=offer_info.is_prime,
-                    is_amazon_fulfilled=offer_info.is_amazon_fulfilled,  # 新增：是否由亚马逊配送
-                    is_free_shipping_eligible=offer_info.is_free_shipping_eligible,  # 新增：是否符合免运费资格
+                    is_amazon_fulfilled=offer_info.is_amazon_fulfilled,
+                    is_free_shipping_eligible=offer_info.is_free_shipping_eligible,
                     availability=offer_info.availability,
                     merchant_name=offer_info.merchant_name,
                     is_buybox_winner=offer_info.is_buybox_winner,
@@ -305,6 +314,10 @@ class ProductService:
                         updated_at=current_time
                     )
                     db.add(coupon_history)
+                
+                # 添加CJ特有信息
+                if include_cj_data and hasattr(offer_info, 'commission'):
+                    offer.commission = offer_info.commission
                 
                 db.add(offer)
             
@@ -383,7 +396,9 @@ class ProductService:
         main_categories: Optional[List[str]] = None,
         sub_categories: Optional[List[str]] = None,
         bindings: Optional[List[str]] = None,
-        product_groups: Optional[List[str]] = None
+        product_groups: Optional[List[str]] = None,
+        source: Optional[str] = None,  # 新增：数据来源筛选
+        min_commission: Optional[int] = None  # 新增：最低佣金筛选
     ) -> List[ProductInfo]:
         """获取商品列表"""
         try:
@@ -410,6 +425,33 @@ class ProductService:
                     isouter=True
                 ).filter(CouponHistory.id.isnot(None))
                 query = query.distinct(Product.asin)
+
+            # 应用数据来源筛选
+            if source:
+                if source == "cj":
+                    query = query.filter(Product.source == "cj")
+                elif source == "pa-api":
+                    query = query.filter(or_(
+                        Product.source == "bestseller",
+                        Product.source == "coupon",
+                        Product.source == "pa-api",
+                        Product.source.is_(None)  # 兼容旧数据
+                    ))
+                # 当source为"all"时，不添加筛选条件，显示所有来源的商品
+
+            # 应用佣金筛选
+            if min_commission is not None:
+                # 只对CJ商品应用佣金筛选
+                if source == "cj":
+                    query = query.join(Offer).filter(
+                        cast(Offer.commission, Float) >= min_commission
+                    )
+                elif source == "all":
+                    # 对于所有来源，只对CJ商品应用佣金筛选
+                    query = query.outerjoin(Offer).filter(or_(
+                        and_(Product.source == "cj", cast(Offer.commission, Float) >= min_commission),
+                        Product.source != "cj"
+                    ))
 
             # 应用类别筛选
             if main_categories:
@@ -439,11 +481,19 @@ class ProductService:
 
             # 应用排序
             if sort_by:
-                sort_column = getattr(Product, sort_by, Product.timestamp)
-                if sort_order == "desc":
-                    query = query.order_by(desc(sort_column))
+                if sort_by == "commission":
+                    # 按佣金排序需要特殊处理
+                    query = query.join(Offer).order_by(
+                        desc(cast(Offer.commission, Float))
+                        if sort_order == "desc"
+                        else asc(cast(Offer.commission, Float))
+                    )
                 else:
-                    query = query.order_by(asc(sort_column))
+                    sort_column = getattr(Product, sort_by, Product.timestamp)
+                    if sort_order == "desc":
+                        query = query.order_by(desc(sort_column))
+                    else:
+                        query = query.order_by(asc(sort_column))
             else:
                 query = query.order_by(desc(Product.timestamp))
 
@@ -451,52 +501,59 @@ class ProductService:
             offset = (page - 1) * page_size
             query = query.offset(offset).limit(page_size)
 
-            # 执行查询
-            products = query.all()
+            try:
+                # 执行查询
+                products = query.all()
+                
+                # 转换为ProductInfo对象
+                result = []
+                for product in products:
+                    try:
+                        # 获取商品的所有优惠信息
+                        offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
 
-            # 转换为ProductInfo对象
-            result = []
-            for product in products:
-                try:
-                    # 获取商品的所有优惠信息
-                    offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+                        # 构建ProductInfo对象
+                        product_info = ProductInfo(
+                            asin=product.asin,
+                            title=product.title,
+                            url=product.url,
+                            brand=product.brand,
+                            main_image=product.main_image,
+                            timestamp=product.timestamp or datetime.utcnow(),
+                            # 添加分类相关信息
+                            binding=product.binding,
+                            product_group=product.product_group,
+                            categories=product.categories,
+                            browse_nodes=product.browse_nodes,
+                            # 添加CJ相关信息
+                            cj_url=product.cj_url if product.source == "cj" else None,
+                            offers=[
+                                ProductOffer(
+                                    condition=offer.condition or "New",
+                                    price=offer.price or 0.0,
+                                    currency=offer.currency or "USD",
+                                    savings=offer.savings,
+                                    savings_percentage=offer.savings_percentage,
+                                    is_prime=offer.is_prime or False,
+                                    availability=offer.availability or "Available",
+                                    merchant_name=offer.merchant_name or "Amazon",
+                                    is_buybox_winner=offer.is_buybox_winner or False,
+                                    deal_type=offer.deal_type,
+                                    coupon_type=getattr(offer, 'coupon_type', None),
+                                    coupon_value=getattr(offer, 'coupon_value', None),
+                                    commission=offer.commission if product.source == "cj" else None
+                                ) for offer in offers
+                            ]
+                        )
+                        result.append(product_info)
+                    except Exception as e:
+                        logger.error(f"处理商品 {product.asin} 时出错: {str(e)}")
+                        continue
 
-                    # 构建ProductInfo对象
-                    product_info = ProductInfo(
-                        asin=product.asin,
-                        title=product.title,
-                        url=product.url,
-                        brand=product.brand,
-                        main_image=product.main_image,
-                        timestamp=product.timestamp or datetime.utcnow(),
-                        # 添加分类相关信息
-                        binding=product.binding,
-                        product_group=product.product_group,
-                        categories=product.categories,
-                        browse_nodes=product.browse_nodes,
-                        offers=[
-                            ProductOffer(
-                                condition=offer.condition or "New",
-                                price=offer.price or 0.0,
-                                currency=offer.currency or "USD",
-                                savings=offer.savings,
-                                savings_percentage=offer.savings_percentage,
-                                is_prime=offer.is_prime or False,
-                                availability=offer.availability or "Available",
-                                merchant_name=offer.merchant_name or "Amazon",
-                                is_buybox_winner=offer.is_buybox_winner or False,
-                                deal_type=offer.deal_type,
-                                coupon_type=getattr(offer, 'coupon_type', None),
-                                coupon_value=getattr(offer, 'coupon_value', None)
-                            ) for offer in offers
-                        ]
-                    )
-                    result.append(product_info)
-                except Exception as e:
-                    logger.error(f"处理商品 {product.asin} 时出错: {str(e)}")
-                    continue
-
-            return result
+                return result
+            except Exception as e:
+                logger.error(f"获取商品列表失败: {str(e)}")
+                return []
 
         except Exception as e:
             logger.error(f"获取商品列表失败: {str(e)}")
@@ -591,7 +648,9 @@ class ProductService:
         sort_by: Optional[str] = None,
         sort_order: str = "desc",
         is_prime_only: bool = False,
-        coupon_type: Optional[str] = None
+        coupon_type: Optional[str] = None,
+        source: Optional[str] = None,  # 新增：数据来源筛选
+        min_commission: Optional[int] = None  # 新增：最低佣金筛选
     ) -> List[ProductInfo]:
         """获取优惠券商品列表"""
         try:
@@ -603,6 +662,33 @@ class ProductService:
                 CouponHistory,
                 Product.asin == CouponHistory.product_id
             )
+            
+            # 应用数据来源筛选
+            if source:
+                if source == "cj":
+                    query = query.filter(Product.source == "cj")
+                elif source == "pa-api":
+                    query = query.filter(or_(
+                        Product.source == "bestseller",
+                        Product.source == "coupon",
+                        Product.source == "pa-api",
+                        Product.source.is_(None)  # 兼容旧数据
+                    ))
+                # 当source为"all"时，不添加筛选条件，显示所有来源的商品
+            
+            # 应用佣金筛选
+            if min_commission is not None:
+                # 只对CJ商品应用佣金筛选
+                if source == "cj":
+                    query = query.join(Offer).filter(
+                        cast(Offer.commission, Float) >= min_commission
+                    )
+                elif source == "all":
+                    # 对于所有来源，只对CJ商品应用佣金筛选
+                    query = query.outerjoin(Offer).filter(or_(
+                        and_(Product.source == "cj", cast(Offer.commission, Float) >= min_commission),
+                        Product.source != "cj"
+                    ))
             
             # 应用过滤条件
             if min_price is not None:
@@ -618,11 +704,19 @@ class ProductService:
                 
             # 应用排序
             if sort_by:
-                sort_column = getattr(Product, sort_by, Product.timestamp)
-                if sort_order == "desc":
-                    query = query.order_by(desc(sort_column))
+                if sort_by == "commission":
+                    # 按佣金排序需要特殊处理
+                    query = query.join(Offer).order_by(
+                        desc(cast(Offer.commission, Float))
+                        if sort_order == "desc"
+                        else asc(cast(Offer.commission, Float))
+                    )
                 else:
-                    query = query.order_by(asc(sort_column))
+                    sort_column = getattr(Product, sort_by, Product.timestamp)
+                    if sort_order == "desc":
+                        query = query.order_by(desc(sort_column))
+                    else:
+                        query = query.order_by(asc(sort_column))
             else:
                 # 默认按更新时间倒序排序
                 query = query.order_by(desc(Product.timestamp))
@@ -653,6 +747,8 @@ class ProductService:
                     product_group=product.product_group or None,
                     categories=product.categories or [],
                     browse_nodes=product.browse_nodes or [],
+                    # 添加CJ相关信息
+                    cj_url=product.cj_url if product.source == "cj" else None,
                     offers=[
                         ProductOffer(
                             condition=offer.condition or "New",
@@ -666,7 +762,8 @@ class ProductService:
                             is_buybox_winner=offer.is_buybox_winner or False,
                             deal_type=offer.deal_type,
                             coupon_type=offer.coupon_type,
-                            coupon_value=offer.coupon_value
+                            coupon_value=offer.coupon_value,
+                            commission=offer.commission if product.source == "cj" else None
                         ) for offer in offers
                     ]
                 )
@@ -688,18 +785,46 @@ class ProductService:
         min_discount: Optional[int] = None,
         sort_by: Optional[str] = None,
         sort_order: str = "desc",
-        is_prime_only: bool = False
+        is_prime_only: bool = False,
+        source: Optional[str] = None,  # 新增：数据来源筛选
+        min_commission: Optional[int] = None  # 新增：最低佣金筛选
     ) -> List[ProductInfo]:
         """获取折扣商品列表"""
         try:
             # 构建基础查询
             query = db.query(Product).distinct(Product.asin)
             
-            # 确保商品有折扣且来源为bestseller
+            # 确保商品有折扣
             query = query.filter(Product.savings_percentage > 0)
-            query = query.filter(Product.source == "bestseller")  # 只返回bestseller来源的商品
             
-            # 应用过滤条件
+            # 应用数据来源筛选
+            if source:
+                if source == "cj":
+                    query = query.filter(Product.source == "cj")
+                elif source == "pa-api":
+                    query = query.filter(or_(
+                        Product.source == "bestseller",
+                        Product.source == "coupon",
+                        Product.source == "pa-api",
+                        Product.source.is_(None)  # 兼容旧数据
+                    ))
+                # 当source为"all"时，不添加筛选条件，显示所有来源的商品
+            
+            # 应用佣金筛选
+            if min_commission is not None:
+                # 只对CJ商品应用佣金筛选
+                if source == "cj":
+                    query = query.join(Offer).filter(
+                        cast(Offer.commission, Float) >= min_commission
+                    )
+                elif source == "all":
+                    # 对于所有来源，只对CJ商品应用佣金筛选
+                    query = query.outerjoin(Offer).filter(or_(
+                        and_(Product.source == "cj", cast(Offer.commission, Float) >= min_commission),
+                        Product.source != "cj"
+                    ))
+
+            # 应用其他筛选条件
             if min_price is not None:
                 query = query.filter(Product.current_price >= min_price)
             if max_price is not None:
@@ -711,11 +836,19 @@ class ProductService:
                 
             # 应用排序
             if sort_by:
-                sort_column = getattr(Product, sort_by, Product.timestamp)
-                if sort_order == "desc":
-                    query = query.order_by(desc(sort_column))
+                if sort_by == "commission":
+                    # 按佣金排序需要特殊处理
+                    query = query.join(Offer).order_by(
+                        desc(cast(Offer.commission, Float))
+                        if sort_order == "desc"
+                        else asc(cast(Offer.commission, Float))
+                    )
                 else:
-                    query = query.order_by(asc(sort_column))
+                    sort_column = getattr(Product, sort_by, Product.timestamp)
+                    if sort_order == "desc":
+                        query = query.order_by(desc(sort_column))
+                    else:
+                        query = query.order_by(asc(sort_column))
             else:
                 # 默认按折扣率倒序排序
                 query = query.order_by(desc(Product.savings_percentage))
@@ -746,6 +879,8 @@ class ProductService:
                     product_group=product.product_group or None,
                     categories=product.categories or [],
                     browse_nodes=product.browse_nodes or [],
+                    # 添加CJ相关信息
+                    cj_url=product.cj_url if product.source == "cj" else None,
                     offers=[
                         ProductOffer(
                             condition=offer.condition or "New",
@@ -759,7 +894,8 @@ class ProductService:
                             is_buybox_winner=offer.is_buybox_winner or False,
                             deal_type=offer.deal_type,
                             coupon_type=getattr(offer, 'coupon_type', None),
-                            coupon_value=getattr(offer, 'coupon_value', None)
+                            coupon_value=getattr(offer, 'coupon_value', None),
+                            commission=offer.commission if product.source == "cj" else None
                         ) for offer in offers
                     ]
                 )

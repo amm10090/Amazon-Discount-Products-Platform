@@ -33,231 +33,228 @@ st.set_page_config(
 # 自定义CSS
 st.markdown(f"""
 <style>
-    .product-card {{
-        border: 1px solid #ddd;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
-        background-color: {config["frontend"]["theme"]["backgroundColor"]};
+    /* 全局样式 */
+    .stApp {{
+        background-color: #f5f5f7;
     }}
-    .product-image {{
-        max-width: 200px;
-        height: auto;
+    
+    /* 标签页样式 */
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 8px;
+        padding: 0.5rem;
     }}
-    .category-breadcrumb {{
-        font-size: 0.9em;
-        color: #666;
-        margin-bottom: 10px;
-        padding: 5px 10px;
-        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
-        border-radius: 4px;
-        display: flex;
+    
+    .stTabs [data-baseweb="tab"] {{
+        height: 50px;
+        padding: 0 24px;
+        background-color: white;
+        border-radius: 100px;
+        gap: 8px;
+        color: #1d1d1f;
+        font-weight: 500;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }}
+    
+    .stTabs [aria-selected="true"] {{
+        background: linear-gradient(135deg, #1E88E5, #1976D2);
+        color: white !important;
+    }}
+    
+    /* 侧边栏样式 */
+    .css-1d391kg {{
+        background-color: white;
+        padding: 2rem 1rem;
+        border-right: 1px solid #e0e0e0;
+    }}
+    
+    /* 标签样式 */
+    .source-tag {{
+        display: inline-flex;
         align-items: center;
-        flex-wrap: wrap;
-        gap: 4px;
-    }}
-    .category-breadcrumb .category-link {{
-        color: {config["frontend"]["theme"]["primaryColor"]};
-        text-decoration: none;
-        padding: 2px 8px;
-        background-color: {config["frontend"]["theme"]["backgroundColor"]};
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        transition: all 0.2s ease;
-    }}
-    .category-breadcrumb .category-link:hover {{
-        text-decoration: none;
-        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
-        border-color: {config["frontend"]["theme"]["primaryColor"]};
-    }}
-    .category-breadcrumb .category-separator {{
-        color: {config["frontend"]["theme"]["textColor"]};
-        margin: 0 4px;
-    }}
-    .category-tag {{
-        display: inline-block;
-        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
-        color: {config["frontend"]["theme"]["textColor"]};
-        padding: 4px 12px;
-        border-radius: 12px;
+        padding: 6px 16px;
+        border-radius: 100px;
         font-size: 0.85em;
+        font-weight: 500;
         margin: 4px;
-        border: 1px solid #e0e0e0;
+        color: white;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }}
+    
+    .source-tag.cj {{
+        background: linear-gradient(135deg, #FF6B6B, #FF5252);
+    }}
+    
+    .source-tag.amazon {{
+        background: linear-gradient(135deg, #9C27B0, #7B1FA2);
+    }}
+    
+    .source-tag.prime {{
+        background: linear-gradient(135deg, #00A8E1, #0091EA);
+    }}
+    
+    .source-tag.commission {{
+        background: linear-gradient(135deg, #4CAF50, #43A047);
+    }}
+    
+    .source-tag.coupon {{
+        background: linear-gradient(135deg, #FF5722, #F4511E);
+    }}
+    
+    /* 按钮样式 */
+    .stButton>button {{
+        border-radius: 100px;
+        padding: 0.5rem 1rem;
+        font-weight: 500;
         transition: all 0.2s ease;
+        border: none;
+        background: linear-gradient(135deg, #1E88E5, #1976D2);
+        color: white;
     }}
-    .category-tag:hover {{
-        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
-        border-color: {config["frontend"]["theme"]["primaryColor"]};
-        color: {config["frontend"]["theme"]["primaryColor"]};
+    
+    .stButton>button:hover {{
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }}
-    .category-section {{
-        margin: 10px 0;
-        padding: 15px;
-        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
+    
+    /* 输入框样式 */
+    .stNumberInput>div>div>input {{
         border-radius: 8px;
         border: 1px solid #e0e0e0;
     }}
-    .category-title {{
-        font-size: 0.95em;
-        color: {config["frontend"]["theme"]["textColor"]};
-        margin-bottom: 10px;
-        font-weight: 500;
+    
+    .stSlider>div>div {{
+        background-color: white;
+        border-radius: 100px;
+        padding: 1rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     }}
-    .category-content {{
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        align-items: flex-start;
+    
+    /* 选择框样式 */
+    .stSelectbox>div>div {{
+        border-radius: 8px;
+        border: 1px solid #e0e0e0;
     }}
-    .price-tag {{
-        color: #B12704;
-        font-size: 1.2em;
-        font-weight: bold;
-        margin-bottom: 8px;
+    
+    /* 卡片样式 */
+    .product-card {{
+        background-color: white;
+        border-radius: 20px;
+        padding: 24px;
+        margin: 16px 0;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }}
+    
+    .product-card:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+    }}
+    
+    /* 图片容器样式 */
+    .image-container {{
+        background-color: #f5f5f7;
+        border-radius: 16px;
+        padding: 16px;
+        text-align: center;
+        transition: transform 0.2s ease;
+    }}
+    
+    .image-container:hover {{
+        transform: scale(1.02);
+    }}
+    
+    /* 价格样式 */
+    .price-container {{
+        margin: 16px 0;
+    }}
+    
     .original-price {{
-        color: #666;
+        color: #86868b;
         text-decoration: line-through;
         font-size: 0.9em;
     }}
+    
     .current-price {{
-        color: #B12704;
-        font-size: 1.3em;
-        font-weight: bold;
-    }}
-    .discount-tag {{
-        color: #067D62;
-        font-weight: bold;
-        background-color: #E3F4F4;
-        padding: 4px 8px;
-        border-radius: 4px;
-        display: inline-block;
+        color: #1d1d1f;
+        font-size: 1.4em;
+        font-weight: 600;
         margin-top: 4px;
     }}
-    .prime-tag {{
-        color: #00A8E1;
-        font-weight: bold;
-    }}
-    .coupon-tag {{
-        background: {config["frontend"]["theme"]["primaryColor"]};
-        color: white;
-        padding: 8px 16px;
-        border-radius: 4px;
-        font-weight: bold;
-        position: relative;
-        margin: 10px 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }}
-    .stButton>button {{
-        background-color: {config["frontend"]["theme"]["primaryColor"]};
-        color: white;
-    }}
-    .block-container {{
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        background-color: {config["frontend"]["theme"]["backgroundColor"]};
-    }}
-    .sidebar .sidebar-content {{
-        background-color: {config["frontend"]["theme"]["secondaryBackgroundColor"]};
-    }}
-    body {{
-        color: {config["frontend"]["theme"]["textColor"]};
-    }}
-    .coupon-card {{
-        display: flex;
-        width: 180px;
-        height: 28px;
-        margin: 5px 0;
-        position: relative;
-        border-radius: 2px;
-        overflow: hidden;
-    }}
     
-    .coupon-left {{
-        width: 70px;
-        text-align: center;
-        font-size: 15px;
-        font-weight: 500;
-        color: white;
-        background: {config["frontend"]["theme"]["primaryColor"]};
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-    }}
-    
-    .coupon-right {{
-        flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-size: 13px;
-        font-weight: 400;
-        background: #FF5722;
-        position: relative;
-        margin-left: 1px;
-    }}
-    
-    .coupon-right::before {{
-        content: "";
-        position: absolute;
-        left: -4px;
-        top: 0;
-        bottom: 0;
-        width: 8px;
-        background: linear-gradient(90deg, transparent 0%, #FF5722 100%);
-    }}
-    
-    .coupon-left::after {{
-        content: "";
-        position: absolute;
-        right: -4px;
-        top: 0;
-        bottom: 0;
-        width: 8px;
-        background: linear-gradient(90deg, {config["frontend"]["theme"]["primaryColor"]} 0%, transparent 100%);
-    }}
-    
-    .coupon-left::before,
-    .coupon-right::after {{
-        content: "";
-        position: absolute;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: {config["frontend"]["theme"]["backgroundColor"]};
-    }}
-    
-    .coupon-left::before {{
-        right: -4px;
-        top: -4px;
-    }}
-    
-    .coupon-left::after {{
-        right: -4px;
-        bottom: -4px;
-    }}
-    
-    .coupon-right::before {{
-        left: -4px;
-        top: -4px;
-    }}
-    
-    .coupon-right::after {{
-        left: -4px;
-        bottom: -4px;
-    }}
-    
-    .coupon-value {{
-        font-size: 1.2em;
+    /* 链接按钮样式 */
+    .link-button {{
         display: block;
-        margin-top: 4px;
+        padding: 12px 20px;
+        border-radius: 100px;
+        text-decoration: none;
+        text-align: center;
+        font-weight: 500;
+        margin: 8px 0;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }}
     
-    .coupon-type {{
-        font-size: 0.9em;
-        opacity: 0.9;
+    .link-button:hover {{
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }}
+    
+    .link-button.cj {{
+        background: linear-gradient(135deg, #FF6B6B, #FF5252);
+        color: white;
+    }}
+    
+    .link-button.amazon {{
+        background: linear-gradient(135deg, #1E88E5, #1976D2);
+        color: white;
+    }}
+    
+    /* 分类标签样式 */
+    .category-chip {{
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: 100px;
+        font-size: 0.85em;
+        font-weight: 500;
+        margin: 4px;
+        background-color: #f5f5f7;
+        color: #1d1d1f;
+        transition: all 0.2s ease;
+    }}
+    
+    .category-chip:hover {{
+        background-color: #e0e0e0;
+        transform: translateY(-1px);
+    }}
+    
+    /* 分隔符样式 */
+    .separator {{
+        color: #86868b;
+        margin: 0 4px;
+    }}
+    
+    /* 品牌信息样式 */
+    .brand-info {{
+        color: #1d1d1f;
+        margin: 16px 0;
+        font-size: 0.95em;
+    }}
+    
+    .brand-label {{
+        color: #86868b;
+    }}
+    
+    .brand-value {{
+        font-weight: 500;
+    }}
+    
+    /* 更新时间样式 */
+    .update-time {{
+        color: #86868b;
+        font-size: 0.85em;
+        text-align: center;
+        margin-top: 16px;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -279,7 +276,9 @@ def load_products(
     prime_only: bool = False,
     sort_by: Optional[str] = None,
     sort_order: str = "desc",
-    selected_categories: Optional[Dict[str, List[str]]] = None
+    selected_categories: Optional[Dict[str, List[str]]] = None,
+    source_filter: str = "all",
+    min_commission: Optional[int] = None
 ) -> Dict:
     """加载商品数据"""
     try:
@@ -295,6 +294,14 @@ def load_products(
             "sort_by": sort_by,
             "sort_order": sort_order
         }
+        
+        # 添加数据来源筛选
+        if source_filter != "all":
+            params["source"] = source_filter
+        
+        # 添加佣金筛选
+        if min_commission is not None and source_filter in ["all", "cj"]:
+            params["min_commission"] = min_commission
         
         # 添加类别筛选参数
         if selected_categories:
@@ -341,386 +348,439 @@ def display_products(
     api_url: str,
     key_suffix: str = ""
 ):
-    """显示商品列表
-    
-    Args:
-        products_data: 包含商品列表和分页信息的字典
-        api_url: API服务地址
-        key_suffix: 状态键后缀
-    """
+    """显示商品列表"""
     if not products_data or not isinstance(products_data, dict):
         st.warning(get_text("no_matching_products"))
         return
     
     products = products_data.get("items", [])
     total = products_data.get("total", 0)
-    current_page = products_data.get("page", 1)
-    page_size = products_data.get("page_size", 20)
     
     if len(products) == 0:
         st.info(get_text("no_products"))
         return
     
     # 显示商品总数
-    st.success(f"{get_text('total_items')}: {total}")
-    
-    # 添加批量删除功能
-    st.markdown("### " + get_text("product_list"))
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        if st.button(
-            "🗑️ " + get_text("delete_all"),
-            key=f"delete_all_{key_suffix}"
-        ):
-            if st.warning(get_text("confirm_delete_all")):
-                result = batch_delete_products(products)
-                if result["success_count"] > 0:
-                    st.success(
-                        get_text("batch_delete_success").format(
-                            success_count=result["success_count"]
-                        )
-                    )
-                if result["fail_count"] > 0:
-                    st.error(
-                        get_text("batch_delete_failed").format(
-                            fail_count=result["fail_count"]
-                        )
-                    )
-                st.rerun()
+    st.markdown(f"""
+        <div style="
+            background-color: #f5f5f7;
+            padding: 16px 24px;
+            border-radius: 16px;
+            margin: 20px 0;
+            font-size: 1.1em;
+            color: #1d1d1f;
+            font-weight: 500;
+            text-align: center;
+        ">
+            共找到 {total} 个商品
+        </div>
+    """, unsafe_allow_html=True)
     
     # 显示商品列表
     for product in products:
         with st.container():
-            # 显示分类导航
-            breadcrumb_html = '<div class="category-breadcrumb">'
+            # 创建商品卡片
+            st.markdown("""
+                <div style="
+                    background-color: white;
+                    border-radius: 20px;
+                    padding: 24px;
+                    margin: 16px 0;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+                    transition: transform 0.2s ease, box-shadow 0.2s ease;
+                ">
+            """, unsafe_allow_html=True)
             
-            # 优先使用browse_nodes，因为它包含完整的层级结构
-            if product.get("browse_nodes") and len(product.get("browse_nodes", [])) > 0:
-                # 获取第一个浏览节点
-                browse_node = product["browse_nodes"][0]
-                breadcrumb_categories = []
+            # 显示分类导航
+            if (product.get("browse_nodes") or 
+                product.get("categories") or 
+                product.get("binding") or 
+                product.get("product_group")):
                 
-                # 递归获取祖先节点
-                def get_ancestors(node):
-                    if not node:
-                        return
-                    # 检查不同的名称字段
-                    node_name = (
-                        node.get("display_name") or 
-                        node.get("DisplayName") or 
-                        node.get("context_free_name") or 
-                        node.get("ContextFreeName") or 
-                        node.get("name")
+                # 准备类别列表
+                categories = []
+                
+                # 优先使用browse_nodes
+                if product.get("browse_nodes") and len(product.get("browse_nodes", [])) > 0:
+                    browse_node = product["browse_nodes"][0]
+                    
+                    def get_ancestors(node):
+                        if not node:
+                            return
+                        node_name = (
+                            node.get("display_name") or 
+                            node.get("DisplayName") or 
+                            node.get("context_free_name") or 
+                            node.get("ContextFreeName") or 
+                            node.get("name")
+                        )
+                        if node_name:
+                            categories.insert(0, node_name.strip())
+                        ancestor = node.get("ancestor") or node.get("Ancestor")
+                        if ancestor:
+                            get_ancestors(ancestor)
+                    
+                    current_name = (
+                        browse_node.get("display_name") or 
+                        browse_node.get("DisplayName") or 
+                        browse_node.get("context_free_name") or 
+                        browse_node.get("ContextFreeName") or 
+                        browse_node.get("name")
                     )
-                    if node_name:
-                        breadcrumb_categories.insert(0, node_name)
-                    # 检查祖先节点
-                    ancestor = node.get("ancestor") or node.get("Ancestor")
+                    if current_name:
+                        categories.append(current_name.strip())
+                    
+                    ancestor = browse_node.get("ancestor") or browse_node.get("Ancestor")
                     if ancestor:
                         get_ancestors(ancestor)
                 
-                # 添加当前节点
-                current_name = (
-                    browse_node.get("display_name") or 
-                    browse_node.get("DisplayName") or 
-                    browse_node.get("context_free_name") or 
-                    browse_node.get("ContextFreeName") or 
-                    browse_node.get("name")
-                )
-                if current_name:
-                    breadcrumb_categories.append(current_name)
+                # 如果没有browse_nodes，使用categories
+                elif product.get("categories") and len(product["categories"]) > 0:
+                    categories = [cat.strip() for cat in product["categories"][0].split(" > ")] if isinstance(product["categories"][0], str) else []
                 
-                # 获取所有祖先节点
-                ancestor = browse_node.get("ancestor") or browse_node.get("Ancestor")
-                if ancestor:
-                    get_ancestors(ancestor)
-                
-                # 生成面包屑导航
-                if breadcrumb_categories:
-                    for i, cat in enumerate(breadcrumb_categories):
-                        breadcrumb_html += f'<span class="category-link">{cat.strip()}</span>'
-                        if i < len(breadcrumb_categories) - 1:
-                            breadcrumb_html += '<span class="category-separator">›</span>'
-            
-            # 如果没有browse_nodes，使用categories字段
-            elif product.get("categories") and len(product["categories"]) > 0:
-                categories = product["categories"][0].split(" > ") if isinstance(product["categories"][0], str) else []
-                if categories:
-                    for i, cat in enumerate(categories):
-                        breadcrumb_html += f'<span class="category-link">{cat.strip()}</span>'
-                        if i < len(categories) - 1:
-                            breadcrumb_html += '<span class="category-separator">›</span>'
-            
-            # 如果前两者都没有，使用binding和product_group组合
-            elif product.get("binding") or product.get("product_group"):
-                if product.get("product_group"):
-                    breadcrumb_html += f'<span class="category-link">{product["product_group"]}</span>'
+                # 如果前两者都没有，使用binding和product_group
+                elif product.get("binding") or product.get("product_group"):
+                    if product.get("product_group"):
+                        categories.append(product["product_group"])
                     if product.get("binding"):
-                        breadcrumb_html += '<span class="category-separator">›</span>'
-                if product.get("binding"):
-                    breadcrumb_html += f'<span class="category-link">{product["binding"]}</span>'
+                        categories.append(product["binding"])
+                
+                # 使用pills组件显示类别
+                if categories:
+                    st.markdown("""
+                        <style>
+                            div[data-testid="stPills"] {
+                                margin-bottom: 1rem;
+                            }
+                            div[data-testid="stPills"] button {
+                                background-color: #f5f5f7 !important;
+                                border-radius: 100px !important;
+                                color: #1d1d1f !important;
+                                font-weight: 500 !important;
+                                border: none !important;
+                                padding: 0.25rem 0.75rem !important;
+                                margin-right: 0.5rem !important;
+                            }
+                            div[data-testid="stPills"] button:hover {
+                                background-color: #e8e8e8 !important;
+                                color: #1d1d1f !important;
+                            }
+                            div[data-testid="stPills"] button[data-testid="pill"] {
+                                cursor: default !important;
+                            }
+                        </style>
+                    """, unsafe_allow_html=True)
+                    st.write("类别导航:")
+                    _ = st.pills(
+                        "类别",
+                        options=categories,
+                        key=f"category_pills_{product.get('asin', '')}_{key_suffix}"
+                    )
             
-            breadcrumb_html += '</div>'
-            
-            # 只有当有分类信息时才显示面包屑
-            if '>' in breadcrumb_html or 'category-link' in breadcrumb_html:
-                st.markdown(breadcrumb_html, unsafe_allow_html=True)
-            
+            # 商品布局
             col1, col2, col3 = st.columns([1, 2, 1])
             
             with col1:
                 if product.get("main_image"):
-                    st.image(
-                        product["main_image"],
-                        caption=product.get("asin"),
-                        use_container_width=True
-                    )
+                    st.markdown(f"""
+                        <div style="
+                            background-color: #f5f5f7;
+                            border-radius: 16px;
+                            padding: 16px;
+                            text-align: center;
+                        ">
+                            <img src="{product['main_image']}" 
+                                style="max-width: 100%; height: auto; border-radius: 8px;"
+                            >
+                        </div>
+                    """, unsafe_allow_html=True)
                 else:
-                    st.markdown("🖼️ " + get_text("no_image"))
+                    st.markdown("""
+                        <div style="
+                            background-color: #f5f5f7;
+                            border-radius: 16px;
+                            padding: 16px;
+                            text-align: center;
+                            color: #86868b;
+                        ">
+                            🖼️ 暂无图片
+                        </div>
+                    """, unsafe_allow_html=True)
             
             with col2:
-                st.markdown(f"### {product.get('title', get_text('unknown_product'))}")
+                # 商品标题
+                st.markdown(f"""
+                    <div style="margin-bottom: 16px;">
+                        <h3 style="
+                            color: #1d1d1f;
+                            font-size: 1.2em;
+                            font-weight: 600;
+                            margin: 0 0 12px 0;
+                            line-height: 1.4;
+                        ">{product.get('title', get_text('unknown_product'))}</h3>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # 标签容器
+                tag_container = st.container()
+                tag_cols = tag_container.columns(4)
+                
+                # 来源标签
+                if product.get('source') == 'cj':
+                    tag_cols[0].markdown("""
+                        <div style="
+                            background: linear-gradient(135deg, #FF6B6B, #FF5252);
+                            color: white;
+                            padding: 6px 12px;
+                            border-radius: 100px;
+                            text-align: center;
+                            font-size: 0.85em;
+                            font-weight: 500;
+                            margin: 4px 0;
+                            box-shadow: 0 2px 8px rgba(255, 107, 107, 0.2);
+                        ">
+                            🔄 CJ
+                        </div>
+                    """, unsafe_allow_html=True)
+                elif product.get('source') == 'pa-api':
+                    tag_cols[0].markdown("""
+                        <div style="
+                            background: linear-gradient(135deg, #9C27B0, #7B1FA2);
+                            color: white;
+                            padding: 6px 12px;
+                            border-radius: 100px;
+                            text-align: center;
+                            font-size: 0.85em;
+                            font-weight: 500;
+                            margin: 4px 0;
+                            box-shadow: 0 2px 8px rgba(156, 39, 176, 0.2);
+                        ">
+                            🛍️ Amazon API
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                # 佣金标签
+                if product.get("source") == "cj" and product.get("offers"):
+                    main_offer = product["offers"][0]
+                    if main_offer.get("commission"):
+                        tag_cols[1].markdown(f"""
+                            <div style="
+                                background: linear-gradient(135deg, #4CAF50, #43A047);
+                                color: white;
+                                padding: 6px 12px;
+                                border-radius: 100px;
+                                text-align: center;
+                                font-size: 0.85em;
+                                font-weight: 500;
+                                margin: 4px 0;
+                                box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+                            ">
+                                💰 佣金: {main_offer["commission"]}
+                            </div>
+                        """, unsafe_allow_html=True)
+                
+                # Prime标签
+                if product.get("offers") and len(product["offers"]) > 0:
+                    if product["offers"][0].get("is_prime"):
+                        tag_cols[2].markdown("""
+                            <div style="
+                                background: linear-gradient(135deg, #00A8E1, #0091EA);
+                                color: white;
+                                padding: 6px 12px;
+                                border-radius: 100px;
+                                text-align: center;
+                                font-size: 0.85em;
+                                font-weight: 500;
+                                margin: 4px 0;
+                                box-shadow: 0 2px 8px rgba(0, 168, 225, 0.2);
+                            ">
+                                ✓ Prime
+                            </div>
+                        """, unsafe_allow_html=True)
+                
+                # 优惠券标签
+                if product.get("offers") and product["offers"][0].get("coupon_type"):
+                    coupon_type = product["offers"][0]["coupon_type"]
+                    coupon_value = product["offers"][0]["coupon_value"]
+                    tag_cols[3].markdown(f"""
+                        <div style="
+                            background: linear-gradient(135deg, #FF5722, #F4511E);
+                            color: white;
+                            padding: 6px 12px;
+                            border-radius: 100px;
+                            text-align: center;
+                            font-size: 0.85em;
+                            font-weight: 500;
+                            margin: 4px 0;
+                            box-shadow: 0 2px 8px rgba(255, 87, 34, 0.2);
+                        ">
+                            🏷️ {coupon_value}{'%' if coupon_type == 'percentage' else '$'} OFF
+                        </div>
+                    """, unsafe_allow_html=True)
                 
                 # 品牌信息
                 if product.get("brand"):
-                    st.markdown(f"**{get_text('brand')}:** {product['brand']}")
+                    st.markdown(f"""
+                        <div style="
+                            color: #1d1d1f;
+                            margin: 16px 0;
+                            font-size: 0.95em;
+                        ">
+                            <span style="color: #86868b;">品牌:</span>
+                            <span style="font-weight: 500;">{product['brand']}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
                 
-                # 商品变体信息
-                if product.get("variants") and len(product["variants"]) > 0:
-                    with st.expander("查看商品变体"):
-                        for variant in product["variants"]:
-                            st.markdown("---")
-                            cols = st.columns([1, 2, 1])
-                            
-                            with cols[0]:
-                                if variant.get("image"):
-                                    st.image(
-                                        variant["image"],
-                                        caption=variant.get("asin"),
-                                        use_container_width=True
-                                    )
-                            
-                            with cols[1]:
-                                st.markdown(f"**{variant.get('product_name', '未知变体')}**")
-                                
-                                # 变体价格信息
-                                if variant.get("original_price") and variant.get("discount_price"):
-                                    original_price = float(variant["original_price"].replace("$", "")) if isinstance(variant["original_price"], str) else variant["original_price"]
-                                    discount_price = float(variant["discount_price"].replace("$", "")) if isinstance(variant["discount_price"], str) else variant["discount_price"]
-                                    
-                                    if original_price > discount_price:
-                                        discount_percentage = ((original_price - discount_price) / original_price) * 100
-                                        st.markdown(
-                                            f'''
-                                            <div class="price-tag">
-                                                <div class="original-price">${original_price:.2f}</div>
-                                                <div class="current-price">${discount_price:.2f}</div>
-                                                <div class="discount-tag">-{discount_percentage:.0f}% OFF</div>
-                                            </div>
-                                            ''',
-                                            unsafe_allow_html=True
-                                        )
-                                    else:
-                                        st.markdown(
-                                            f'<div class="current-price">${discount_price:.2f}</div>',
-                                            unsafe_allow_html=True
-                                        )
-                            
-                            with cols[2]:
-                                if variant.get("url"):
-                                    st.markdown(f"[🔗 查看详情]({variant['url']})")
-                                if variant.get("affiliate_url"):
-                                    st.markdown(f"[🔗 推广链接]({variant['affiliate_url']})")
-                
-                # 商品分类信息
-                with st.expander(get_text("product_category")):
-                    st.markdown('<div class="category-section">', unsafe_allow_html=True)
+                # 价格信息
+                if product.get("offers") and len(product["offers"]) > 0:
+                    offer = product["offers"][0]
+                    price = offer.get("price")
+                    savings = offer.get("savings")
+                    currency = offer.get("currency", "USD")
                     
-                    # 显示绑定类型和产品组
-                    if product.get("binding") or product.get("product_group"):
-                        st.markdown('<div class="category-title">基本分类</div>', unsafe_allow_html=True)
-                        st.markdown('<div class="category-content">', unsafe_allow_html=True)
-                        if product.get("binding"):
-                            st.markdown(f'<span class="category-tag">📦 {product["binding"]}</span>', unsafe_allow_html=True)
-                        if product.get("product_group"):
-                            st.markdown(f'<span class="category-tag">🏷️ {product["product_group"]}</span>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    # 显示分类路径
-                    if product.get("categories") and len(product["categories"]) > 0:
-                        st.markdown('<div class="category-title">详细分类</div>', unsafe_allow_html=True)
-                        st.markdown('<div class="category-content">', unsafe_allow_html=True)
-                        for category_path in product["categories"]:
-                            categories = category_path.split(" > ") if isinstance(category_path, str) else []
-                            for category in categories:
-                                st.markdown(f'<span class="category-tag">📑 {category.strip()}</span>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    # 显示浏览节点信息
-                    if product.get("browse_nodes"):
-                        st.markdown('<div class="category-title">浏览节点</div>', unsafe_allow_html=True)
-                        st.markdown('<div class="category-content">', unsafe_allow_html=True)
-                        for node in product["browse_nodes"]:
-                            node_name = node.get('name', '')
-                            node_id = node.get('id', '')
-                            if node_name and node_id:
-                                st.markdown(
-                                    f'<span class="category-tag">🔍 {node_name} ({node_id})</span>',
-                                    unsafe_allow_html=True
-                                )
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                # 价格和折扣信息
-                price_col, discount_col, prime_col = st.columns(3)
-                
-                with price_col:
-                    try:
-                        # 获取价格信息
-                        if isinstance(product.get("offers"), list) and len(product["offers"]) > 0:
-                            offer = product["offers"][0]
-                            price = offer.get("price")
-                            savings = offer.get("savings")
-                            savings_percentage = offer.get("savings_percentage")
-                            currency = offer.get("currency", "USD")
-                            
-                            if price is not None and price != "":
-                                try:
-                                    price = float(price)
-                                    savings = float(savings) if savings is not None else 0
-                                    savings_percentage = float(savings_percentage) if savings_percentage is not None else 0
-                                    
-                                    # 计算原价
-                                    original_price = price + savings if savings > 0 else price
-                                    
-                                    # 显示价格信息
-                                    if savings > 0 and savings_percentage > 0:
-                                        st.markdown(
-                                            f'''
-                                            <div class="price-tag">
-                                                <div class="original-price">${original_price:.2f} {currency}</div>
-                                                <div class="current-price">${price:.2f} {currency}</div>
-                                                <div class="discount-tag">-{savings_percentage:.0f}% OFF</div>
-                                            </div>
-                                            ''',
-                                            unsafe_allow_html=True
-                                        )
-                                    else:
-                                        st.markdown(
-                                            f'''
-                                            <div class="price-tag">
-                                                <div class="current-price">${price:.2f} {currency}</div>
-                                            </div>
-                                            ''',
-                                            unsafe_allow_html=True
-                                        )
-                                except (ValueError, TypeError):
-                                    st.markdown(
-                                        f'<p class="price-tag">{get_text("price_unavailable")}</p>',
-                                        unsafe_allow_html=True
-                                    )
-                            else:
-                                st.markdown(
-                                    f'<p class="price-tag">{get_text("price_unavailable")}</p>',
-                                    unsafe_allow_html=True
-                                )
-                        else:
-                            st.markdown(
-                                f'<p class="price-tag">{get_text("price_unavailable")}</p>',
-                                unsafe_allow_html=True
-                            )
-                    except Exception as e:
-                        st.markdown(
-                            f'<p class="price-tag">{get_text("price_unavailable")}</p>',
-                            unsafe_allow_html=True
-                        )
-                
-                with discount_col:
-                    try:
-                        # 获取优惠券信息
-                        if isinstance(product.get("offers"), list) and len(product["offers"]) > 0:
-                            offer = product["offers"][0]
-                            coupon_type = offer.get("coupon_type")
-                            coupon_value = offer.get("coupon_value")
-                            
-                            if coupon_type and coupon_value:
-                                # 计算折扣金额和百分比
-                                price = float(offer.get("price", 0))
-                                if coupon_type == "percentage":
-                                    savings = price * (float(coupon_value) / 100)
-                                    savings_percentage = float(coupon_value)
-                                else:  # fixed
-                                    savings = float(coupon_value)
-                                    savings_percentage = (savings / price) * 100 if price > 0 else 0
-                                
-                                # 显示折扣信息
-                                if savings > 0:
-                                    st.markdown(
-                                        f'<p class="discount-tag">'
-                                        f'{get_text("save_money")} ${savings:.2f} ({savings_percentage:.0f}%)'
-                                        f'</p>',
-                                        unsafe_allow_html=True
-                                    )
-                                
-                                # 显示优惠券信息
-                                left_text = (
-                                    f"{coupon_value}%" 
-                                    if coupon_type.lower() == "percentage" 
-                                    else f"${coupon_value}"
-                                )
-                                right_text = (
-                                    "OFF" 
-                                    if coupon_type.lower() == "percentage" 
-                                    else "COUPON"
-                                )
-                                
-                                st.markdown(
-                                    f'''
-                                    <div class="coupon-card">
-                                        <div class="coupon-left">{left_text}</div>
-                                        <div class="coupon-right">{right_text}</div>
+                    if price is not None:
+                        price_col, discount_col = st.columns([1, 1])
+                        with price_col:
+                            if savings:
+                                original_price = price + savings
+                                st.markdown(f"""
+                                    <div style="margin: 16px 0;">
+                                        <div style="
+                                            color: #86868b;
+                                            text-decoration: line-through;
+                                            font-size: 0.9em;
+                                        ">
+                                            ${original_price:.2f} {currency}
+                                        </div>
+                                        <div style="
+                                            color: #1d1d1f;
+                                            font-size: 1.4em;
+                                            font-weight: 600;
+                                            margin-top: 4px;
+                                        ">
+                                            ${price:.2f} {currency}
+                                        </div>
                                     </div>
-                                    ''',
-                                    unsafe_allow_html=True
-                                )
-                    except (ValueError, TypeError, AttributeError) as e:
-                        pass
-                
-                with prime_col:
-                    try:
-                        offers = product.get("offers", [])
-                        if offers and isinstance(offers, list) and len(offers) > 0:
-                            is_prime = offers[0].get("is_prime", False)
-                            if is_prime:
-                                st.markdown(
-                                    '<p class="prime-tag">✓ Prime</p>',
-                                    unsafe_allow_html=True
-                                )
-                    except (ValueError, TypeError):
-                        pass
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"""
+                                    <div style="
+                                        color: #1d1d1f;
+                                        font-size: 1.4em;
+                                        font-weight: 600;
+                                        margin: 16px 0;
+                                    ">
+                                        ${price:.2f} {currency}
+                                    </div>
+                                """, unsafe_allow_html=True)
+                        
+                        with discount_col:
+                            if savings:
+                                savings_percentage = int((savings / (price + savings)) * 100)
+                                st.markdown(f"""
+                                    <div style="
+                                        background: linear-gradient(135deg, #067D62, #00695C);
+                                        color: white;
+                                        padding: 8px 16px;
+                                        border-radius: 100px;
+                                        text-align: center;
+                                        font-size: 0.95em;
+                                        font-weight: 500;
+                                        margin: 16px 0;
+                                        box-shadow: 0 2px 8px rgba(6, 125, 98, 0.2);
+                                    ">
+                                        节省 {savings_percentage}%
+                                    </div>
+                                """, unsafe_allow_html=True)
             
             with col3:
-                # 商品链接和删除按钮
+                # CJ推广链接
+                if product.get("cj_url"):
+                    st.markdown(f"""
+                        <a href="{product['cj_url']}" target="_blank" style="
+                            display: block;
+                            background: linear-gradient(135deg, #FF6B6B, #FF5252);
+                            color: white;
+                            padding: 12px 20px;
+                            border-radius: 100px;
+                            text-decoration: none;
+                            text-align: center;
+                            font-weight: 500;
+                            margin: 8px 0;
+                            box-shadow: 0 2px 8px rgba(255, 107, 107, 0.2);
+                            transition: transform 0.2s ease, box-shadow 0.2s ease;
+                        ">
+                            CJ推广链接
+                        </a>
+                    """, unsafe_allow_html=True)
+                
+                # 商品链接
                 if product.get("url"):
-                    st.markdown(f"[🔗 {get_text('view_details')}]({product['url']})")
+                    st.markdown(f"""
+                        <a href="{product['url']}" target="_blank" style="
+                            display: block;
+                            background: linear-gradient(135deg, #1E88E5, #1976D2);
+                            color: white;
+                            padding: 12px 20px;
+                            border-radius: 100px;
+                            text-decoration: none;
+                            text-align: center;
+                            font-weight: 500;
+                            margin: 8px 0;
+                            box-shadow: 0 2px 8px rgba(30, 136, 229, 0.2);
+                            transition: transform 0.2s ease, box-shadow 0.2s ease;
+                        ">
+                            查看详情
+                        </a>
+                    """, unsafe_allow_html=True)
                 
                 # 删除按钮
-                if st.button(
-                    f"🗑️ {get_text('delete')}",
+                delete_button = st.button(
+                    "🗑️ 删除",
                     key=f"delete_{product['asin']}_{key_suffix}",
-                    type="secondary"
-                ):
-                    if st.warning(get_text("confirm_delete")):
-                        if delete_product(product["asin"]):
-                            st.success(get_text("delete_success"))
+                    type="secondary",
+                    use_container_width=True
+                )
+                
+                if delete_button:
+                    st.markdown("""
+                        <div style="
+                            background-color: #ffebee;
+                            color: #c62828;
+                            padding: 12px;
+                            border-radius: 8px;
+                            margin: 8px 0;
+                            text-align: center;
+                            font-size: 0.9em;
+                        ">
+                            确认要删除此商品吗？
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("取消", key=f"cancel_{product['asin']}"):
                             st.rerun()
+                    with col2:
+                        if st.button("确认", key=f"confirm_{product['asin']}", type="primary"):
+                            if delete_product(product["asin"]):
+                                st.success("删除成功")
+                                st.rerun()
                 
                 # 更新时间
                 if product.get("timestamp"):
-                    st.caption(f"{get_text('update_time')}: {product['timestamp']}")
+                    st.markdown(f"""
+                        <div style="
+                            color: #86868b;
+                            font-size: 0.85em;
+                            text-align: center;
+                            margin-top: 16px;
+                        ">
+                            更新于 {product['timestamp']}
+                        </div>
+                    """, unsafe_allow_html=True)
             
-            st.markdown("---")
+            st.markdown("</div>", unsafe_allow_html=True)
 
 def handle_pagination(
     total_items: int,
@@ -955,23 +1015,40 @@ def render_products_page():
     with st.sidebar:
         st.subheader("筛选条件")
         
+        # 添加数据源筛选
+        source_filter = st.selectbox(
+            "数据来源",
+            options=["all", "pa-api", "cj"],
+            format_func=lambda x: {
+                "all": "全部来源",
+                "pa-api": "Amazon API",
+                "cj": "CJ API"
+            }[x]
+        )
+        
         col1, col2 = st.columns(2)
         with col1:
             min_price = st.number_input("最低价格", min_value=0.0, value=0.0)
         with col2:
-            max_price = st.number_input("最高价格", min_value=0.0, value=1000.0)
+            max_price = st.number_input("最高价格", min_value=0.0, value=9999.0)
             
         min_discount = st.slider("最低折扣率", min_value=0, max_value=100, value=0)
         is_prime_only = st.checkbox("只显示Prime商品")
         
+        # 添加CJ佣金筛选
+        min_commission = None
+        if source_filter in ["all", "cj"]:
+            min_commission = st.slider("最低佣金比例", min_value=0, max_value=100, value=0)
+        
         sort_by = st.selectbox(
             "排序方式",
-            options=[None, "price", "discount", "timestamp"],
+            options=[None, "price", "discount", "timestamp", "commission"],
             format_func=lambda x: {
                 None: "默认排序",
                 "price": "按价格",
                 "discount": "按折扣",
-                "timestamp": "按时间"
+                "timestamp": "按时间",
+                "commission": "按佣金"
             }[x]
         )
         
@@ -1001,7 +1078,7 @@ def render_products_page():
         
         # 加载折扣商品数据
         discount_products = load_products(
-            product_type="discount",  # 指定为折扣商品
+            product_type="discount",
             page=st.session_state.discount_page,
             page_size=page_size,
             min_price=min_price,
@@ -1010,7 +1087,9 @@ def render_products_page():
             prime_only=is_prime_only,
             sort_by=sort_by,
             sort_order=sort_order,
-            selected_categories=selected_categories
+            selected_categories=selected_categories,
+            source_filter=source_filter,
+            min_commission=min_commission
         )
         
         # 显示折扣商品
@@ -1045,7 +1124,7 @@ def render_products_page():
         
         # 加载优惠券商品数据
         coupon_products = load_products(
-            product_type="coupon",  # 指定为优惠券商品
+            product_type="coupon",
             page=st.session_state.coupon_page,
             page_size=page_size,
             min_price=min_price,
@@ -1054,7 +1133,9 @@ def render_products_page():
             prime_only=is_prime_only,
             sort_by=sort_by,
             sort_order=sort_order,
-            selected_categories=selected_categories
+            selected_categories=selected_categories,
+            source_filter=source_filter,
+            min_commission=min_commission
         )
         
         # 显示优惠券商品
