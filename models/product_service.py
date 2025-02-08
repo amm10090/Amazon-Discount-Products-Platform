@@ -11,6 +11,7 @@ from sqlalchemy import func, desc, asc
 from datetime import datetime, timedelta
 from .database import Product, Offer, CouponHistory
 from .product import ProductInfo, ProductOffer
+from src.core.cj_api_client import CJAPIClient
 
 class ProductService:
     """产品数据服务"""
@@ -803,4 +804,173 @@ class ProductService:
             
         except Exception as e:
             logger.error(f"获取折扣商品列表失败: {str(e)}")
-            return [] 
+            return []
+
+    @staticmethod
+    async def create_or_update_product_from_cj(
+        db: Session, 
+        cj_product: Dict[str, Any],
+        generate_url: bool = True
+    ) -> Product:
+        """从CJ API响应创建或更新产品
+        
+        Args:
+            db: 数据库会话
+            cj_product: CJ API返回的产品数据
+            generate_url: 是否生成推广链接
+            
+        Returns:
+            Product: 创建或更新的产品记录
+        """
+        asin = cj_product["asin"]
+        
+        # 查找现有产品
+        product = db.query(Product).filter(Product.asin == asin).first()
+        
+        if not product:
+            product = Product(asin=asin)
+            db.add(product)
+        
+        # 更新基本信息
+        product.title = cj_product["product_name"]
+        product.main_image = cj_product["image"]
+        product.brand = cj_product["brand_name"]
+        
+        # 更新价格信息
+        product.original_price = float(cj_product["original_price"].replace("$", ""))
+        product.current_price = float(cj_product["discount_price"].replace("$", ""))
+        product.currency = "USD"
+        
+        if product.original_price and product.current_price:
+            product.savings_amount = product.original_price - product.current_price
+            if product.original_price > 0:
+                product.savings_percentage = int((product.savings_amount / product.original_price) * 100)
+        
+        # 更新CJ特定字段
+        product.cj_product_id = cj_product["product_id"]
+        product.cj_commission = float(cj_product["commission"].replace("%", ""))
+        product.cj_discount_code = cj_product["discount_code"]
+        product.cj_coupon = cj_product["coupon"]
+        product.cj_url = cj_product["url"]
+        product.cj_parent_asin = cj_product["parent_asin"]
+        product.cj_variant_asin = cj_product["variant_asin"]
+        product.cj_rating = float(cj_product["rating"]) if cj_product["rating"] else None
+        product.cj_reviews = cj_product["reviews"]
+        product.cj_brand_id = cj_product["brand_id"]
+        product.cj_brand_name = cj_product["brand_name"]
+        product.cj_is_featured = cj_product["is_featured_product"] == 1
+        product.cj_is_amazon_choice = cj_product["is_amazon_choice"] == 1
+        product.cj_update_time = datetime.fromisoformat(cj_product["update_time"])
+        
+        # 更新分类信息
+        product.categories = [[cj_product["category"], cj_product["subcategory"]]]
+        
+        # 更新元数据
+        product.source = "cj"
+        product.api_provider = "cj-api"
+        product.raw_data = cj_product
+        product.timestamp = datetime.utcnow()
+        
+        # 如果需要生成新的推广链接
+        if generate_url:
+            try:
+                cj_client = CJAPIClient()
+                product.cj_url = await cj_client.generate_product_link(asin)
+            except Exception as e:
+                logger.error(f"生成CJ推广链接失败: {str(e)}")
+        
+        # 提交更改
+        db.commit()
+        db.refresh(product)
+        
+        return product
+    
+    @staticmethod
+    async def check_and_update_cj_products(
+        db: Session,
+        asins: List[str],
+        force_update: bool = False
+    ) -> Dict[str, bool]:
+        """检查并更新产品的CJ信息
+        
+        Args:
+            db: 数据库会话
+            asins: ASIN列表
+            force_update: 是否强制更新现有CJ信息
+            
+        Returns:
+            Dict[str, bool]: 商品可用性字典
+        """
+        try:
+            cj_client = CJAPIClient()
+            
+            # 检查商品在CJ平台的可用性
+            availability = await cj_client.check_products_availability(asins)
+            
+            # 更新数据库中的商品信息
+            for asin, is_available in availability.items():
+                if is_available:
+                    # 获取商品详情
+                    cj_product = await cj_client.get_product_details(asin)
+                    if cj_product:
+                        # 检查是否需要更新
+                        product = db.query(Product).filter(Product.asin == asin).first()
+                        if (not product or 
+                            not product.cj_product_id or 
+                            force_update or 
+                            (product.cj_update_time and 
+                             datetime.utcnow() - product.cj_update_time > timedelta(days=1))):
+                            await ProductService.create_or_update_product_from_cj(db, cj_product)
+            
+            return availability
+            
+        except Exception as e:
+            logger.error(f"检查和更新CJ商品信息失败: {str(e)}")
+            return {asin: False for asin in asins}
+    
+    @staticmethod
+    async def get_product_by_asin(db: Session, asin: str) -> Optional[ProductInfo]:
+        """根据ASIN获取商品信息，优先返回CJ信息"""
+        try:
+            product = db.query(Product).filter(Product.asin == asin).first()
+            
+            if not product:
+                return None
+            
+            # 如果是CJ商品，使用CJ的URL
+            url = product.cj_url if product.source == "cj" else product.url
+            
+            # 获取商品的所有优惠信息
+            offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+            
+            return ProductInfo(
+                asin=product.asin,
+                title=product.title,
+                url=url,  # 使用CJ URL或原始URL
+                brand=product.brand,
+                main_image=product.main_image,
+                timestamp=product.timestamp or datetime.utcnow(),
+                binding=product.binding,
+                product_group=product.product_group,
+                categories=product.categories,
+                browse_nodes=product.browse_nodes,
+                offers=[
+                    ProductOffer(
+                        condition=o.condition or "New",
+                        price=o.price or 0.0,
+                        currency=o.currency or "USD",
+                        savings=o.savings,
+                        savings_percentage=o.savings_percentage,
+                        is_prime=o.is_prime or False,
+                        availability=o.availability or "Available",
+                        merchant_name=o.merchant_name or "Amazon",
+                        is_buybox_winner=o.is_buybox_winner or False,
+                        deal_type=o.deal_type,
+                        coupon_type=o.coupon_type if hasattr(o, 'coupon_type') else None,
+                        coupon_value=o.coupon_value if hasattr(o, 'coupon_value') else None
+                    ) for o in offers
+                ]
+            )
+        except Exception as e:
+            logger.error(f"获取商品 {asin} 详情时出错: {str(e)}")
+            raise e 

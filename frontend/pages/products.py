@@ -484,6 +484,53 @@ def display_products(
                 if product.get("brand"):
                     st.markdown(f"**{get_text('brand')}:** {product['brand']}")
                 
+                # 商品变体信息
+                if product.get("variants") and len(product["variants"]) > 0:
+                    with st.expander("查看商品变体"):
+                        for variant in product["variants"]:
+                            st.markdown("---")
+                            cols = st.columns([1, 2, 1])
+                            
+                            with cols[0]:
+                                if variant.get("image"):
+                                    st.image(
+                                        variant["image"],
+                                        caption=variant.get("asin"),
+                                        use_container_width=True
+                                    )
+                            
+                            with cols[1]:
+                                st.markdown(f"**{variant.get('product_name', '未知变体')}**")
+                                
+                                # 变体价格信息
+                                if variant.get("original_price") and variant.get("discount_price"):
+                                    original_price = float(variant["original_price"].replace("$", "")) if isinstance(variant["original_price"], str) else variant["original_price"]
+                                    discount_price = float(variant["discount_price"].replace("$", "")) if isinstance(variant["discount_price"], str) else variant["discount_price"]
+                                    
+                                    if original_price > discount_price:
+                                        discount_percentage = ((original_price - discount_price) / original_price) * 100
+                                        st.markdown(
+                                            f'''
+                                            <div class="price-tag">
+                                                <div class="original-price">${original_price:.2f}</div>
+                                                <div class="current-price">${discount_price:.2f}</div>
+                                                <div class="discount-tag">-{discount_percentage:.0f}% OFF</div>
+                                            </div>
+                                            ''',
+                                            unsafe_allow_html=True
+                                        )
+                                    else:
+                                        st.markdown(
+                                            f'<div class="current-price">${discount_price:.2f}</div>',
+                                            unsafe_allow_html=True
+                                        )
+                            
+                            with cols[2]:
+                                if variant.get("url"):
+                                    st.markdown(f"[🔗 查看详情]({variant['url']})")
+                                if variant.get("affiliate_url"):
+                                    st.markdown(f"[🔗 推广链接]({variant['affiliate_url']})")
+                
                 # 商品分类信息
                 with st.expander(get_text("product_category")):
                     st.markdown('<div class="category-section">', unsafe_allow_html=True)

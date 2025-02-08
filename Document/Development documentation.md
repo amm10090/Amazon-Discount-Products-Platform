@@ -575,7 +575,7 @@ python run.py --mode api
 python run.py --mode frontend
 ```
 
-## 10. 开发指南
+ 。## 10. 开发指南
 
 ### 10.1 开发环境设置
 ```bash
