@@ -11,14 +11,16 @@ from sqlalchemy import func, desc, asc
 from datetime import datetime, timedelta
 from .database import Product, Offer, CouponHistory
 from .product import ProductInfo, ProductOffer
-from src.core.cj_api_client import CJAPIClient
 
 class ProductService:
-    """产品数据服务"""
+    """
+    商品服务类
+    提供商品的增删改查等数据库操作方法
+    """
     
     @staticmethod
     def create_product(db: Session, product_info: ProductInfo, source: str = "pa-api") -> Product:
-        """创建新产品记录"""
+        """创建新商品记录"""
         # 获取第一个优惠（通常是最佳优惠）
         best_offer = product_info.offers[0] if product_info.offers else None
         
@@ -63,7 +65,7 @@ class ProductService:
     
     @staticmethod
     def update_product(db: Session, product_info: ProductInfo, source: str = "pa-api") -> Optional[Product]:
-        """更新现有产品记录"""
+        """更新商品信息"""
         db_product = db.query(Product).filter(Product.asin == product_info.asin).first()
         if not db_product:
             return None
@@ -105,9 +107,7 @@ class ProductService:
     
     @staticmethod
     def get_product_by_asin(db: Session, asin: str) -> Optional[ProductInfo]:
-        """
-        根据ASIN获取单个产品详情
-        """
+        """根据ASIN获取商品信息"""
         try:
             product = db.query(Product).filter(Product.asin == asin).first()
             
@@ -148,12 +148,12 @@ class ProductService:
     
     @staticmethod
     def get_products(db: Session, skip: int = 0, limit: int = 100) -> List[Product]:
-        """获取产品列表"""
+        """获取商品列表"""
         return db.query(Product).offset(skip).limit(limit).all()
     
     @staticmethod
     def create_or_update_product(db: Session, product_info: ProductInfo, source: str = "pa-api") -> Product:
-        """创建或更新产品记录"""
+        """创建或更新商品信息"""
         existing_product = ProductService.get_product_by_asin(db, product_info.asin)
         if existing_product:
             return ProductService.update_product(db, product_info, source)
@@ -168,17 +168,7 @@ class ProductService:
         api_provider: str = "pa-api",  # API提供者
         include_metadata: bool = False  # 是否包含元数据（分类信息等）
     ) -> List[ProductInfo]:
-        """
-        批量创建或更新产品信息
-        
-        Args:
-            db: 数据库会话
-            products: 产品信息列表
-            include_coupon: 是否包含优惠券信息
-            source: 数据来源渠道（bestseller/coupon）
-            api_provider: API提供者（pa-api等）
-            include_metadata: 是否包含元数据（分类信息等）
-        """
+        """批量创建或更新商品信息"""
         saved_products = []
         current_time = datetime.utcnow()
         
@@ -327,15 +317,7 @@ class ProductService:
 
     @staticmethod
     def get_category_stats(db: Session) -> Dict[str, Any]:
-        """获取类别统计信息
-        
-        返回:
-            Dict[str, Any]: 包含以下信息:
-            - main_categories: 主要类别统计
-            - sub_categories: 子类别统计
-            - bindings: 商品绑定类型统计
-            - product_groups: 商品组统计
-        """
+        """获取类别统计信息"""
         try:
             # 获取所有商品的类别信息
             products = db.query(Product).all()
@@ -403,14 +385,7 @@ class ProductService:
         bindings: Optional[List[str]] = None,
         product_groups: Optional[List[str]] = None
     ) -> List[ProductInfo]:
-        """获取商品列表，支持分页、筛选和排序
-        
-        新增参数:
-            main_categories: 主要类别筛选列表
-            sub_categories: 子类别筛选列表
-            bindings: 商品绑定类型筛选列表
-            product_groups: 商品组筛选列表
-        """
+        """获取商品列表"""
         try:
             # 构建基础查询
             query = db.query(Product)
@@ -529,9 +504,7 @@ class ProductService:
 
     @staticmethod
     def get_stats(db: Session) -> Dict[str, Any]:
-        """
-        获取产品数据统计信息
-        """
+        """获取商品统计信息"""
         # 基本统计
         total_products = db.query(func.count(Product.asin)).scalar()
         
@@ -571,15 +544,7 @@ class ProductService:
 
     @staticmethod
     def batch_delete_products(db: Session, asins: List[str]) -> Dict[str, int]:
-        """批量删除商品
-        
-        Args:
-            db: 数据库会话
-            asins: 要删除的商品ASIN列表
-            
-        Returns:
-            Dict[str, int]: 包含成功和失败数量的字典
-        """
+        """批量删除商品"""
         success_count = 0
         fail_count = 0
         
@@ -804,173 +769,4 @@ class ProductService:
             
         except Exception as e:
             logger.error(f"获取折扣商品列表失败: {str(e)}")
-            return []
-
-    @staticmethod
-    async def create_or_update_product_from_cj(
-        db: Session, 
-        cj_product: Dict[str, Any],
-        generate_url: bool = True
-    ) -> Product:
-        """从CJ API响应创建或更新产品
-        
-        Args:
-            db: 数据库会话
-            cj_product: CJ API返回的产品数据
-            generate_url: 是否生成推广链接
-            
-        Returns:
-            Product: 创建或更新的产品记录
-        """
-        asin = cj_product["asin"]
-        
-        # 查找现有产品
-        product = db.query(Product).filter(Product.asin == asin).first()
-        
-        if not product:
-            product = Product(asin=asin)
-            db.add(product)
-        
-        # 更新基本信息
-        product.title = cj_product["product_name"]
-        product.main_image = cj_product["image"]
-        product.brand = cj_product["brand_name"]
-        
-        # 更新价格信息
-        product.original_price = float(cj_product["original_price"].replace("$", ""))
-        product.current_price = float(cj_product["discount_price"].replace("$", ""))
-        product.currency = "USD"
-        
-        if product.original_price and product.current_price:
-            product.savings_amount = product.original_price - product.current_price
-            if product.original_price > 0:
-                product.savings_percentage = int((product.savings_amount / product.original_price) * 100)
-        
-        # 更新CJ特定字段
-        product.cj_product_id = cj_product["product_id"]
-        product.cj_commission = float(cj_product["commission"].replace("%", ""))
-        product.cj_discount_code = cj_product["discount_code"]
-        product.cj_coupon = cj_product["coupon"]
-        product.cj_url = cj_product["url"]
-        product.cj_parent_asin = cj_product["parent_asin"]
-        product.cj_variant_asin = cj_product["variant_asin"]
-        product.cj_rating = float(cj_product["rating"]) if cj_product["rating"] else None
-        product.cj_reviews = cj_product["reviews"]
-        product.cj_brand_id = cj_product["brand_id"]
-        product.cj_brand_name = cj_product["brand_name"]
-        product.cj_is_featured = cj_product["is_featured_product"] == 1
-        product.cj_is_amazon_choice = cj_product["is_amazon_choice"] == 1
-        product.cj_update_time = datetime.fromisoformat(cj_product["update_time"])
-        
-        # 更新分类信息
-        product.categories = [[cj_product["category"], cj_product["subcategory"]]]
-        
-        # 更新元数据
-        product.source = "cj"
-        product.api_provider = "cj-api"
-        product.raw_data = cj_product
-        product.timestamp = datetime.utcnow()
-        
-        # 如果需要生成新的推广链接
-        if generate_url:
-            try:
-                cj_client = CJAPIClient()
-                product.cj_url = await cj_client.generate_product_link(asin)
-            except Exception as e:
-                logger.error(f"生成CJ推广链接失败: {str(e)}")
-        
-        # 提交更改
-        db.commit()
-        db.refresh(product)
-        
-        return product
-    
-    @staticmethod
-    async def check_and_update_cj_products(
-        db: Session,
-        asins: List[str],
-        force_update: bool = False
-    ) -> Dict[str, bool]:
-        """检查并更新产品的CJ信息
-        
-        Args:
-            db: 数据库会话
-            asins: ASIN列表
-            force_update: 是否强制更新现有CJ信息
-            
-        Returns:
-            Dict[str, bool]: 商品可用性字典
-        """
-        try:
-            cj_client = CJAPIClient()
-            
-            # 检查商品在CJ平台的可用性
-            availability = await cj_client.check_products_availability(asins)
-            
-            # 更新数据库中的商品信息
-            for asin, is_available in availability.items():
-                if is_available:
-                    # 获取商品详情
-                    cj_product = await cj_client.get_product_details(asin)
-                    if cj_product:
-                        # 检查是否需要更新
-                        product = db.query(Product).filter(Product.asin == asin).first()
-                        if (not product or 
-                            not product.cj_product_id or 
-                            force_update or 
-                            (product.cj_update_time and 
-                             datetime.utcnow() - product.cj_update_time > timedelta(days=1))):
-                            await ProductService.create_or_update_product_from_cj(db, cj_product)
-            
-            return availability
-            
-        except Exception as e:
-            logger.error(f"检查和更新CJ商品信息失败: {str(e)}")
-            return {asin: False for asin in asins}
-    
-    @staticmethod
-    async def get_product_by_asin(db: Session, asin: str) -> Optional[ProductInfo]:
-        """根据ASIN获取商品信息，优先返回CJ信息"""
-        try:
-            product = db.query(Product).filter(Product.asin == asin).first()
-            
-            if not product:
-                return None
-            
-            # 如果是CJ商品，使用CJ的URL
-            url = product.cj_url if product.source == "cj" else product.url
-            
-            # 获取商品的所有优惠信息
-            offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
-            
-            return ProductInfo(
-                asin=product.asin,
-                title=product.title,
-                url=url,  # 使用CJ URL或原始URL
-                brand=product.brand,
-                main_image=product.main_image,
-                timestamp=product.timestamp or datetime.utcnow(),
-                binding=product.binding,
-                product_group=product.product_group,
-                categories=product.categories,
-                browse_nodes=product.browse_nodes,
-                offers=[
-                    ProductOffer(
-                        condition=o.condition or "New",
-                        price=o.price or 0.0,
-                        currency=o.currency or "USD",
-                        savings=o.savings,
-                        savings_percentage=o.savings_percentage,
-                        is_prime=o.is_prime or False,
-                        availability=o.availability or "Available",
-                        merchant_name=o.merchant_name or "Amazon",
-                        is_buybox_winner=o.is_buybox_winner or False,
-                        deal_type=o.deal_type,
-                        coupon_type=o.coupon_type if hasattr(o, 'coupon_type') else None,
-                        coupon_value=o.coupon_value if hasattr(o, 'coupon_value') else None
-                    ) for o in offers
-                ]
-            )
-        except Exception as e:
-            logger.error(f"获取商品 {asin} 详情时出错: {str(e)}")
-            raise e 
+            return [] 

@@ -30,8 +30,11 @@ TRANSLATIONS = {
         "cache_health": "健康状态",
         "cleanup_status": "清理状态",
         "last_cleanup": "最后清理时间",
-        "clear_cache": "清理过期缓存",
-        "cache_cleared": "缓存清理成功",
+        "clear_expired_cache": "清理过期缓存",
+        "clear_all_cache": "清理所有缓存",
+        "clear_all_cache_warning": "⚠️ 确定要清理所有缓存吗？此操作不可恢复！",
+        "clearing_cache": "正在清理缓存...",
+        "cache_cleared": "缓存已清理成功",
         "cache_clear_failed": "缓存清理失败",
         
         # 爬虫控制
@@ -215,22 +218,6 @@ TRANSLATIONS = {
         "no_coupon_value_price_data": "暂无优惠券金额与价格关系数据",
         "coupon_type": "优惠券类型",
         
-        # 缓存相关
-        "cache_stats": "缓存统计",
-        "cache_files": "总文件数",
-        "cache_size": "总大小",
-        "cache_type_distribution": "缓存类型分布",
-        "cache_status": "缓存状态",
-        "cache_health": "健康状态",
-        "cleanup_status": "清理状态",
-        "last_cleanup": "最后清理时间",
-        "clear_cache": "清理缓存",
-        "cache_cleared": "缓存已成功清理",
-        "cache_clear_failed": "清理缓存失败",
-        "loading_failed": "加载数据失败",
-        "size": "大小",
-        "files": "文件数",
-        
         # 商品分类相关
         "product_category": "商品分类",
         "product_binding": "商品类型",
@@ -282,14 +269,17 @@ TRANSLATIONS = {
         
         # Cache Management
         "cache_stats": "Cache Statistics",
-        "cache_files": "Total Files",
-        "cache_size": "Total Size",
+        "cache_files": "Cache Files",
+        "cache_size": "Cache Size",
         "cache_type_distribution": "Cache Type Distribution",
         "cache_status": "Cache Status",
         "cache_health": "Health Status",
         "cleanup_status": "Cleanup Status",
         "last_cleanup": "Last Cleanup Time",
-        "clear_cache": "Clear Cache",
+        "clear_expired_cache": "Clear Expired Cache",
+        "clear_all_cache": "Clear All Cache",
+        "clear_all_cache_warning": "⚠️ Are you sure you want to clear all cache? This action cannot be undone!",
+        "clearing_cache": "Clearing cache...",
         "cache_cleared": "Cache cleared successfully",
         "cache_clear_failed": "Failed to clear cache",
         
@@ -473,22 +463,6 @@ TRANSLATIONS = {
         "no_coupon_price_data": "No coupon price relation data available",
         "no_coupon_value_price_data": "No coupon value and price relation data available",
         "coupon_type": "Coupon Type",
-        
-        # 缓存相关
-        "cache_stats": "Cache Statistics",
-        "cache_files": "Total Files",
-        "cache_size": "Total Size",
-        "cache_type_distribution": "Cache Type Distribution",
-        "cache_status": "Cache Status",
-        "cache_health": "Health Status",
-        "cleanup_status": "Cleanup Status",
-        "last_cleanup": "Last Cleanup Time",
-        "clear_cache": "Clear Cache",
-        "cache_cleared": "Cache cleared successfully",
-        "cache_clear_failed": "Failed to clear cache",
-        "loading_failed": "Failed to load data",
-        "size": "Size",
-        "files": "Files",
         
         # 商品分类相关
         "product_category": "Product Category",

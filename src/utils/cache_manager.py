@@ -41,6 +41,7 @@ class CacheManager:
         self.config = self._load_config(config_path)
         # 使用项目根目录作为基准
         self.base_dir = self.root_dir / self.config["cache"]["base_dir"]
+        self.enabled = True  # 默认启用缓存
         self._ensure_cache_dirs()
         self._cleanup_thread = None
         self._start_cleanup_thread()
@@ -246,12 +247,28 @@ class CacheManager:
             logger.error(f"删除缓存失败: {str(e)}")
             
     def clear_all(self):
-        """清空所有缓存"""
+        """清理所有缓存文件"""
+        # 如果缓存被禁用，直接返回
+        if not self.enabled:
+            return
+            
         try:
-            shutil.rmtree(self.base_dir)
-            self._ensure_cache_dirs()
+            # 遍历所有缓存目录
+            for dir_name in self.config["cache"]["file_structure"].values():
+                cache_dir = self.base_dir / dir_name
+                if cache_dir.exists():
+                    # 删除目录下的所有文件
+                    for cache_file in cache_dir.glob("*"):
+                        try:
+                            cache_file.unlink()
+                            logger.info(f"已删除缓存文件: {cache_file}")
+                        except Exception as e:
+                            logger.error(f"删除缓存文件失败: {cache_file}, 错误: {str(e)}")
+                    
+            logger.info("所有缓存已清理完成")
         except Exception as e:
-            logger.error(f"清空缓存失败: {str(e)}")
+            logger.error(f"清理所有缓存失败: {str(e)}")
+            raise
             
     def _cleanup_expired(self):
         """清理过期缓存"""
@@ -311,6 +328,34 @@ class CacheManager:
             logger.error(f"获取缓存统计信息失败: {str(e)}")
             
         return stats
+
+    def clear_expired(self):
+        """清理过期的缓存文件"""
+        # 如果缓存被禁用，直接返回
+        if not self.enabled:
+            return
+            
+        try:
+            current_time = time.time()
+            for cache_type, dir_name in self.config["cache"]["file_structure"].items():
+                cache_dir = self.base_dir / dir_name
+                if not cache_dir.exists():
+                    continue
+                    
+                ttl = self.config["cache"]["ttl"].get(cache_type, self.config["cache"]["ttl"]["others"])
+                
+                for cache_file in cache_dir.glob("*"):
+                    try:
+                        if time.time() - cache_file.stat().st_mtime > ttl:
+                            cache_file.unlink()
+                            logger.info(f"已删除过期缓存: {cache_file}")
+                    except Exception as e:
+                        logger.error(f"删除过期缓存文件失败: {cache_file}, 错误: {str(e)}")
+                        
+            logger.info("过期缓存清理完成")
+        except Exception as e:
+            logger.error(f"清理过期缓存失败: {str(e)}")
+            raise
 
 def cache_decorator(cache_type: str = "products", ttl: Optional[int] = None):
     """

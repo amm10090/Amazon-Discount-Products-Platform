@@ -20,33 +20,36 @@ from datetime import datetime
 import asyncio
 import uvicorn
 import sys
+import os
 from pathlib import Path as PathLib
 import aiohttp
 from sqlalchemy import or_, and_
-
-# 添加项目根目录到Python路径
-project_root = PathLib(__file__).parent.parent.parent.parent
-sys.path.append(str(project_root))
-
-from models.cj_product_service import CJProduct, ProductVariant
-from ..amazon_bestseller import crawl_deals, save_results
-import os
 from fastapi.responses import FileResponse, JSONResponse
 from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
 from models.product import ProductInfo, ProductOffer
 from pydantic import BaseModel, Field
-from ..amazon_product_api import AmazonProductAPI
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
-from models.database import SessionLocal, init_db, Product, get_cj_db
+from models.database import SessionLocal, init_db, Product, ProductVariant
 from models.product_service import ProductService
 from enum import Enum
 from models.scheduler import SchedulerManager
 from models.scheduler_models import JobConfig, JobStatus, SchedulerStatus, JobHistory
 import pytz
 import logging
-from src.core.cj_api_client import CJAPIClient
-from models.cj_product_service import CJProductService
+
+# 添加项目根目录到Python路径
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+try:
+    from src.core.amazon_bestseller import crawl_deals, save_results
+    from src.core.amazon_product_api import AmazonProductAPI
+    from src.core.cj_api_client import CJAPIClient
+except ImportError as e:
+    logging.error(f"导入错误: {str(e)}")
+    raise
 
 # 加载环境变量
 load_dotenv()
@@ -560,6 +563,19 @@ async def clear_cache():
             detail=f"清理缓存失败: {str(e)}"
         )
 
+@app.post("/api/cache/clear-all")
+async def clear_all_cache():
+    """清理所有缓存"""
+    try:
+        api = get_product_api()
+        api.cache_manager.clear_all()
+        return {"status": "success", "message": "所有缓存已清理"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清理所有缓存失败: {str(e)}"
+        )
+
 # 调度器相关API
 @app.post("/api/scheduler/jobs")
 async def add_job(job_config: JobConfig):
@@ -737,189 +753,41 @@ async def get_category_stats(db: Session = Depends(get_db)):
             detail=f"获取类别统计信息失败: {str(e)}"
         )
 
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时的事件处理"""
-    # 确保数据库表已创建
-    init_db()
-    print("数据库初始化完成")
-
-# CJ相关API
-@app.get("/api/cj/products")
-async def list_cj_products(
-    db: Session = Depends(get_cj_db),  # 使用CJ专用数据库会话
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=50, description="每页数量"),
-    category: Optional[str] = Query(None, description="商品类别"),
-    subcategory: Optional[str] = Query(None, description="商品子类别"),
-    country_code: str = Query("US", description="国家代码"),
-    brand_id: int = Query(0, description="品牌ID"),
-    is_featured_product: int = Query(2, description="是否精选商品(0:否, 1:是, 2:全部)"),
-    is_amazon_choice: int = Query(2, description="是否亚马逊之选(0:否, 1:是, 2:全部)"),
-    have_coupon: int = Query(2, description="是否有优惠券(0:否, 1:是, 2:全部)"),
-    discount_min: int = Query(0, description="最低折扣率")
-):
-    """从数据库获取CJ商品列表,按父商品分组显示"""
-    try:
-        # 构建基础查询,只查询父商品或没有父商品的商品
-        query = db.query(CJProduct).filter(
-            or_(
-                CJProduct.asin == CJProduct.parent_asin,  # 商品是自己的父商品
-                and_(
-                    CJProduct.parent_asin.is_(None),  # 没有父商品
-                    ~CJProduct.asin.in_(  # 且不是其他商品的变体
-                        db.query(ProductVariant.variant_asin)
-                    )
-                )
-            )
-        )
-
-        # 应用过滤条件
-        if category:
-            query = query.filter(CJProduct.category == category)
-        if subcategory:
-            query = query.filter(CJProduct.subcategory == subcategory)
-        if is_featured_product != 2:
-            query = query.filter(CJProduct.is_featured_product == (is_featured_product == 1))
-        if is_amazon_choice != 2:
-            query = query.filter(CJProduct.is_amazon_choice == (is_amazon_choice == 1))
-        if discount_min > 0:
-            query = query.filter(CJProduct.discount_price < CJProduct.original_price)
-
-        # 获取总数
-        total = query.count()
-
-        # 应用分页
-        products = query.offset((page - 1) * page_size).limit(page_size).all()
-
-        # 处理响应数据
-        result = []
-        for product in products:
-            # 获取变体信息
-            variants = []
-            if product.parent_asin:
-                # 获取同一父ASIN下的所有变体
-                variants = db.query(CJProduct).filter(
-                    and_(
-                        CJProduct.parent_asin == product.parent_asin,
-                        CJProduct.asin != product.asin
-                    )
-                ).all()
-            elif product.asin:
-                # 获取以当前商品为父ASIN的变体
-                variants = db.query(CJProduct).filter(
-                    CJProduct.parent_asin == product.asin
-                ).all()
-
-            # 构建商品数据
-            product_data = {
-                "asin": product.asin,
-                "product_id": product.product_id,
-                "product_name": product.product_name,
-                "brand_name": product.brand_name,
-                "brand_id": product.brand_id,
-                "image": product.image,
-                "url": product.url,
-                "affiliate_url": product.affiliate_url,
-                "original_price": product.original_price,
-                "discount_price": product.discount_price,
-                "commission": product.commission,
-                "discount_code": product.discount_code,
-                "coupon": product.coupon,
-                "parent_asin": product.parent_asin,
-                "rating": product.rating,
-                "reviews": product.reviews,
-                "category": product.category,
-                "subcategory": product.subcategory,
-                "is_featured_product": product.is_featured_product,
-                "is_amazon_choice": product.is_amazon_choice,
-                "update_time": product.update_time.isoformat() if product.update_time else None,
-                "variants": [
-                    {
-                        "asin": v.asin,
-                        "product_name": v.product_name,
-                        "image": v.image,
-                        "url": v.url,
-                        "affiliate_url": v.affiliate_url,
-                        "original_price": v.original_price,
-                        "discount_price": v.discount_price,
-                        "discount_code": v.discount_code,
-                        "coupon": v.coupon
-                    }
-                    for v in variants
-                ]
-            }
-            result.append(product_data)
-
-        return {
-            "items": result,
-            "total": total,
-            "page": page,
-            "page_size": page_size
-        }
-
-    except Exception as e:
-        logger.error(f"获取CJ商品列表失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/cj/check-products")
-async def check_cj_products(
-    request: ProductRequest,
-    db: Session = Depends(get_db),
-    force_update: bool = Query(False, description="是否强制更新现有CJ信息")
-):
-    """检查商品在CJ平台的可用性"""
+async def check_cj_products(request: ProductRequest):
+    """检查商品在CJ平台的可用性
+    
+    Args:
+        request: 包含ASIN列表的请求对象
+        
+    Returns:
+        Dict[str, bool]: 商品可用性字典，key为ASIN，value为是否可用
+    """
     try:
-        availability = await ProductService.check_and_update_cj_products(
-            db,
-            request.asins,
-            force_update
-        )
-        return {
-            "availability": availability,
-            "total_available": sum(1 for v in availability.values() if v),
-            "total_checked": len(availability)
-        }
+        cj_client = CJAPIClient()
+        availability = await cj_client.check_products_availability(request.asins)
+        return availability
     except Exception as e:
+        logger.error(f"检查CJ商品可用性失败: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"检查CJ商品可用性失败: {str(e)}"
+            detail=f"检查商品可用性失败: {str(e)}"
         )
 
 @app.get("/api/cj/generate-link/{asin}")
-async def generate_cj_link(
-    asin: str = Path(..., description="商品ASIN"),
-    db: Session = Depends(get_db)
-):
-    """生成CJ推广链接"""
+async def generate_cj_link(asin: str = Path(..., description="商品ASIN")):
+    """生成CJ推广链接
+    
+    Args:
+        asin: 商品ASIN
+        
+    Returns:
+        Dict: 包含生成的推广链接
+    """
     try:
         cj_client = CJAPIClient()
-        
-        # 首先检查商品是否存在于CJ平台
-        product_details = await cj_client.get_product_details(asin)
-        if not product_details:
-            raise HTTPException(
-                status_code=404,
-                detail=f"商品 {asin} 在CJ平台上不存在"
-            )
-        
-        # 生成推广链接
         url = await cj_client.generate_product_link(asin)
-        
-        # 更新数据库中的链接
-        product = db.query(Product).filter(Product.asin == asin).first()
-        if product:
-            product.cj_url = url
-            db.commit()
-            
-        return {
-            "url": url,
-            "asin": asin,
-            "status": "success"
-        }
-        
-    except HTTPException:
-        raise
+        return {"url": url}
     except Exception as e:
         logger.error(f"生成CJ推广链接失败: {str(e)}")
         raise HTTPException(
@@ -927,126 +795,13 @@ async def generate_cj_link(
             detail=f"生成推广链接失败: {str(e)}"
         )
 
-@app.post("/api/cj/fetch-and-store")
-async def fetch_and_store_cj_products(
-    db: Session = Depends(get_cj_db),  # 使用CJ专用数据库会话
-    category: Optional[str] = Query(None, description="商品类别"),
-    subcategory: Optional[str] = Query(None, description="商品子类别"),
-    limit: int = Query(50, ge=1, le=100, description="获取商品数量"),
-    country_code: str = Query("US", description="国家代码"),
-    brand_id: int = Query(0, description="品牌ID"),
-    is_featured_product: int = Query(2, description="是否精选商品(0:否, 1:是, 2:全部)"),
-    is_amazon_choice: int = Query(2, description="是否亚马逊之选(0:否, 1:是, 2:全部)"),
-    have_coupon: int = Query(2, description="是否有优惠券(0:否, 1:是, 2:全部)"),
-    discount_min: int = Query(0, description="最低折扣率"),
-    retry_failed: bool = Query(False, description="是否重试失败的商品")
-):
-    """获取CJ商品并生成推广链接
-    
-    此端点会：
-    1. 从CJ API获取商品数据
-    2. 为每个商品生成推广链接
-    3. 将数据保存到CJ专用数据库
-    4. 返回处理结果
-    """
-    try:
-        # 初始化CJ API客户端
-        cj_client = CJAPIClient()
-        
-        # 获取商品列表
-        response = await cj_client.get_products(
-            category=category,
-            subcategory=subcategory,
-            limit=limit,
-            country_code=country_code,
-            brand_id=brand_id,
-            is_featured_product=is_featured_product,
-            is_amazon_choice=is_amazon_choice,
-            have_coupon=have_coupon,
-            discount_min=discount_min
-        )
-        
-        products = response.get("data", {}).get("list", [])
-        processed_products = []
-        failed_products = []
-        
-        # 处理每个商品
-        for product in products:
-            try:
-                # 生成推广链接
-                affiliate_url = await cj_client.generate_product_link(
-                    product["asin"],
-                    max_retries=3,  # 最多重试3次
-                    timeout=aiohttp.ClientTimeout(total=60)  # 设置60秒超时
-                )
-                product["affiliate_url"] = affiliate_url
-                
-                # 保存到CJ专用数据库
-                db_product = CJProductService.create_or_update_product(db, product)
-                
-                processed_products.append({
-                    "asin": product["asin"],
-                    "product_name": product["product_name"],
-                    "affiliate_url": affiliate_url,
-                    "status": "success"
-                })
-                
-            except Exception as e:
-                logger.error(f"处理商品 {product.get('asin')} 失败: {str(e)}")
-                failed_products.append(product)
-                processed_products.append({
-                    "asin": product.get("asin"),
-                    "product_name": product.get("product_name"),
-                    "status": "failed",
-                    "error": str(e)
-                })
-                continue
-        
-        # 如果需要重试失败的商品
-        if retry_failed and failed_products:
-            logger.info(f"开始重试 {len(failed_products)} 个失败的商品")
-            for product in failed_products:
-                try:
-                    # 使用更长的超时时间重试
-                    affiliate_url = await cj_client.generate_product_link(
-                        product["asin"],
-                        max_retries=5,  # 增加重试次数
-                        timeout=aiohttp.ClientTimeout(total=120)  # 增加超时时间
-                    )
-                    product["affiliate_url"] = affiliate_url
-                    
-                    # 更新CJ专用数据库
-                    db_product = CJProductService.create_or_update_product(db, product)
-                    
-                    # 更新处理结果
-                    for p in processed_products:
-                        if p["asin"] == product["asin"]:
-                            p.update({
-                                "affiliate_url": affiliate_url,
-                                "status": "success",
-                                "error": None
-                            })
-                            break
-                            
-                except Exception as e:
-                    logger.error(f"重试处理商品 {product.get('asin')} 仍然失败: {str(e)}")
-                    continue
-        
-        return {
-            "total_products": len(products),
-            "processed_products": processed_products,
-            "success_count": sum(1 for p in processed_products if p["status"] == "success"),
-            "fail_count": sum(1 for p in processed_products if p["status"] == "failed"),
-            "has_more": response.get("data", {}).get("has_more", False),
-            "cursor": response.get("data", {}).get("cursor", "")
-        }
-        
-    except Exception as e:
-        logger.error(f"获取和处理CJ商品失败: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取和处理CJ商品失败: {str(e)}"
-        )
+@app.on_event("startup")
+def startup_event():
+    """应用启动时的初始化操作"""
+    # 创建并启动调度器
+    scheduler_manager = SchedulerManager()
+    scheduler_manager.start()
+    logger.info("调度器已启动")
 
 if __name__ == "__main__":
     """

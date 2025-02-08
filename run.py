@@ -73,7 +73,7 @@ class ServiceManager:
         # 配置根日志记录器
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            format='%(asctime)s [%(levelname)s] %(message)s',
             handlers=[
                 RotatingFileHandler(
                     log_dir / "service.log",
@@ -83,6 +83,13 @@ class ServiceManager:
                 logging.StreamHandler()
             ]
         )
+        
+        # 设置其他模块的日志级别
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+        logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+        logging.getLogger("apscheduler").setLevel(logging.WARNING)
+        logging.getLogger("fastapi").setLevel(logging.WARNING)
+        
         self.logger = logging.getLogger("ServiceManager")
         
     def setup_signal_handlers(self):
@@ -101,56 +108,33 @@ class ServiceManager:
         sys.exit(0)
         
     def start_api(self):
-        """
-        启动FastAPI服务
-        
-        功能：
-        1. 设置必要的环境变量
-        2. 配置Python路径
-        3. 启动uvicorn服务器
-        4. 设置日志重定向
-        
-        Returns:
-            subprocess.Popen: 启动的进程实例
-        """
+        """启动FastAPI服务"""
         config = self.config["api"]
         
         # 设置环境变量
         env = os.environ.copy()
-        project_root = Path.cwd()  # 获取项目根目录
+        project_root = Path.cwd()
         
-        # 设置配置文件路径
         if hasattr(self, 'config_path') and self.config_path:
             env["CONFIG_PATH"] = str(self.config_path)
         else:
             env["CONFIG_PATH"] = str(project_root / "config" / "production.yaml")
             
-        # 添加项目根目录到PYTHONPATH
         env["PYTHONPATH"] = str(project_root)
-            
-        # 切换到src目录
         os.chdir(str(project_root / "src"))
         
-        # 构建uvicorn启动命令
         cmd = [
-            sys.executable,  # 使用当前Python解释器
+            sys.executable,
             "-m", "uvicorn",
-            "core.fastapi.amazon_crawler_api:app",  # 使用正确的模块路径
+            "core.fastapi.amazon_crawler_api:app",
             "--host", config['host'],
             "--port", str(config['port']),
-            "--workers", str(config.get('workers', 4))
+            "--workers", str(config.get('workers', 4)),
+            "--log-level", "error"  # 设置uvicorn日志级别为error
         ]
         
-        # 仅在开发环境启用热重载
         if self.config.get('environment') == 'development' and config.get('reload', False):
-            cmd.extend([
-                "--reload",
-                "--reload-dir", str(project_root / "src")
-            ])
-            
-        self.logger.info(f"启动命令: {' '.join(cmd)}")
-        self.logger.info(f"工作目录: {os.getcwd()}")
-        self.logger.info(f"PYTHONPATH: {env.get('PYTHONPATH')}")
+            cmd.extend(["--reload", "--reload-dir", str(project_root / "src")])
         
         process = subprocess.Popen(
             cmd,
@@ -158,24 +142,22 @@ class ServiceManager:
             stderr=subprocess.PIPE,
             universal_newlines=True,
             env=env,
-            bufsize=1  # 行缓冲
+            bufsize=1
         )
         
-        # 创建日志线程
         def log_output(pipe, prefix):
             for line in pipe:
-                self.logger.info(f"{prefix}: {line.strip()}")
-                
+                if "Uvicorn running on" in line or "Application startup complete" in line:
+                    self.logger.info(f"{line.strip()}")
+        
         import threading
         threading.Thread(target=log_output, args=(process.stdout, "FastAPI"), daemon=True).start()
         threading.Thread(target=log_output, args=(process.stderr, "FastAPI Error"), daemon=True).start()
         
         self.processes.append(process)
-        self.logger.info(f"FastAPI 服务已启动: http://{config['host']}:{config['port']}")
+        self.logger.info(f"FastAPI服务已启动: http://{config['host']}:{config['port']}")
         
-        # 切回项目根目录
         os.chdir(str(project_root))
-        
         return process
         
     def start_frontend(self):
@@ -184,7 +166,7 @@ class ServiceManager:
         frontend_path = os.path.join("frontend", "main.py")
         
         if not os.path.exists(frontend_path):
-            print(f"错误: 找不到前端入口文件 {frontend_path}")
+            self.logger.error(f"错误: 找不到前端入口文件 {frontend_path}")
             return None
             
         cmd = [
@@ -194,7 +176,8 @@ class ServiceManager:
             "--server.port",
             str(config['port']),
             "--server.address",
-            config['host']
+            config['host'],
+            "--logger.level=error"  # 设置streamlit日志级别
         ]
         
         process = subprocess.Popen(
@@ -204,7 +187,7 @@ class ServiceManager:
             universal_newlines=True
         )
         self.processes.append(process)
-        print(f"Streamlit 前端已启动: http://{config['host']}:{config['port']}")
+        self.logger.info(f"✓ Streamlit前端已启动: http://{config['host']}:{config['port']}")
         return process
         
     def stop_process(self, process: subprocess.Popen):
@@ -262,51 +245,48 @@ class ServiceManager:
             
     async def start_all(self):
         """启动所有服务"""
-        print("正在启动服务...")
+        self.logger.info("正在启动服务...")
         
-        # 启动调度器
         try:
             await self.init_scheduler()
-            print("调度器服务已启动")
+            self.logger.info("✓ 调度器服务已启动")
+            
+            api_process = self.start_api()
+            if not api_process:
+                self.logger.error("启动API服务失败")
+                if self.scheduler:
+                    self.scheduler.stop()
+                self.stop_all()
+                return False
+            
+            await asyncio.sleep(2)
+            
+            frontend_process = self.start_frontend()
+            if not frontend_process:
+                self.logger.error("启动前端服务失败")
+                if self.scheduler:
+                    self.scheduler.stop()
+                self.stop_all()
+                return False
+            
+            self.logger.info("\n服务启动完成!")
+            self.logger.info("按 Ctrl+C 停止服务\n")
+            
+            while True:
+                for process in self.processes[:]:
+                    if process.poll() is not None:
+                        if self.config.get('environment') == 'production':
+                            self.logger.warning(f"检测到进程退出，正在重启...")
+                            self.restart_process(process)
+                        else:
+                            self.processes.remove(process)
+                await asyncio.sleep(1)
         except Exception as e:
-            print(f"启动调度器失败: {e}")
-            return False
-        
-        # 启动API服务
-        api_process = self.start_api()
-        if not api_process:
-            print("启动API服务失败")
+            self.logger.error(f"启动服务时发生错误: {e}")
             if self.scheduler:
                 self.scheduler.stop()
             self.stop_all()
             return False
-            
-        # 等待API服务启动
-        await asyncio.sleep(2)
-        
-        # 启动前端服务
-        frontend_process = self.start_frontend()
-        if not frontend_process:
-            print("启动前端服务失败")
-            if self.scheduler:
-                self.scheduler.stop()
-            self.stop_all()
-            return False
-            
-        print("\n所有服务已启动!")
-        print("使用 Ctrl+C 可以停止所有服务")
-        
-        # 监控进程
-        while True:
-            for process in self.processes[:]:
-                if process.poll() is not None:
-                    self.logger.warning(f"进程 {process.pid} 已退出，退出码: {process.returncode}")
-                    if self.config.get('environment') == 'production':
-                        self.logger.info("正在尝试重启进程...")
-                        self.restart_process(process)
-                    else:
-                        self.processes.remove(process)
-            await asyncio.sleep(1)
 
 async def main():
     """主函数"""

@@ -30,14 +30,9 @@ try:
         log_section, set_log_config
     )
     from src.utils.config_loader import config_loader
-except ImportError:
-    from ..utils.webdriver_manager import WebDriverConfig
-    from ..utils.logger_manager import (
-        log_info, log_debug, log_warning, 
-        log_error, log_success, log_progress,
-        log_section, set_log_config
-    )
-    from ..utils.config_loader import config_loader
+except ImportError as e:
+    logging.error(f"导入错误: {str(e)}")
+    raise
 
 # 初始化组件日志配置
 def init_logger():
@@ -242,11 +237,7 @@ async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
     Returns:
         List[str]: ASIN列表
     """
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: _sync_crawl_deals(max_items, timeout, headless))
-
-def _sync_crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[str]:
-    """同步爬取实现"""
+    start_time = time.time()  # 移到函数开始处
     driver = None
     try:
         log_section("开始爬取任务")
@@ -259,7 +250,6 @@ def _sync_crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
         seen_asins = set()
         no_new_items_count = 0
         connection_retry_count = 0
-        start_time = time.time()
         
         log_info("正在访问Amazon Deals页面...")
         driver.get('https://www.amazon.com/deals')

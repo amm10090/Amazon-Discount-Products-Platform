@@ -455,6 +455,14 @@ class AmazonProductAPI:
         调用缓存管理器清理过期的缓存数据
         """
         self.cache_manager.clear_expired()
+        
+    def clear_all_cache(self):
+        """
+        清理所有缓存
+        
+        调用缓存管理器清理所有缓存数据
+        """
+        self.cache_manager.clear_all()
 
 async def main():
     """

@@ -100,24 +100,36 @@ def get_cache_stats(api_url: str) -> dict:
     except:
         return {}
 
-def clear_cache_data(api_url: str) -> bool:
-    """清理缓存数据
+def clear_cache_data(api_url: str, clear_all: bool = False) -> dict:
+    """清理PA-API缓存数据
     
     Args:
         api_url: API服务地址
+        clear_all: 是否清理所有缓存
         
     Returns:
-        bool: 是否清理成功
+        dict: 清理结果
     """
+    result = {
+        "success": False,
+        "message": ""
+    }
+    
     try:
-        response = requests.post(f"{api_url}/api/cache/clear")
-        success = response.status_code == 200
-        if success:
-            # 同时清理本地缓存
-            cache_manager.clear_cache()
-        return success
-    except:
-        return False
+        # 根据clear_all参数选择不同的API端点
+        endpoint = "/api/cache/clear-all" if clear_all else "/api/cache/clear"
+        response = requests.post(f"{api_url}{endpoint}")
+        result["success"] = response.status_code == 200
+        
+        if result["success"]:
+            result["message"] = "所有PA-API缓存已清理" if clear_all else "过期PA-API缓存已清理"
+        else:
+            result["message"] = "PA-API缓存清理失败"
+            
+        return result
+    except Exception as e:
+        result["message"] = f"PA-API缓存清理过程发生错误: {str(e)}"
+        return result
 
 def main():
     # 加载配置
@@ -268,13 +280,28 @@ def main():
                         """)
                 
                 # 清理缓存按钮
-                if st.button("🧹 " + get_text("clear_cache")):
-                    with st.spinner(get_text("clearing_cache")):
-                        if clear_cache_data(api_url):
-                            st.success(get_text("cache_cleared"))
-                            st.rerun()
-                        else:
-                            st.error(get_text("cache_clear_failed"))
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🧹 " + get_text("clear_expired_cache")):
+                        with st.spinner(get_text("clearing_cache")):
+                            result = clear_cache_data(api_url, clear_all=False)
+                            if result["success"]:
+                                st.success(result["message"])
+                                st.rerun()
+                            else:
+                                st.error(result["message"])
+                                
+                with col2:
+                    if st.button("🗑️ " + get_text("clear_all_cache")):
+                        # 添加确认对话框
+                        if st.warning(get_text("clear_all_cache_warning")):
+                            with st.spinner(get_text("clearing_cache")):
+                                result = clear_cache_data(api_url, clear_all=True)
+                                if result["success"]:
+                                    st.success(result["message"])
+                                    st.rerun()
+                                else:
+                                    st.error(result["message"])
             else:
                 st.warning(get_text("loading_failed"))
     
