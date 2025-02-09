@@ -314,8 +314,8 @@ def load_products(
             if selected_categories.get("product_groups"):
                 params["product_groups"] = selected_categories["product_groups"]
         
-        # 移除None值的参数
-        params = {k: v for k, v in params.items() if v is not None}
+        # 移除None值和空列表的参数
+        params = {k: v for k, v in params.items() if (isinstance(v, list) and len(v) > 0) or (not isinstance(v, list) and v is not None)}
         
         # 根据商品类型选择不同的API端点
         if product_type == "discount":
@@ -325,6 +325,7 @@ def load_products(
         else:
             endpoint = "/api/products/list"
         
+        # 发送请求
         response = requests.get(f"{API_BASE_URL}{endpoint}", params=params)
         response.raise_for_status()
         
@@ -998,6 +999,10 @@ def render_category_filter(category_stats: Dict[str, Dict[str, int]]) -> Dict[st
                 for group, count in category_stats["product_groups"].items():
                     if st.checkbox(f"{group} ({count})", key=f"group_{group}"):
                         selected_categories["product_groups"].append(group)
+    
+    # 如果没有选择任何类别，返回None
+    if not any(selected_categories.values()):
+        return None
     
     return selected_categories
 

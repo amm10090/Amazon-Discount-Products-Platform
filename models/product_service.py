@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 import logging
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey, or_, cast, and_
+import json
 
 # 配置logger
 logger = logging.getLogger(__name__)
@@ -51,11 +52,17 @@ class ProductService:
             
             # 其他信息
             deal_type=best_offer.deal_type if best_offer else None,
-            features=[],  # 需要从API响应中提取
+            features=json.dumps([]) if not product_info.features else json.dumps(product_info.features),
+            
+            # 分类信息
+            categories=json.dumps(product_info.categories) if product_info.categories else json.dumps([]),
+            browse_nodes=json.dumps(product_info.browse_nodes) if product_info.browse_nodes else json.dumps([]),
+            binding=product_info.binding,
+            product_group=product_info.product_group,
             
             # 元数据
             source=source,
-            raw_data=product_info.dict()
+            raw_data=json.dumps(product_info.dict())
         )
         
         db.add(db_product)
@@ -164,167 +171,184 @@ class ProductService:
         db: Session, 
         products: List[ProductInfo], 
         include_coupon: bool = False,
-        include_cj_data: bool = False,  # 新增参数：是否包含CJ数据
-        source: Optional[str] = None,  # 数据来源渠道：bestseller/coupon/cj
-        api_provider: str = "pa-api",  # API提供者：pa-api/cj-api
-        include_metadata: bool = False  # 是否包含元数据（分类信息等）
+        include_cj_data: bool = False,
+        source: Optional[str] = None,
+        api_provider: str = "pa-api",
+        include_metadata: bool = False
     ) -> List[ProductInfo]:
         """批量创建或更新商品信息"""
         saved_products = []
         current_time = datetime.utcnow()
         
         for product_info in products:
-            # 获取第一个优惠（通常是最佳优惠）
-            best_offer = product_info.offers[0] if product_info.offers else None
-            
-            # 查找现有产品
-            product = db.query(Product).filter(Product.asin == product_info.asin).first()
-            
-            if not product:
-                # 创建新产品
-                product = Product(
-                    asin=product_info.asin,
-                    title=product_info.title,
-                    url=product_info.url,
-                    brand=product_info.brand,
-                    main_image=product_info.main_image,
-                    
-                    # 价格信息
-                    current_price=best_offer.price if best_offer else None,
-                    original_price=best_offer.price + best_offer.savings if best_offer and best_offer.savings else None,
-                    currency=best_offer.currency if best_offer else None,
-                    savings_amount=best_offer.savings if best_offer else None,
-                    savings_percentage=best_offer.savings_percentage if best_offer else None,
-                    
-                    # Prime信息
-                    is_prime=best_offer.is_prime if best_offer else None,
-                    is_prime_exclusive=False,
-                    
-                    # 商品状态
-                    condition=best_offer.condition if best_offer else None,
-                    availability=best_offer.availability if best_offer else None,
-                    merchant_name=best_offer.merchant_name if best_offer else None,
-                    is_buybox_winner=best_offer.is_buybox_winner if best_offer else None,
-                    
-                    # 其他信息
-                    deal_type=best_offer.deal_type if best_offer else None,
-                    features=[],
-                    
-                    # 时间信息
-                    created_at=current_time,
-                    updated_at=current_time,
-                    timestamp=current_time,
-                    
-                    # 元数据
-                    source=source,
-                    api_provider=api_provider,
-                    raw_data=product_info.dict()
-                )
+            try:
+                # 获取第一个优惠（通常是最佳优惠）
+                best_offer = product_info.offers[0] if product_info.offers else None
                 
-                # 添加分类相关信息
-                if include_metadata:
-                    product.binding = product_info.binding
-                    product.product_group = product_info.product_group
-                    product.categories = product_info.categories
-                    product.browse_nodes = product_info.browse_nodes
-                    
-                # 添加CJ相关信息
-                if include_cj_data and hasattr(product_info, 'cj_url'):
-                    product.cj_url = product_info.cj_url
-                    
-                db.add(product)
-            else:
-                # 更新现有产品
-                product.title = product_info.title
-                product.url = product_info.url
-                product.brand = product_info.brand
-                product.main_image = product_info.main_image
+                # 查找现有产品
+                product = db.query(Product).filter(Product.asin == product_info.asin).first()
                 
-                # 更新价格信息
-                if best_offer:
-                    product.current_price = best_offer.price
-                    product.original_price = best_offer.price + best_offer.savings if best_offer.savings else None
-                    product.currency = best_offer.currency
-                    product.savings_amount = best_offer.savings
-                    product.savings_percentage = best_offer.savings_percentage
+                # 序列化列表类型的字段
+                features = json.dumps(product_info.features) if product_info.features else json.dumps([])
+                categories = json.dumps(product_info.categories) if product_info.categories else json.dumps([])
+                browse_nodes = json.dumps(product_info.browse_nodes) if product_info.browse_nodes else json.dumps([])
+                raw_data = json.dumps(product_info.dict())
+                
+                if not product:
+                    # 创建新产品
+                    product = Product(
+                        asin=product_info.asin,
+                        title=product_info.title,
+                        url=product_info.url,
+                        brand=product_info.brand,
+                        main_image=product_info.main_image,
+                        
+                        # 价格信息
+                        current_price=best_offer.price if best_offer else None,
+                        original_price=best_offer.price + best_offer.savings if best_offer and best_offer.savings else None,
+                        currency=best_offer.currency if best_offer else None,
+                        savings_amount=best_offer.savings if best_offer else None,
+                        savings_percentage=best_offer.savings_percentage if best_offer else None,
+                        
+                        # Prime信息
+                        is_prime=best_offer.is_prime if best_offer else None,
+                        is_prime_exclusive=False,
+                        
+                        # 商品状态
+                        condition=best_offer.condition if best_offer else None,
+                        availability=best_offer.availability if best_offer else None,
+                        merchant_name=best_offer.merchant_name if best_offer else None,
+                        is_buybox_winner=best_offer.is_buybox_winner if best_offer else None,
+                        
+                        # 其他信息
+                        deal_type=best_offer.deal_type if best_offer else None,
+                        features=features,
+                        categories=categories,
+                        browse_nodes=browse_nodes,
+                        
+                        # 时间信息
+                        created_at=current_time,
+                        updated_at=current_time,
+                        timestamp=current_time,
+                        
+                        # 元数据
+                        source=source,
+                        api_provider=api_provider,
+                        raw_data=raw_data
+                    )
                     
-                    # 更新Prime信息
-                    product.is_prime = best_offer.is_prime
+                    # 添加分类相关信息
+                    if include_metadata:
+                        product.binding = product_info.binding
+                        product.product_group = product_info.product_group
+                        
+                    # 添加CJ相关信息
+                    if include_cj_data and hasattr(product_info, 'cj_url'):
+                        product.cj_url = product_info.cj_url
+                        
+                    db.add(product)
+                else:
+                    # 更新现有产品
+                    product.title = product_info.title
+                    product.url = product_info.url
+                    product.brand = product_info.brand
+                    product.main_image = product_info.main_image
+                    product.features = features
+                    product.categories = categories
+                    product.browse_nodes = browse_nodes
                     
-                    # 更新商品状态
-                    product.condition = best_offer.condition
-                    product.availability = best_offer.availability
-                    product.merchant_name = best_offer.merchant_name
-                    product.is_buybox_winner = best_offer.is_buybox_winner
-                    product.deal_type = best_offer.deal_type
-                
-                # 更新分类相关信息
-                if include_metadata:
-                    product.binding = product_info.binding
-                    product.product_group = product_info.product_group
-                    product.categories = product_info.categories
-                    product.browse_nodes = product_info.browse_nodes
-                
-                # 更新CJ相关信息
-                if include_cj_data and hasattr(product_info, 'cj_url'):
-                    product.cj_url = product_info.cj_url
-                
-                # 更新时间和元数据
-                product.updated_at = current_time
-                product.timestamp = current_time
-                if source:  # 只在明确指定source时更新
-                    product.source = source
-                product.api_provider = api_provider  # 始终更新API提供者
-                product.raw_data = product_info.dict()
-            
-            # 删除旧的优惠信息
-            db.query(Offer).filter(Offer.product_id == product.asin).delete()
-            
-            # 添加新的优惠信息
-            for offer_info in product_info.offers:
-                offer = Offer(
-                    product_id=product.asin,
-                    condition=offer_info.condition,
-                    price=offer_info.price,
-                    currency=offer_info.currency,
-                    savings=offer_info.savings,
-                    savings_percentage=offer_info.savings_percentage,
-                    is_prime=offer_info.is_prime,
-                    is_amazon_fulfilled=offer_info.is_amazon_fulfilled,
-                    is_free_shipping_eligible=offer_info.is_free_shipping_eligible,
-                    availability=offer_info.availability,
-                    merchant_name=offer_info.merchant_name,
-                    is_buybox_winner=offer_info.is_buybox_winner,
-                    deal_type=offer_info.deal_type,
-                    created_at=current_time,
-                    updated_at=current_time
-                )
-                
-                # 如果包含优惠券信息，添加优惠券相关字段
-                if include_coupon and hasattr(offer_info, 'coupon_type') and hasattr(offer_info, 'coupon_value'):
-                    offer.coupon_type = offer_info.coupon_type
-                    offer.coupon_value = offer_info.coupon_value
+                    # 更新价格信息
+                    if best_offer:
+                        product.current_price = best_offer.price
+                        product.original_price = best_offer.price + best_offer.savings if best_offer.savings else None
+                        product.currency = best_offer.currency
+                        product.savings_amount = best_offer.savings
+                        product.savings_percentage = best_offer.savings_percentage
+                        
+                        # 更新Prime信息
+                        product.is_prime = best_offer.is_prime
+                        
+                        # 更新商品状态
+                        product.condition = best_offer.condition
+                        product.availability = best_offer.availability
+                        product.merchant_name = best_offer.merchant_name
+                        product.is_buybox_winner = best_offer.is_buybox_winner
+                        product.deal_type = best_offer.deal_type
                     
-                    # 添加优惠券历史记录
-                    coupon_history = CouponHistory(
+                    # 更新分类相关信息
+                    if include_metadata:
+                        product.binding = product_info.binding
+                        product.product_group = product_info.product_group
+                    
+                    # 更新CJ相关信息
+                    if include_cj_data and hasattr(product_info, 'cj_url'):
+                        product.cj_url = product_info.cj_url
+                    
+                    # 更新时间和元数据
+                    product.updated_at = current_time
+                    product.timestamp = current_time
+                    if source:  # 只在明确指定source时更新
+                        product.source = source
+                    product.api_provider = api_provider  # 始终更新API提供者
+                    product.raw_data = raw_data
+                
+                # 删除旧的优惠信息
+                db.query(Offer).filter(Offer.product_id == product.asin).delete()
+                
+                # 添加新的优惠信息
+                for offer_info in product_info.offers:
+                    offer = Offer(
                         product_id=product.asin,
-                        coupon_type=offer_info.coupon_type,
-                        coupon_value=offer_info.coupon_value,
+                        condition=offer_info.condition,
+                        price=offer_info.price,
+                        currency=offer_info.currency,
+                        savings=offer_info.savings,
+                        savings_percentage=offer_info.savings_percentage,
+                        is_prime=offer_info.is_prime,
+                        is_amazon_fulfilled=offer_info.is_amazon_fulfilled,
+                        is_free_shipping_eligible=offer_info.is_free_shipping_eligible,
+                        availability=offer_info.availability,
+                        merchant_name=offer_info.merchant_name,
+                        is_buybox_winner=offer_info.is_buybox_winner,
+                        deal_type=offer_info.deal_type,
                         created_at=current_time,
                         updated_at=current_time
                     )
-                    db.add(coupon_history)
+                    
+                    # 如果包含优惠券信息，添加优惠券相关字段
+                    if include_coupon and hasattr(offer_info, 'coupon_type') and hasattr(offer_info, 'coupon_value'):
+                        offer.coupon_type = offer_info.coupon_type
+                        offer.coupon_value = offer_info.coupon_value
+                        
+                        # 添加优惠券历史记录
+                        coupon_history = CouponHistory(
+                            product_id=product.asin,
+                            coupon_type=offer_info.coupon_type,
+                            coupon_value=offer_info.coupon_value,
+                            created_at=current_time,
+                            updated_at=current_time
+                        )
+                        db.add(coupon_history)
+                    
+                    # 添加CJ特有信息
+                    if include_cj_data and hasattr(offer_info, 'commission'):
+                        offer.commission = offer_info.commission
+                    
+                    db.add(offer)
                 
-                # 添加CJ特有信息
-                if include_cj_data and hasattr(offer_info, 'commission'):
-                    offer.commission = offer_info.commission
+                saved_products.append(product_info)
                 
-                db.add(offer)
-            
-            saved_products.append(product_info)
+            except Exception as e:
+                logger.error(f"处理商品时出错 {product_info.asin}: {str(e)}")
+                continue
         
-        # 提交事务
-        db.commit()
+        try:
+            # 提交事务
+            db.commit()
+        except Exception as e:
+            logger.error(f"提交事务时出错: {str(e)}")
+            db.rollback()
+            raise
         
         return saved_products
 
@@ -344,27 +368,34 @@ class ProductService:
             }
             
             for product in products:
-                # 处理categories (商品分类路径)
-                if product.categories:
-                    for category_path in product.categories:
-                        if isinstance(category_path, list) and len(category_path) > 0:
-                            # 主要类别统计
-                            main_category = category_path[0]
-                            stats["main_categories"][main_category] = stats["main_categories"].get(main_category, 0) + 1
-                            
-                            # 子类别统计
-                            if len(category_path) > 1:
-                                sub_category = category_path[1]
-                                parent_key = f"{main_category}:{sub_category}"
-                                stats["sub_categories"][parent_key] = stats["sub_categories"].get(parent_key, 0) + 1
+                try:
+                    # 解析categories JSON字符串
+                    if product.categories:
+                        categories = json.loads(product.categories)
+                        if isinstance(categories, list):
+                            for category_path in categories:
+                                if isinstance(category_path, list) and len(category_path) > 0:
+                                    # 主要类别统计
+                                    main_category = category_path[0]
+                                    stats["main_categories"][main_category] = stats["main_categories"].get(main_category, 0) + 1
+                                    
+                                    # 子类别统计
+                                    if len(category_path) > 1:
+                                        sub_category = category_path[1]
+                                        parent_key = f"{main_category}:{sub_category}"
+                                        stats["sub_categories"][parent_key] = stats["sub_categories"].get(parent_key, 0) + 1
                 
-                # 处理binding (商品绑定类型)
-                if product.binding:
-                    stats["bindings"][product.binding] = stats["bindings"].get(product.binding, 0) + 1
-                
-                # 处理product_group (商品组)
-                if product.product_group:
-                    stats["product_groups"][product.product_group] = stats["product_groups"].get(product.product_group, 0) + 1
+                except json.JSONDecodeError as e:
+                    logger.error(f"解析商品 {product.asin} 的类别信息时出错: {str(e)}")
+                    continue
+            
+            # 处理binding (商品绑定类型)
+            if product.binding:
+                stats["bindings"][product.binding] = stats["bindings"].get(product.binding, 0) + 1
+            
+            # 处理product_group (商品组)
+            if product.product_group:
+                stats["product_groups"][product.product_group] = stats["product_groups"].get(product.product_group, 0) + 1
             
             # 对每个统计结果按数量降序排序
             for key in stats:
@@ -493,19 +524,28 @@ class ProductService:
                     
             # 应用类别筛选
             if main_categories:
-                conditions = []
+                main_category_conditions = []
                 for category in main_categories:
-                    conditions.append(Product.categories.cast(String).like(f'%["{category}"%'))
-                if conditions:
-                    query = query.filter(or_(*conditions))
+                    # 使用JSON字符串匹配
+                    main_category_conditions.append(
+                        Product.categories.like(f'%["{category}"%')
+                    )
+                if main_category_conditions:
+                    query = query.filter(or_(*main_category_conditions))
                     
             if sub_categories:
-                conditions = []
+                sub_category_conditions = []
                 for category_path in sub_categories:
                     main_cat, sub_cat = category_path.split(":")
-                    conditions.append(Product.categories.cast(String).like(f'%["{main_cat}", "{sub_cat}"%'))
-                if conditions:
-                    query = query.filter(or_(*conditions))
+                    # 使用JSON字符串匹配
+                    sub_category_conditions.append(
+                        and_(
+                            Product.categories.like(f'%["{main_cat}"%'),
+                            Product.categories.like(f'%"{sub_cat}"%')
+                        )
+                    )
+                if sub_category_conditions:
+                    query = query.filter(or_(*sub_category_conditions))
                     
             if bindings:
                 query = query.filter(Product.binding.in_(bindings))
@@ -527,39 +567,49 @@ class ProductService:
             # 转换为ProductInfo对象
             result = []
             for product in products:
-                offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
-                
-                product_info = ProductInfo(
-                    asin=product.asin,
-                    title=product.title,
-                    url=product.url,
-                    brand=product.brand,
-                    main_image=product.main_image,
-                    timestamp=product.timestamp or datetime.utcnow(),
-                    binding=product.binding,
-                    product_group=product.product_group,
-                    categories=product.categories,
-                    browse_nodes=product.browse_nodes,
-                    cj_url=product.cj_url if product.source == "cj" else None,
-                    offers=[
-                        ProductOffer(
-                            condition=offer.condition or "New",
-                            price=offer.price or 0.0,
-                            currency=offer.currency or "USD",
-                            savings=offer.savings,
-                            savings_percentage=offer.savings_percentage,
-                            is_prime=offer.is_prime or False,
-                            availability=offer.availability or "Available",
-                            merchant_name=offer.merchant_name or "Amazon",
-                            is_buybox_winner=offer.is_buybox_winner or False,
-                            deal_type=offer.deal_type,
-                            coupon_type=getattr(offer, 'coupon_type', None),
-                            coupon_value=getattr(offer, 'coupon_value', None),
-                            commission=offer.commission if product.source == "cj" else None
-                        ) for offer in offers
-                    ]
-                )
-                result.append(product_info)
+                try:
+                    # 解析JSON字符串
+                    categories = json.loads(product.categories) if product.categories else []
+                    browse_nodes = json.loads(product.browse_nodes) if product.browse_nodes else []
+                    features = json.loads(product.features) if product.features else []
+                    
+                    offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+                    
+                    product_info = ProductInfo(
+                        asin=product.asin,
+                        title=product.title,
+                        url=product.url,
+                        brand=product.brand,
+                        main_image=product.main_image,
+                        timestamp=product.timestamp or datetime.utcnow(),
+                        binding=product.binding,
+                        product_group=product.product_group,
+                        categories=categories,
+                        browse_nodes=browse_nodes,
+                        features=features,
+                        cj_url=product.cj_url if product.source == "cj" else None,
+                        offers=[
+                            ProductOffer(
+                                condition=offer.condition or "New",
+                                price=offer.price or 0.0,
+                                currency=offer.currency or "USD",
+                                savings=offer.savings,
+                                savings_percentage=offer.savings_percentage,
+                                is_prime=offer.is_prime or False,
+                                availability=offer.availability or "Available",
+                                merchant_name=offer.merchant_name or "Amazon",
+                                is_buybox_winner=offer.is_buybox_winner or False,
+                                deal_type=offer.deal_type,
+                                coupon_type=getattr(offer, 'coupon_type', None),
+                                coupon_value=getattr(offer, 'coupon_value', None),
+                                commission=offer.commission if product.source == "cj" else None
+                            ) for offer in offers
+                        ]
+                    )
+                    result.append(product_info)
+                except json.JSONDecodeError as e:
+                    logger.error(f"解析商品 {product.asin} 的JSON数据时出错: {str(e)}")
+                    continue
                 
             return {
                 "items": result,
@@ -731,39 +781,60 @@ class ProductService:
             # 转换为ProductInfo对象
             result = []
             for product in products:
-                offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
-                
-                product_info = ProductInfo(
-                    asin=product.asin,
-                    title=product.title,
-                    url=product.url,
-                    brand=product.brand,
-                    main_image=product.main_image,
-                    timestamp=product.timestamp or datetime.utcnow(),
-                    binding=product.binding or None,
-                    product_group=product.product_group or None,
-                    categories=product.categories or [],
-                    browse_nodes=product.browse_nodes or [],
-                    cj_url=product.cj_url if product.source == "cj" else None,
-                    offers=[
-                        ProductOffer(
-                            condition=offer.condition or "New",
-                            price=offer.price or 0.0,
-                            currency=offer.currency or "USD",
-                            savings=offer.savings,
-                            savings_percentage=offer.savings_percentage,
-                            is_prime=offer.is_prime or False,
-                            availability=offer.availability or "Available",
-                            merchant_name=offer.merchant_name or "Amazon",
-                            is_buybox_winner=offer.is_buybox_winner or False,
-                            deal_type=offer.deal_type,
-                            coupon_type=offer.coupon_type,
-                            coupon_value=offer.coupon_value,
-                            commission=offer.commission if product.source == "cj" else None
-                        ) for offer in offers
-                    ]
-                )
-                result.append(product_info)
+                try:
+                    # 解析JSON字符串
+                    categories = json.loads(product.categories) if product.categories else []
+                    browse_nodes = json.loads(product.browse_nodes) if product.browse_nodes else []
+                    features = json.loads(product.features) if product.features else []
+                    
+                    # 确保解析后的数据是列表类型
+                    if not isinstance(categories, list):
+                        categories = []
+                    if not isinstance(browse_nodes, list):
+                        browse_nodes = []
+                    if not isinstance(features, list):
+                        features = []
+                    
+                    offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+                    
+                    product_info = ProductInfo(
+                        asin=product.asin,
+                        title=product.title,
+                        url=product.url,
+                        brand=product.brand,
+                        main_image=product.main_image,
+                        timestamp=product.timestamp or datetime.utcnow(),
+                        binding=product.binding,
+                        product_group=product.product_group,
+                        categories=categories,
+                        browse_nodes=browse_nodes,
+                        features=features,
+                        cj_url=product.cj_url if product.source == "cj" else None,
+                        offers=[
+                            ProductOffer(
+                                condition=offer.condition or "New",
+                                price=offer.price or 0.0,
+                                currency=offer.currency or "USD",
+                                savings=offer.savings,
+                                savings_percentage=offer.savings_percentage,
+                                is_prime=offer.is_prime or False,
+                                availability=offer.availability or "Available",
+                                merchant_name=offer.merchant_name or "Amazon",
+                                is_buybox_winner=offer.is_buybox_winner or False,
+                                deal_type=offer.deal_type,
+                                coupon_type=getattr(offer, 'coupon_type', None),
+                                coupon_value=getattr(offer, 'coupon_value', None),
+                                commission=offer.commission if product.source == "cj" else None
+                            ) for offer in offers
+                        ]
+                    )
+                    result.append(product_info)
+                except json.JSONDecodeError as e:
+                    logger.error(f"解析商品 {product.asin} 的JSON数据时出错: {str(e)}")
+                    continue
+                except Exception as e:
+                    logger.error(f"处理商品 {product.asin} 时出错: {str(e)}")
+                    continue
                 
             return {
                 "items": result,

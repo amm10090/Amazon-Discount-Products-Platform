@@ -87,12 +87,12 @@ class Product(Base):
     # 分类信息
     binding = Column(String(100))  # 商品绑定类型(如Kindle/平装书等)
     product_group = Column(String(100))  # 商品分组
-    categories = Column(JSON)  # 商品分类路径，JSON数组格式
-    browse_nodes = Column(JSON)  # 亚马逊浏览节点信息
+    categories = Column(Text)  # 商品分类路径，存储为JSON字符串
+    browse_nodes = Column(Text)  # 亚马逊浏览节点信息，存储为JSON字符串
     
     # 其他信息
     deal_type = Column(String(50))  # 优惠类型
-    features = Column(JSON)  # 商品特性列表
+    features = Column(Text)  # 商品特性列表，存储为JSON字符串
     
     # 时间信息，用于追踪记录的生命周期
     created_at = Column(DateTime, default=datetime.utcnow)  # 记录创建时间
@@ -102,7 +102,7 @@ class Product(Base):
     # 元数据
     source = Column(String(50))  # 数据来源：bestseller/coupon/cj
     api_provider = Column(String(50))  # API提供者：pa-api/cj-api
-    raw_data = Column(JSON)  # 原始API响应数据，用于数据追溯
+    raw_data = Column(Text)  # 原始API响应数据，存储为JSON字符串
 
     # 关联关系定义
     offers = relationship("Offer", back_populates="product", cascade="all, delete-orphan")

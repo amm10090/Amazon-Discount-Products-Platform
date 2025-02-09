@@ -130,121 +130,132 @@ async def process_products_batch(
     batch_asins: List[str],
     batch_index: int,
     total_batches: int,
-    coupon_info: Optional[Dict] = None  # 新增：优惠券信息参数
+    coupon_info: Optional[Dict] = None,
+    max_retries: int = 3,  # 最大重试次数
+    retry_delay: float = 2.0  # 重试延迟（秒）
 ) -> int:
     """处理一批产品数据"""
-    try:
-        log_info(f"处理第 {batch_index + 1}/{total_batches} 批 ({len(batch_asins)} 个ASIN)")
-        
-        # 首先检查CJ平台的可用性
-        log_info(f"正在检查CJ平台可用性: {batch_asins}")
-        cj_availability = await cj_client.check_products_availability(batch_asins)
-        available_count = sum(1 for v in cj_availability.values() if v)
-        log_info(f"CJ平台可用商品数量: {available_count}/{len(batch_asins)}")
-        if available_count > 0:
-            log_info(f"CJ平台可用商品: {[asin for asin, available in cj_availability.items() if available]}")
-        
-        # 获取PA-API产品详细信息
-        log_info("正在从PA-API获取商品信息...")
-        products = await api.get_products_by_asins(batch_asins)
-        
-        if products:
-            log_info(f"成功获取 {len(products)} 个商品的PA-API数据")
+    for retry in range(max_retries):
+        try:
+            log_info(f"处理第 {batch_index + 1}/{total_batches} 批 ({len(batch_asins)} 个ASIN)")
+            if retry > 0:
+                log_info(f"第 {retry} 次重试...")
             
-            # 对于每个产品，如果在CJ平台可用，则获取CJ数据并整合
-            cj_processed = 0
-            for product in products:
-                if cj_availability.get(product.asin, False):
-                    try:
-                        log_info(f"正在处理CJ商品数据: {product.asin}")
-                        
-                        # 获取CJ商品详情
-                        cj_product = await cj_client.get_product_details(product.asin)
-                        if cj_product and isinstance(cj_product, dict):
-                            log_info(f"成功获取CJ商品详情: {product.asin}")
-                            
-                            # 生成CJ推广链接
-                            cj_link = await cj_client.generate_product_link(product.asin)
-                            log_info(f"成功生成CJ推广链接: {product.asin}")
-                            
-                            # 整合CJ数据到product对象
-                            if product.offers and len(product.offers) > 0:
-                                main_offer = product.offers[0]
-                                
-                                # 添加佣金信息（CJ特有）
-                                commission = cj_product.get('commission')
-                                if isinstance(commission, str):
-                                    # 处理百分比格式（例如：'3%'）
-                                    commission_value = float(commission.rstrip('%'))
-                                    main_offer.commission = commission_value
-                                elif isinstance(commission, (int, float)):
-                                    main_offer.commission = float(commission)
-                                log_debug(f"CJ佣金信息: {product.asin} - {main_offer.commission}")
-                                
-                                # 如果CJ有优惠券信息，使用CJ的数据
-                                coupon_data = cj_product.get('coupon', {})
-                                if isinstance(coupon_data, dict):
-                                    main_offer.coupon_type = coupon_data.get('type')
-                                    coupon_value = coupon_data.get('value')
-                                    if coupon_value is not None:
-                                        main_offer.coupon_value = float(coupon_value)
-                                    log_debug(f"CJ优惠券信息: {product.asin} - {main_offer.coupon_type}:{main_offer.coupon_value}")
-                                
-                                # 如果CJ有折扣信息，使用CJ的数据
-                                discount = cj_product.get('discount')
-                                if isinstance(discount, str):
-                                    try:
-                                        discount_value = float(discount.strip('%'))
-                                        main_offer.savings_percentage = int(discount_value)
-                                        if main_offer.price:
-                                            main_offer.savings = (main_offer.price * discount_value) / 100
-                                        log_debug(f"CJ折扣信息: {product.asin} - {main_offer.savings_percentage}%")
-                                    except (ValueError, TypeError) as e:
-                                        log_error(f"处理折扣信息时出错: {str(e)}")
-                            
-                            # 添加CJ推广链接
-                            product.cj_url = cj_link
-                            cj_processed += 1
-                            log_success(f"成功整合CJ数据: {product.asin}")
-                    except Exception as e:
-                        log_error(f"处理CJ数据时出错 (ASIN: {product.asin}): {str(e)}")
+            # 首先检查CJ平台的可用性
+            log_info(f"正在检查CJ平台可用性: {batch_asins}")
+            cj_availability = await cj_client.check_products_availability(batch_asins)
+            available_count = sum(1 for v in cj_availability.values() if v)
+            log_info(f"CJ平台可用商品数量: {available_count}/{len(batch_asins)}")
+            if available_count > 0:
+                log_info(f"CJ平台可用商品: {[asin for asin, available in cj_availability.items() if available]}")
+            
+            # 获取PA-API产品详细信息
+            log_info("正在从PA-API获取商品信息...")
+            products = await api.get_products_by_asins(batch_asins)
+            
+            if products:
+                log_info(f"成功获取 {len(products)} 个商品的PA-API数据")
                 
-                # 如果有优惠券信息，添加到产品中
-                if coupon_info and product.asin in coupon_info:
-                    if product.offers and len(product.offers) > 0:
-                        main_offer = product.offers[0]
-                        coupon_data = coupon_info[product.asin]
-                        if isinstance(coupon_data, dict):
-                            main_offer.coupon_type = coupon_data.get('type')
-                            coupon_value = coupon_data.get('value')
-                            if coupon_value is not None:
-                                main_offer.coupon_value = float(coupon_value)
-                            log_debug(f"添加优惠券信息: {product.asin} - {main_offer.coupon_type}:{main_offer.coupon_value}")
-            
-            if cj_processed > 0:
-                log_success(f"成功处理 {cj_processed} 个CJ商品数据")
-            
-            # 存储到数据库
-            log_info("正在保存商品数据到数据库...")
-            with SessionLocal() as db:
-                saved_products = ProductService.bulk_create_or_update_products(
-                    db, 
-                    products,
-                    include_cj_data=True,  # 包含CJ数据
-                    include_coupon=True,  # 包含优惠券数据
-                    source="cj" if any(cj_availability.values()) else "coupon",  # 根据是否有CJ数据决定来源
-                    api_provider="cj-api" if any(cj_availability.values()) else "pa-api",  # 相应的API提供者
-                    include_metadata=True  # 包含元数据
-                )
-                log_success(f"成功保存 {len(saved_products)} 个商品信息，其中包含 {cj_processed} 个CJ商品")
-                return len(saved_products)
-        else:
-            log_warning("未获取到产品信息")
+                # 对于每个产品，如果在CJ平台可用，则获取CJ数据并整合
+                cj_processed = 0
+                for product in products:
+                    if cj_availability.get(product.asin, False):
+                        try:
+                            log_info(f"正在处理CJ商品数据: {product.asin}")
+                            
+                            # 获取CJ商品详情
+                            cj_product = await cj_client.get_product_details(product.asin)
+                            if cj_product and isinstance(cj_product, dict):
+                                log_info(f"成功获取CJ商品详情: {product.asin}")
+                                
+                                # 生成CJ推广链接
+                                cj_link = await cj_client.generate_product_link(product.asin)
+                                log_info(f"成功生成CJ推广链接: {product.asin}")
+                                
+                                # 整合CJ数据到product对象
+                                if product.offers and len(product.offers) > 0:
+                                    main_offer = product.offers[0]
+                                    
+                                    # 添加佣金信息（CJ特有）
+                                    commission = cj_product.get('commission')
+                                    if isinstance(commission, str):
+                                        commission_value = float(commission.rstrip('%'))
+                                        main_offer.commission = commission_value
+                                    elif isinstance(commission, (int, float)):
+                                        main_offer.commission = float(commission)
+                                    log_debug(f"CJ佣金信息: {product.asin} - {main_offer.commission}")
+                                    
+                                    # 如果CJ有优惠券信息，使用CJ的数据
+                                    coupon_data = cj_product.get('coupon', {})
+                                    if isinstance(coupon_data, dict):
+                                        main_offer.coupon_type = coupon_data.get('type')
+                                        coupon_value = coupon_data.get('value')
+                                        if coupon_value is not None:
+                                            main_offer.coupon_value = float(coupon_value)
+                                        log_debug(f"CJ优惠券信息: {product.asin} - {main_offer.coupon_type}:{main_offer.coupon_value}")
+                                    
+                                    # 如果CJ有折扣信息，使用CJ的数据
+                                    discount = cj_product.get('discount')
+                                    if isinstance(discount, str):
+                                        try:
+                                            discount_value = float(discount.strip('%'))
+                                            main_offer.savings_percentage = int(discount_value)
+                                            if main_offer.price:
+                                                main_offer.savings = (main_offer.price * discount_value) / 100
+                                            log_debug(f"CJ折扣信息: {product.asin} - {main_offer.savings_percentage}%")
+                                        except (ValueError, TypeError) as e:
+                                            log_error(f"处理折扣信息时出错: {str(e)}")
+                                
+                                # 添加CJ推广链接
+                                product.cj_url = cj_link
+                                cj_processed += 1
+                                log_success(f"成功整合CJ数据: {product.asin}")
+                        except Exception as e:
+                            log_error(f"处理CJ数据时出错 (ASIN: {product.asin}): {str(e)}")
+                    
+                    # 如果有优惠券信息，添加到产品中
+                    if coupon_info and product.asin in coupon_info:
+                        if product.offers and len(product.offers) > 0:
+                            main_offer = product.offers[0]
+                            coupon_data = coupon_info[product.asin]
+                            if isinstance(coupon_data, dict):
+                                main_offer.coupon_type = coupon_data.get('type')
+                                coupon_value = coupon_data.get('value')
+                                if coupon_value is not None:
+                                    main_offer.coupon_value = float(coupon_value)
+                                log_debug(f"添加优惠券信息: {product.asin} - {main_offer.coupon_type}:{main_offer.coupon_value}")
+                
+                if cj_processed > 0:
+                    log_success(f"成功处理 {cj_processed} 个CJ商品数据")
+                
+                # 存储到数据库
+                log_info("正在保存商品数据到数据库...")
+                with SessionLocal() as db:
+                    saved_products = ProductService.bulk_create_or_update_products(
+                        db, 
+                        products,
+                        include_cj_data=True,  # 包含CJ数据
+                        include_coupon=True,  # 包含优惠券数据
+                        source="cj" if any(cj_availability.values()) else "coupon",  # 根据是否有CJ数据决定来源
+                        api_provider="cj-api" if any(cj_availability.values()) else "pa-api",  # 相应的API提供者
+                        include_metadata=True  # 包含元数据
+                    )
+                    log_success(f"成功保存 {len(saved_products)} 个商品信息，其中包含 {cj_processed} 个CJ商品")
+                    return len(saved_products)
+            else:
+                log_warning("未获取到产品信息")
+                
+            # 如果成功执行到这里，跳出重试循环
+            break
+                
+        except Exception as e:
+            log_error(f"处理批次时出错: {str(e)}")
+            if retry < max_retries - 1:  # 如果还有重试机会
+                await asyncio.sleep(retry_delay * (retry + 1))  # 指数退避延迟
+                continue
             return 0
-            
-    except Exception as e:
-        log_error(f"处理批次时出错: {str(e)}")
-        return 0
+    
+    return 0
 
 async def crawl_bestseller_products(
     api: AmazonProductAPI,
@@ -289,8 +300,9 @@ async def crawl_bestseller_products(
                 )
                 total_success += success_count
                 
+                # 增加批次间的延迟
                 if i + batch_size < len(asin_list):
-                    await asyncio.sleep(1)  # 避免API限制
+                    await asyncio.sleep(5)  # 增加到5秒延迟
                 
         return total_success
         
