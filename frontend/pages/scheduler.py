@@ -2,13 +2,13 @@ import streamlit as st
 import requests
 from datetime import datetime, timedelta
 import pytz
-from i18n import init_language, get_text, language_selector
+from frontend.i18n.language import init_language, get_text
 import pandas as pd
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-from main import load_config
-from utils.cache_manager import cache_manager
+from frontend.main import load_config
+from frontend.utils.cache_manager import cache_manager
 from typing import List, Dict, Optional, Union
 
 # 加载配置
@@ -359,12 +359,6 @@ def format_datetime(dt: Union[str, datetime], timezone: Optional[str] = None) ->
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 def main():
-    # 侧边栏
-    with st.sidebar:
-        # 语言选择器
-        language_selector()
-        st.markdown("---")
-    
     st.title("⏰ " + get_text("scheduler_title"))
     
     # API地址

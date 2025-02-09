@@ -4,12 +4,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from i18n import init_language, get_text, language_selector
+from frontend.i18n.language import init_language, get_text
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-from main import load_config
-from utils.cache_manager import cache_manager
+from frontend.main import load_config
+from frontend.utils.cache_manager import cache_manager
 
 # 加载配置
 config = load_config()
@@ -51,12 +51,6 @@ st.markdown(f"""
     }}
 </style>
 """, unsafe_allow_html=True)
-
-# 侧边栏
-with st.sidebar:
-    # 语言选择器
-    language_selector()
-    st.markdown("---")
 
 st.title("📊 " + get_text("analysis_title"))
 

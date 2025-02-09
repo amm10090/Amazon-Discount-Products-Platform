@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 from utils.cache_manager import cache_manager
 
+# 初始化语言设置（必须在最开始）
+init_language()
+
 @cache_manager.resource_cache(show_spinner=False)
 def load_config(config_path: str = None) -> dict:
     """加载配置文件
@@ -135,12 +138,9 @@ def main():
     # 加载配置
     config = load_config()
     
-    # 初始化语言设置
-    init_language()
-    
     # 设置页面配置
     st.set_page_config(
-        page_title="Amazon优惠商品平台",
+        page_title=get_text("nav_home"),
         page_icon="🛍️",
         layout=config["frontend"]["page"]["layout"],
         initial_sidebar_state=config["frontend"]["page"]["initial_sidebar_state"],
@@ -224,7 +224,7 @@ def main():
         st.title("🛍️ " + get_text("nav_home"))
         st.markdown("---")
         
-        # 语言选择器
+        # 全局语言选择器
         language_selector()
         st.markdown("---")
         
@@ -344,7 +344,7 @@ def main():
                 - {get_text("view_details")}
                 - {get_text("export_data")}
                 """)
-                st.page_link("pages/products.py", label=get_text("nav_products"), icon="📦")
+                st.page_link("pages/1_products.py", label=get_text("nav_products"), icon="📦")
 
 if __name__ == "__main__":
     main() 
