@@ -285,18 +285,9 @@ def process_visible_products(
     seen_asins: set,
     stats: CrawlStats
 ) -> List[Dict]:
-    """处理当前可见的商品信息，并更新统计数据
-    
-    Args:
-        driver: WebDriver实例
-        seen_asins: 已处理过的ASIN集合
-        stats: 爬虫统计信息对象
-        
-    Returns:
-        List[Dict]: 新发现的商品信息列表
-    """
+    """处理当前可见的商品信息，并更新统计数据"""
     products = []
-    processed_in_view = set()  # 记录本次视图中已处理的ASIN
+    processed_in_view = set()
     
     try:
         # 等待商品卡片加载
@@ -344,10 +335,12 @@ def process_visible_products(
                 # 检查是否是重复的ASIN
                 if asin in seen_asins:
                     stats.duplicate_count += 1
+                    log_debug(f"跳过重复商品: {asin}")
                     continue
                 
                 # 确保元素在视图中完全可见
                 if not is_element_fully_visible(driver, card):
+                    log_debug(f"商品不完全可见，跳过: {asin}")
                     continue
                 
                 # 提取商品信息
@@ -355,7 +348,7 @@ def process_visible_products(
                 if product:
                     seen_asins.add(asin)
                     stats.unique_count += 1
-                    stats.last_index = index  # 更新最后处理的索引
+                    stats.last_index = index
                     
                     # 添加索引信息到商品数据
                     product['index'] = index
@@ -368,6 +361,7 @@ def process_visible_products(
                     )
                     
                     products.append(product)
+                    log_debug(f"成功处理商品: {asin} (索引: {index})")
                     
             except Exception as e:
                 log_error(f"处理商品卡片时出错: {str(e)}")
@@ -512,14 +506,7 @@ async def save_coupon_results(
     filename: str,
     format: str = 'json'
 ) -> None:
-    """异步保存优惠券商品结果，包含详细的统计信息
-    
-    Args:
-        results: 商品结果列表
-        stats: 爬虫统计信息
-        filename: 文件名
-        format: 输出格式
-    """
+    """异步保存优惠券商品结果"""
     base_dir = Path("data/coupon_deals")
     base_dir.mkdir(parents=True, exist_ok=True)
     
@@ -527,60 +514,64 @@ async def save_coupon_results(
     filename = f"coupon_deals_{timestamp}.{format}"
     output_path = base_dir / filename
     
-    if format == 'json':
-        data = {
-            'metadata': {
-                'timestamp': datetime.now().isoformat(),
-                'source': 'amazon_coupon_deals',
-                'stats': {
-                    'total_processed': stats.total_seen,
-                    'unique_items': stats.unique_count,
-                    'duplicate_items': stats.duplicate_count,
-                    'duplicate_rate': f"{stats.duplicate_rate:.1f}%",
-                    'duration_seconds': (datetime.now() - stats.start_time).total_seconds(),
-                    'coupon_stats': stats.coupon_stats
-                }
-            },
-            'items': results
-        }
-        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(data, indent=2, ensure_ascii=False))
-            
-    elif format == 'csv':
-        async with aiofiles.open(output_path, 'w', newline='', encoding='utf-8') as f:
-            await f.write('ASIN,URL,Coupon Type,Coupon Value\n')
-            for item in results:
-                coupon_info = item['coupon']
-                line = f"{item['asin']},{item['url']},{coupon_info['type']},{coupon_info['value']}\n"
-                await f.write(line)
+    log_progress(f"正在保存结果到: {output_path}")
+    
+    try:
+        if format == 'json':
+            data = {
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'source': 'amazon_coupon_deals',
+                    'stats': {
+                        'total_processed': stats.total_seen,
+                        'unique_items': stats.unique_count,
+                        'duplicate_items': stats.duplicate_count,
+                        'duplicate_rate': f"{stats.duplicate_rate:.1f}%",
+                        'duration_seconds': (datetime.now() - stats.start_time).total_seconds(),
+                        'coupon_stats': stats.coupon_stats
+                    }
+                },
+                'items': results
+            }
+            async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(data, indent=2, ensure_ascii=False))
                 
-    elif format == 'txt':
-        async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
-            for item in results:
-                coupon_info = item['coupon']
-                line = f"{item['asin']}\t{item['url']}\t{coupon_info['type']}\t{coupon_info['value']}\n"
-                await f.write(line)
-                
-    log_success(f"结果已保存到: {output_path}")
-    log_info(f"包含 {len(results)} 个唯一商品的详细信息和统计数据")
+        elif format == 'csv':
+            async with aiofiles.open(output_path, 'w', newline='', encoding='utf-8') as f:
+                await f.write('ASIN,URL,Coupon Type,Coupon Value\n')
+                for item in results:
+                    coupon_info = item['coupon']
+                    line = f"{item['asin']},{item['url']},{coupon_info['type']},{coupon_info['value']}\n"
+                    await f.write(line)
+                    
+        elif format == 'txt':
+            async with aiofiles.open(output_path, 'w', encoding='utf-8') as f:
+                for item in results:
+                    coupon_info = item['coupon']
+                    line = f"{item['asin']}\t{item['url']}\t{coupon_info['type']}\t{coupon_info['value']}\n"
+                    await f.write(line)
+                    
+        log_success(f"成功保存 {len(results)} 个商品数据")
+        log_debug(f"文件路径: {output_path}")
+        
+    except Exception as e:
+        log_error(f"保存结果时出错: {str(e)}")
+        raise
 
 async def crawl_coupon_deals(
     max_items: int,
     timeout: int,
     headless: bool
 ) -> tuple[List[Dict], CrawlStats]:
-    """爬取优惠券商品数据
-    
-    Returns:
-        tuple: (商品列表, 统计信息)
-    """
+    """爬取优惠券商品数据"""
     try:
-        log_section("开始爬取优惠券商品")
+        log_section("启动优惠券商品爬虫")
         stats = CrawlStats(start_time=datetime.now())
         
-        log_info(f"目标数量: {max_items} 个商品")
-        log_info(f"超时时间: {timeout} 秒")
-        log_info(f"无头模式: {'是' if headless else '否'}")
+        log_info("任务配置:")
+        log_info(f"  • 目标数量: {max_items} 个商品")
+        log_info(f"  • 超时时间: {timeout} 秒")
+        log_info(f"  • 无头模式: {'是' if headless else '否'}")
         
         driver = setup_driver(headless)
         products = []
@@ -590,14 +581,14 @@ async def crawl_coupon_deals(
         consecutive_empty_scrolls = 0
         
         try:
-            log_info("正在访问Amazon Deals页面...")
+            log_progress("正在访问Amazon Deals页面...")
             driver.get('https://www.amazon.com/deals?bubble-id=deals-collection-coupons')
             
             # 等待页面初始加载
             time.sleep(5)
             
             if check_no_results(driver):
-                log_warning("当前页面没有可用的优惠券商品，退出爬取")
+                log_warning("当前页面没有可用的优惠券商品")
                 return [], stats
             
             try:
@@ -607,17 +598,18 @@ async def crawl_coupon_deals(
                         'div[data-testid="virtuoso-item-list"]'
                     ))
                 )
-                log_success("成功找到viewport容器")
+                log_success("成功找到商品展示区域")
             except TimeoutException:
-                log_warning("无法找到商品展示区域，退出爬取")
+                log_warning("无法找到商品展示区域")
                 return [], stats
             
-            log_info("开始获取商品信息...")
+            log_section("开始采集商品数据")
             scroll_count = 0
             last_scroll_position = -1
             
             while len(products) < max_items:
                 scroll_count += 1
+                log_debug(f"执行第 {scroll_count} 次页面滚动")
                 
                 # 获取当前滚动位置
                 current_position = driver.execute_script("return window.pageYOffset;")
@@ -626,7 +618,7 @@ async def crawl_coupon_deals(
                 if current_position == last_scroll_position:
                     consecutive_empty_scrolls += 1
                     if consecutive_empty_scrolls >= 3:
-                        log_warning("连续3次未能滚动，可能已到达底部")
+                        log_warning("连续3次未能滚动，可能已到达页面底部")
                         break
                 else:
                     consecutive_empty_scrolls = 0
@@ -638,14 +630,14 @@ async def crawl_coupon_deals(
                     remaining = max_items - len(products)
                     products.extend(new_products[:remaining])
                     
-                    # 输出详细的进度信息
-                    log_progress(len(products), max_items)
-                    log_info(
-                        f"本次滚动统计:\n"
-                        f"- 新增唯一商品: {len(new_products)}\n"
-                        f"- 总计唯一商品: {stats.unique_count}\n"
-                        f"- 当前重复率: {stats.duplicate_rate:.1f}%\n"
-                        f"- 当前索引: {stats.last_index}"
+                    # 输出进度信息
+                    log_progress(f"已采集 {len(products)}/{max_items} 个商品 ({len(products)/max_items*100:.1f}%)")
+                    log_success(f"本次滚动新增 {len(new_products)} 个商品")
+                    log_debug(
+                        f"采集状态:\n"
+                        f"  • 唯一商品数: {stats.unique_count}\n"
+                        f"  • 重复率: {stats.duplicate_rate:.1f}%\n"
+                        f"  • 当前索引: {stats.last_index}"
                     )
                     
                     if len(products) >= max_items:
@@ -657,19 +649,19 @@ async def crawl_coupon_deals(
                     no_new_items_count += 1
                     if no_new_items_count >= 3:
                         log_warning(
-                            f"连续{no_new_items_count}次未发现新商品\n"
-                            f"- 当前进度: {len(products)}/{max_items}\n"
-                            f"- 重复率: {stats.duplicate_rate:.1f}%\n"
-                            f"- 当前索引: {stats.last_index}"
+                            f"连续 {no_new_items_count} 次未发现新商品\n"
+                            f"  • 当前进度: {len(products)}/{max_items}\n"
+                            f"  • 重复率: {stats.duplicate_rate:.1f}%\n"
+                            f"  • 当前索引: {stats.last_index}"
                         )
                         
                         if no_new_items_count >= timeout:
-                            log_warning(f"超过{timeout}秒未发现新商品，结束爬取")
+                            log_warning(f"{timeout}秒内未发现新商品，结束爬取")
                             break
                 
                 # 滚动页面
                 if not scroll_page(driver, scroll_count, stats.last_index):
-                    log_warning("滚动到底部，结束爬取")
+                    log_warning("已到达页面底部，结束爬取")
                     break
                     
                 # 处理可能的连接问题
@@ -683,42 +675,41 @@ async def crawl_coupon_deals(
                     time.sleep(0.5)
             
             # 输出最终统计信息
-            log_section("爬取任务统计")
+            log_section("爬取任务完成")
             duration = (datetime.now() - stats.start_time).total_seconds()
-            log_success(f"任务完成！耗时: {duration:.1f}秒")
-            log_info(
-                f"统计信息:\n"
-                f"- 总处理商品数: {stats.total_seen}\n"
-                f"- 唯一商品数: {stats.unique_count}\n"
-                f"- 重复商品数: {stats.duplicate_count}\n"
-                f"- 重复率: {stats.duplicate_rate:.1f}%\n"
-                f"- 最终索引: {stats.last_index}\n"
-                f"- 平均处理速度: {stats.total_seen/duration:.1f}个/秒"
-            )
+            
+            log_success(f"任务统计:")
+            log_success(f"  • 总耗时: {duration:.1f} 秒")
+            log_success(f"  • 总处理商品: {stats.total_seen} 个")
+            log_success(f"  • 成功采集: {stats.unique_count} 个")
+            log_success(f"  • 重复商品: {stats.duplicate_count} 个")
+            log_success(f"  • 重复率: {stats.duplicate_rate:.1f}%")
+            log_success(f"  • 处理速度: {stats.total_seen/duration:.1f} 个/秒")
             
             # 输出优惠券统计
-            log_info(
-                f"优惠券统计:\n"
-                f"- 百分比优惠券: {stats.coupon_stats['percentage']['count']}个, "
-                f"平均折扣: {stats.coupon_stats['percentage']['avg_value']:.1f}%\n"
-                f"- 固定金额优惠券: {stats.coupon_stats['fixed']['count']}个, "
-                f"平均优惠: ${stats.coupon_stats['fixed']['avg_value']:.2f}"
-            )
+            log_section("优惠券统计")
+            log_success(f"百分比优惠券:")
+            log_success(f"  • 数量: {stats.coupon_stats['percentage']['count']} 个")
+            log_success(f"  • 平均折扣: {stats.coupon_stats['percentage']['avg_value']:.1f}%")
+            log_success(f"固定金额优惠券:")
+            log_success(f"  • 数量: {stats.coupon_stats['fixed']['count']} 个")
+            log_success(f"  • 平均优惠: ${stats.coupon_stats['fixed']['avg_value']:.2f}")
             
             return products[:max_items], stats
             
         finally:
             driver.quit()
+            log_debug("浏览器资源已释放")
             
     except Exception as e:
-        log_error(f"错误: {str(e)}")
+        log_error(f"爬取过程中发生错误: {str(e)}")
         return [], stats
 
 async def main():
     """异步主函数"""
     args = parse_arguments()
     
-    log_info("开始爬取Amazon优惠券商品...")
+    log_section("启动Amazon优惠券爬虫")
     results, stats = await crawl_coupon_deals(
         max_items=args.max_items,
         timeout=args.timeout,

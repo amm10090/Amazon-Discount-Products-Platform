@@ -36,18 +36,25 @@ class ProductService:
                 "max_price": max_price,
                 "min_discount": min_discount,
                 "is_prime_only": prime_only,
-                "product_type": product_type,
                 "sort_by": sort_by,
                 "sort_order": sort_order
             }
             
-            # 添加数据来源筛选
+            # 添加数据来源筛选 - 使用api_provider参数
             if source_filter != "all":
-                params["source"] = source_filter
+                if source_filter == "pa-api":
+                    params["api_provider"] = "pa-api"
+                elif source_filter == "cj":
+                    params["api_provider"] = "cj-api"
             
             # 添加佣金筛选
-            if min_commission is not None and source_filter in ["all", "cj"]:
-                params["min_commission"] = min_commission
+            if min_commission is not None and min_commission > 0:
+                if source_filter == "all":
+                    # 当选择全部来源且设置了佣金时，使用cj-api
+                    params["api_provider"] = "cj-api"
+                    params["min_commission"] = min_commission
+                elif source_filter == "cj":
+                    params["min_commission"] = min_commission
             
             # 添加类别筛选参数
             if selected_categories:
@@ -135,4 +142,42 @@ class ProductService:
             return {"success_count": 0, "fail_count": len(asins)}
         except Exception as e:
             st.error(f"删除失败: {str(e)}")
-            return {"success_count": 0, "fail_count": len(asins)} 
+            return {"success_count": 0, "fail_count": len(asins)}
+
+    def get_product_stats(self) -> Dict:
+        """获取商品统计信息"""
+        try:
+            response = requests.get(f"{self.api_base_url}/api/products/stats")
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"获取商品统计信息失败: {str(e)}")
+            return {
+                "total_products": 0,
+                "min_price": 0,
+                "max_price": 0,
+                "avg_price": 0,
+                "min_discount": 0,
+                "max_discount": 0,
+                "avg_discount": 0,
+                "prime_products": 0,
+                "last_update": None
+            }
+
+    def get_coupon_stats(self) -> Dict:
+        """获取优惠券统计信息"""
+        try:
+            response = requests.get(f"{self.api_base_url}/api/coupons/stats")
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"获取优惠券统计信息失败: {str(e)}")
+            return {
+                "total_coupons": 0,
+                "percentage_coupons": 0,
+                "fixed_coupons": 0,
+                "min_value": 0,
+                "max_value": 0,
+                "avg_value": 0,
+                "median_value": 0
+            } 

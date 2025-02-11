@@ -137,42 +137,73 @@ async def process_products_batch(
     """处理一批产品数据"""
     for retry in range(max_retries):
         try:
-            log_info(f"处理第 {batch_index + 1}/{total_batches} 批 ({len(batch_asins)} 个ASIN)")
+            log_progress(f"处理第 {batch_index + 1}/{total_batches} 批 ({len(batch_asins)} 个ASIN)")
             if retry > 0:
                 log_info(f"第 {retry} 次重试...")
             
             # 首先检查CJ平台的可用性
-            log_info(f"正在检查CJ平台可用性: {batch_asins}")
+            log_progress(f"正在检查CJ平台可用性: {batch_asins}")
             cj_availability = await cj_client.check_products_availability(batch_asins)
             available_count = sum(1 for v in cj_availability.values() if v)
-            log_info(f"CJ平台可用商品数量: {available_count}/{len(batch_asins)}")
+            log_progress(f"CJ平台可用商品数量: {available_count}/{len(batch_asins)}")
+            
+            cj_asins = [asin for asin, available in cj_availability.items() if available]
             if available_count > 0:
-                log_info(f"CJ平台可用商品: {[asin for asin, available in cj_availability.items() if available]}")
+                log_info(f"CJ平台可用商品: {cj_asins}")
             
-            # 获取PA-API产品详细信息
-            log_info("正在从PA-API获取商品信息...")
-            products = await api.get_products_by_asins(batch_asins)
+            products = []
+            try:
+                # 获取PA-API产品详细信息
+                log_progress("正在从PA-API获取商品信息...")
+                products = await api.get_products_by_asins(batch_asins)
+                if products:
+                    log_success(f"成功获取 {len(products)} 个商品的PA-API数据")
+            except Exception as e:
+                if "429" in str(e):
+                    log_warning("PA-API达到速率限制，跳过PA-API数据获取")
+                    # 如果有CJ商品，我们仍然继续处理
+                    if not cj_asins:
+                        return 0  # 如果没有CJ商品，直接返回
+                else:
+                    raise  # 如果是其他错误，继续抛出
             
-            if products:
-                log_info(f"成功获取 {len(products)} 个商品的PA-API数据")
-                
-                # 对于每个产品，如果在CJ平台可用，则获取CJ数据并整合
+            # 如果有PA-API数据或CJ商品，继续处理
+            if products or cj_asins:
                 cj_processed = 0
+                
+                # 如果有CJ商品，创建基本的ProductInfo对象
+                if cj_asins and not products:
+                    from models.product import ProductInfo
+                    # 为CJ商品创建基本的ProductInfo对象
+                    for asin in cj_asins:
+                        products.append(ProductInfo(
+                            asin=asin,
+                            title="",  # 将在CJ数据处理时更新
+                            api_provider="cj-api"
+                        ))
+                
+                # 处理所有产品
                 for product in products:
-                    if cj_availability.get(product.asin, False):
+                    if product.asin in cj_asins:
                         try:
-                            log_info(f"正在处理CJ商品数据: {product.asin}")
+                            log_progress(f"正在处理CJ商品数据: {product.asin}")
                             
                             # 获取CJ商品详情
                             cj_product = await cj_client.get_product_details(product.asin)
                             if cj_product and isinstance(cj_product, dict):
-                                log_info(f"成功获取CJ商品详情: {product.asin}")
+                                log_success(f"成功获取CJ商品详情: {product.asin}")
                                 
                                 # 生成CJ推广链接
                                 cj_link = await cj_client.generate_product_link(product.asin)
-                                log_info(f"成功生成CJ推广链接: {product.asin}")
+                                log_success(f"成功生成CJ推广链接: {product.asin}")
                                 
                                 # 整合CJ数据到product对象
+                                if not hasattr(product, 'offers') or not product.offers:
+                                    product.offers = []
+                                if not product.offers:
+                                    from models.product import ProductOffer
+                                    product.offers.append(ProductOffer())
+                                
                                 if product.offers and len(product.offers) > 0:
                                     main_offer = product.offers[0]
                                     
@@ -206,8 +237,9 @@ async def process_products_batch(
                                         except (ValueError, TypeError) as e:
                                             log_error(f"处理折扣信息时出错: {str(e)}")
                                 
-                                # 添加CJ推广链接
+                                # 添加CJ推广链接到ProductInfo对象
                                 product.cj_url = cj_link
+                                product.api_provider = "cj-api"  # 设置API提供者为cj-api
                                 cj_processed += 1
                                 log_success(f"成功整合CJ数据: {product.asin}")
                         except Exception as e:
@@ -215,6 +247,10 @@ async def process_products_batch(
                     
                     # 如果有优惠券信息，添加到产品中
                     if coupon_info and product.asin in coupon_info:
+                        if not hasattr(product, 'offers') or not product.offers:
+                            from models.product import ProductOffer
+                            product.offers = [ProductOffer()]
+                        
                         if product.offers and len(product.offers) > 0:
                             main_offer = product.offers[0]
                             coupon_data = coupon_info[product.asin]
@@ -229,27 +265,33 @@ async def process_products_batch(
                     log_success(f"成功处理 {cj_processed} 个CJ商品数据")
                 
                 # 存储到数据库
-                log_info("正在保存商品数据到数据库...")
-                with SessionLocal() as db:
-                    saved_products = ProductService.bulk_create_or_update_products(
-                        db, 
-                        products,
-                        include_cj_data=True,  # 包含CJ数据
-                        include_coupon=True,  # 包含优惠券数据
-                        source="cj" if any(cj_availability.values()) else "coupon",  # 根据是否有CJ数据决定来源
-                        api_provider="cj-api" if any(cj_availability.values()) else "pa-api",  # 相应的API提供者
-                        include_metadata=True  # 包含元数据
-                    )
-                    log_success(f"成功保存 {len(saved_products)} 个商品信息，其中包含 {cj_processed} 个CJ商品")
-                    return len(saved_products)
+                if products:
+                    log_progress("正在保存商品数据到数据库...")
+                    with SessionLocal() as db:
+                        # 根据每个商品的CJ可用性设置api_provider
+                        for product in products:
+                            if not hasattr(product, 'api_provider'):
+                                product.api_provider = "cj-api" if product.asin in cj_asins else "pa-api"
+                        
+                        saved_products = ProductService.bulk_create_or_update_products(
+                            db, 
+                            products,
+                            include_cj_data=True,  # 包含CJ数据
+                            include_coupon=True,  # 包含优惠券数据
+                            source="coupon" if coupon_info else "discount",  # 根据是否有优惠券信息决定来源类型
+                            include_metadata=True  # 包含元数据
+                        )
+                        log_success(f"成功保存 {len(saved_products)} 个商品信息，其中包含 {cj_processed} 个CJ商品")
+                        return len(saved_products)
             else:
-                log_warning("未获取到产品信息")
+                log_warning("未获取到任何产品信息")
                 
             # 如果成功执行到这里，跳出重试循环
             break
                 
         except Exception as e:
-            log_error(f"处理批次时出错: {str(e)}")
+            if "429" not in str(e):  # 如果不是429错误才记录
+                log_error(f"处理批次时出错: {str(e)}")
             if retry < max_retries - 1:  # 如果还有重试机会
                 await asyncio.sleep(retry_delay * (retry + 1))  # 指数退避延迟
                 continue
@@ -385,39 +427,46 @@ async def collect_products(config: Config) -> None:
     Args:
         config: 配置对象，包含所有运行参数
     """
-    log_info("\n" + "="*50)
-    log_info("开始数据采集任务")
-    log_info(f"运行爬虫类型: {[t.value for t in config.crawler_types]}")
-    log_info(f"目标数量: 每类 {config.max_items} 个商品")
-    log_info(f"批处理大小: {config.batch_size}")
-    log_info("="*50 + "\n")
+    log_section("启动数据采集任务")
+    log_info("任务配置:")
+    log_info(f"  • 爬虫类型: {[t.value for t in config.crawler_types]}")
+    log_info(f"  • 目标数量: 每类 {config.max_items} 个商品")
+    log_info(f"  • 批处理大小: {config.batch_size} 个商品/批次")
+    log_info(f"  • 超时时间: {config.timeout} 秒")
+    log_info(f"  • 无头模式: {'是' if config.headless else '否'}")
     
     try:
         # 初始化数据库
-        log_info("初始化数据库...")
+        log_progress("正在初始化数据库...")
         init_db()
+        log_success("数据库初始化完成")
         
         # 获取环境变量
+        log_progress("正在验证API凭证...")
         access_key = os.getenv("AMAZON_ACCESS_KEY")
         secret_key = os.getenv("AMAZON_SECRET_KEY")
         partner_tag = os.getenv("AMAZON_PARTNER_TAG")
         
         if not all([access_key, secret_key, partner_tag]):
-            raise ValueError("缺少必要的Amazon PA-API凭证，请检查环境变量设置")
+            log_error("缺少必要的Amazon PA-API凭证")
+            raise ValueError("请检查环境变量设置: AMAZON_ACCESS_KEY, AMAZON_SECRET_KEY, AMAZON_PARTNER_TAG")
         
         # 初始化PA-API客户端
-        log_info("初始化Amazon Product API客户端...")
+        log_progress("正在初始化Amazon Product API客户端...")
         api = AmazonProductAPI(
             access_key=access_key,
             secret_key=secret_key,
             partner_tag=partner_tag
         )
+        log_success("API客户端初始化完成")
         
         # 准备要运行的爬虫任务
         tasks = []
         run_all = CrawlerType.ALL in config.crawler_types
         
+        log_section("准备爬虫任务")
         if run_all or CrawlerType.BESTSELLER in config.crawler_types:
+            log_info("添加畅销商品爬虫任务")
             tasks.append(
                 crawl_bestseller_products(
                     api, 
@@ -429,6 +478,7 @@ async def collect_products(config: Config) -> None:
             )
             
         if run_all or CrawlerType.COUPON in config.crawler_types:
+            log_info("添加优惠券商品爬虫任务")
             tasks.append(
                 crawl_coupon_products(
                     api, 
@@ -440,27 +490,29 @@ async def collect_products(config: Config) -> None:
             )
         
         # 等待所有任务完成
+        log_section("开始执行爬虫任务")
         results = await asyncio.gather(*tasks)
         
         # 输出统计信息
-        log_info("\n" + "="*50)
-        log_info("数据采集任务完成!")
+        log_section("任务完成统计")
         
         if len(results) == 2:
             bestseller_count, coupon_count = results
-            log_info(f"畅销商品: 成功保存 {bestseller_count} 个")
-            log_info(f"优惠券商品: 成功保存 {coupon_count} 个")
-            log_info(f"总计: {sum(results)} 个商品")
+            log_success(f"采集结果:")
+            log_success(f"  • 畅销商品: {bestseller_count} 个")
+            log_success(f"  • 优惠券商品: {coupon_count} 个")
+            log_success(f"  • 总计: {sum(results)} 个商品")
         elif len(results) == 1:
             count = results[0]
             crawler_type = "畅销商品" if CrawlerType.BESTSELLER in config.crawler_types else "优惠券商品"
-            log_info(f"{crawler_type}: 成功保存 {count} 个")
+            log_success(f"采集结果:")
+            log_success(f"  • {crawler_type}: {count} 个")
             
-        log_info(f"完成时间: {datetime.now()}")
-        log_info("="*50)
+        log_success(f"完成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
     except Exception as e:
-        log_error(f"任务执行出错: {str(e)}")
+        log_error(f"任务执行失败: {str(e)}")
+        raise
 
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""

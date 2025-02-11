@@ -53,6 +53,7 @@ class ProductInfo(BaseModel):
     browse_nodes: Optional[List[Dict]] = []  # 商品浏览节点信息
     features: Optional[List[str]] = []  # 添加商品特性列表
     cj_url: Optional[str] = None  # CJ推广链接
+    api_provider: Optional[str] = "pa-api"  # API提供者，默认为pa-api
     
     class Config:
         json_encoders = {

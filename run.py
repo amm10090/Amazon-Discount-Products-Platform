@@ -169,6 +169,11 @@ class ServiceManager:
             self.logger.error(f"错误: 找不到前端入口文件 {frontend_path}")
             return None
             
+        # 设置环境变量
+        env = os.environ.copy()
+        project_root = Path.cwd()
+        env["PYTHONPATH"] = str(project_root)
+            
         cmd = [
             "streamlit",
             "run",
@@ -184,7 +189,8 @@ class ServiceManager:
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True
+            universal_newlines=True,
+            env=env  # 添加环境变量
         )
         self.processes.append(process)
         self.logger.info(f"✓ Streamlit前端已启动: http://{config['host']}:{config['port']}")

@@ -95,7 +95,7 @@ def render_filter_sidebar() -> Tuple[str, float, float, int, bool, Optional[int]
             get_text("source_filter"),
             options=["all", "pa-api", "cj"],
             format_func=lambda x: {
-                "all": get_text("all"),
+                "all": f"{get_text('all')} (Amazon + CJ)",
                 "pa-api": "Amazon API",
                 "cj": "CJ API"
             }[x]

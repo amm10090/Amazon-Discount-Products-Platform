@@ -109,7 +109,7 @@ def save_results(asins, filename, format='txt'):
 def setup_driver(headless=True):
     """设置Chrome浏览器选项"""
     try:
-        log_debug("开始设置Chrome浏览器...")
+        log_section("初始化Chrome浏览器")
         
         # 获取基础配置的options
         options = WebDriverConfig.setup_chrome_options(headless=headless)
@@ -126,7 +126,7 @@ def setup_driver(headless=True):
         
         # 创建driver实例
         driver = WebDriverConfig.create_chrome_driver(headless=headless, custom_options=options)
-        log_debug("ChromeDriver创建成功")
+        log_success("ChromeDriver创建成功")
         
         # 执行CDP命令
         driver.execute_cdp_cmd('Network.setUserAgentOverride', {
@@ -228,22 +228,15 @@ def check_view_more_button(driver):
 async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = True) -> List[str]:
     """
     异步爬取Amazon Deals页面的商品ASIN
-    
-    Args:
-        max_items: 最大爬取商品数量
-        timeout: 无新商品超时时间（秒）
-        headless: 是否使用无头模式
-        
-    Returns:
-        List[str]: ASIN列表
     """
-    start_time = time.time()  # 移到函数开始处
+    start_time = time.time()
     driver = None
     try:
-        log_section("开始爬取任务")
-        log_info(f"目标数量: {max_items} 个商品")
-        log_info(f"超时时间: {timeout} 秒")
-        log_info(f"无头模式: {'是' if headless else '否'}")
+        log_section("开始Amazon Deals爬取任务")
+        log_info(f"配置信息:")
+        log_info(f"  • 目标数量: {max_items} 个商品")
+        log_info(f"  • 超时时间: {timeout} 秒")
+        log_info(f"  • 无头模式: {'是' if headless else '否'}")
         
         driver = setup_driver(headless=headless)
         all_asins = []
@@ -251,11 +244,11 @@ async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
         no_new_items_count = 0
         connection_retry_count = 0
         
-        log_info("正在访问Amazon Deals页面...")
+        log_progress("正在访问Amazon Deals页面...")
         driver.get('https://www.amazon.com/deals')
         time.sleep(3)
         
-        log_info("初始化页面...")
+        log_progress("初始化页面...")
         wait = WebDriverWait(driver, 5)
         try:
             viewport_container = wait.until(
@@ -271,24 +264,24 @@ async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
         
         while True:
             scroll_count += 1
-            log_debug(f"=== 第 {scroll_count} 次滚动 ===")
+            log_debug(f"执行第 {scroll_count} 次页面滚动")
             
             if time.time() - last_success_time > timeout:
-                log_warning(f"{timeout}秒内没有新商品，结束爬取")
+                log_warning(f"{timeout}秒内未发现新商品，结束爬取")
                 break
             
             if handle_connection_problem(driver):
                 connection_retry_count += 1
-                log_warning(f"第 {connection_retry_count} 次重试连接")
+                log_warning(f"网络连接问题，第 {connection_retry_count} 次重试")
                 if connection_retry_count >= 5:
-                    log_warning("连接问题持续存在，退出爬取")
+                    log_error("连接问题持续存在，终止爬取")
                     break
                 continue
             else:
                 connection_retry_count = 0
             
             if not scroll_page(driver, scroll_count):
-                log_warning("滚动失败，尝试继续...")
+                log_warning("页面滚动失败，尝试继续...")
                 time.sleep(1)
                 continue
             
@@ -298,11 +291,11 @@ async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
                     By.CSS_SELECTOR, 
                     'div[data-testid^="B"][class*="GridItem-module__container"]'
                 )
-                log_debug(f"找到 {len(product_cards)} 个商品卡片")
+                log_debug(f"本次滚动找到 {len(product_cards)} 个商品卡片")
                 
                 for card in product_cards:
                     if len(all_asins) >= max_items:
-                        log_success(f"已达到目标数量: {max_items}")
+                        log_success(f"已达到目标数量: {max_items} 个商品")
                         return all_asins
                     
                     try:
@@ -311,9 +304,9 @@ async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
                             seen_asins.add(main_asin)
                             all_asins.append(main_asin)
                             if len(all_asins) % 10 == 0:
-                                log_progress(len(all_asins), max_items)
+                                log_progress(f"已采集 {len(all_asins)}/{max_items} 个商品 ({(len(all_asins)/max_items*100):.1f}%)")
                     except Exception as e:
-                        log_error(f"获取ASIN失败: {str(e)}")
+                        log_error(f"获取商品ASIN失败: {str(e)}")
                         continue
             except Exception as e:
                 log_error(f"获取商品元素失败: {str(e)}")
@@ -321,35 +314,37 @@ async def crawl_deals(max_items: int = 100, timeout: int = 30, headless: bool = 
             
             new_items = len(all_asins) - previous_count
             if new_items > 0:
-                log_info(f"本次滚动新增: {new_items} 个商品")
+                log_success(f"本次滚动新增 {new_items} 个商品")
                 last_success_time = time.time()
                 no_new_items_count = 0
             else:
                 no_new_items_count += 1
-                # 连续没有新商品时，检查是否有"加载更多"按钮
                 if check_view_more_button(driver):
+                    log_success("发现并点击了'加载更多'按钮")
                     no_new_items_count = 0
                     continue
                     
                 if no_new_items_count >= 3:
-                    log_warning("连续3次未发现新商品，可能已到达底部")
+                    log_warning("连续3次未发现新商品，可能已到达页面底部")
                     break
             
-            time.sleep(random.uniform(0.3, 0.5))  # 减少等待时间
+            time.sleep(random.uniform(0.3, 0.5))
             
     except Exception as e:
-        log_error(f"爬取过程中发生错误: {str(e)}")
+        log_error(f"爬取过程中发生严重错误: {str(e)}")
     finally:
         if driver:
             driver.quit()
-            log_debug("浏览器已关闭")
+            log_debug("浏览器资源已释放")
         
         end_time = time.time()
         duration = end_time - start_time
-        log_section("爬取任务统计信息")
-        log_info(f"总耗时: {duration:.1f} 秒")
-        log_info(f"成功获取: {len(all_asins)} 个商品")
-        log_info(f"平均速度: {len(all_asins)/duration:.1f} 个/秒")
+        
+        log_section("爬取任务完成")
+        log_success(f"任务统计:")
+        log_success(f"  • 总耗时: {duration:.1f} 秒")
+        log_success(f"  • 成功获取: {len(all_asins)} 个商品")
+        log_success(f"  • 平均速度: {len(all_asins)/duration:.1f} 个/秒")
     
     return all_asins
 
@@ -357,7 +352,7 @@ async def main():
     """异步主函数"""
     args = parse_arguments()
     
-    log_info("开始爬取Amazon Deals页面...")
+    log_section("启动Amazon Deals爬虫")
     asins = await crawl_deals(
         max_items=args.max_items,
         timeout=args.timeout,
@@ -368,9 +363,11 @@ async def main():
     if not output_file.endswith(f'.{args.format}'):
         output_file = f"{output_file.rsplit('.', 1)[0]}.{args.format}"
     
+    log_progress(f"正在保存结果到: {output_file}")
     save_results(asins, output_file, args.format)
     
-    log_success(f"任务完成！共找到 {len(asins)} 个唯一ASIN")
+    log_section("任务结束")
+    log_success(f"成功采集 {len(asins)} 个唯一ASIN")
 
 if __name__ == "__main__":
     asyncio.run(main())
