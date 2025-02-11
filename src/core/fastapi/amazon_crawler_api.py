@@ -15,7 +15,7 @@ Amazon爬虫和产品API FastAPI服务
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, Depends
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 import asyncio
 import uvicorn
@@ -119,10 +119,10 @@ class SortOrder(str, Enum):
 
 class CategoryStats(BaseModel):
     """类别统计响应模型"""
-    main_categories: Dict[str, int]
-    sub_categories: Dict[str, int]
-    bindings: Dict[str, int]
-    product_groups: Dict[str, int]
+    browse_nodes: Dict[str, Dict[str, Any]]  # 浏览节点统计
+    browse_tree: Dict[str, Any]              # 浏览节点树形结构
+    bindings: Dict[str, int]                 # 商品绑定类型统计
+    product_groups: Dict[str, int]           # 商品组统计
 
 def get_db():
     """
@@ -306,7 +306,10 @@ async def list_discount_products(
     sort_order: str = Query("desc", description="排序方向"),
     is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
     api_provider: Optional[str] = Query(None, description="数据来源：pa-api/cj-api"),
-    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例"),
+    browse_node_ids: Optional[List[str]] = Query(None, description="Browse Node IDs"),
+    bindings: Optional[List[str]] = Query(None, description="商品绑定类型"),
+    product_groups: Optional[List[str]] = Query(None, description="商品组")
 ):
     """获取折扣商品列表"""
     try:
@@ -320,10 +323,13 @@ async def list_discount_products(
             sort_by=sort_by,
             sort_order=sort_order,
             is_prime_only=is_prime_only,
-            api_provider=api_provider,  # 使用api_provider参数
-            min_commission=min_commission
+            api_provider=api_provider,
+            min_commission=min_commission,
+            browse_node_ids=browse_node_ids,
+            bindings=bindings,
+            product_groups=product_groups
         )
-        return result  # 直接返回完整的结果字典
+        return result
     except Exception as e:
         logger.error(f"获取折扣商品列表失败: {str(e)}")
         return {
@@ -346,7 +352,10 @@ async def list_coupon_products(
     is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
     coupon_type: Optional[str] = Query(None, description="优惠券类型：percentage/fixed"),
     api_provider: Optional[str] = Query(None, description="数据来源：pa-api/cj-api"),
-    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例"),
+    browse_node_ids: Optional[List[str]] = Query(None, description="Browse Node IDs"),
+    bindings: Optional[List[str]] = Query(None, description="商品绑定类型"),
+    product_groups: Optional[List[str]] = Query(None, description="商品组")
 ):
     """获取优惠券商品列表"""
     try:
@@ -361,13 +370,21 @@ async def list_coupon_products(
             sort_order=sort_order,
             is_prime_only=is_prime_only,
             coupon_type=coupon_type,
-            api_provider=api_provider,  # 修改这里，使用api_provider参数
-            min_commission=min_commission
+            api_provider=api_provider,
+            min_commission=min_commission,
+            browse_node_ids=browse_node_ids,
+            bindings=bindings,
+            product_groups=product_groups
         )
-        return products if products else []
+        return products
     except Exception as e:
         logger.error(f"获取优惠券商品列表失败: {str(e)}")
-        return []
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size
+        }
 
 @app.get("/api/products/list")
 async def list_products(

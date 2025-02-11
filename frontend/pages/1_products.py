@@ -49,7 +49,7 @@ st.title(get_text("products_title"))
 category_stats = product_service.load_category_stats()
 
 # 渲染类别筛选组件
-selected_categories = render_category_filter(category_stats)
+selected_filters = render_category_filter(category_stats)
 
 # 渲染其他筛选条件
 (
@@ -87,7 +87,7 @@ with tab_discount:
         prime_only=is_prime_only,
         sort_by=sort_by,
         sort_order=sort_order,
-        selected_categories=selected_categories,
+        selected_filters=selected_filters,
         source_filter=source_filter,
         min_commission=min_commission
     )
@@ -131,7 +131,7 @@ with tab_coupon:
         prime_only=is_prime_only,
         sort_by=sort_by,
         sort_order=sort_order,
-        selected_categories=selected_categories,
+        selected_filters=selected_filters,
         source_filter=source_filter,
         min_commission=min_commission
     )

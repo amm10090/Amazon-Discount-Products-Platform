@@ -364,53 +364,98 @@ class ProductService:
             
             # 初始化统计字典
             stats = {
-                "main_categories": {},  # 主要类别统计
-                "sub_categories": {},   # 子类别统计
+                "browse_nodes": {},     # 浏览节点统计
+                "browse_tree": {},      # 浏览节点树形结构
                 "bindings": {},         # 商品绑定类型统计
                 "product_groups": {},   # 商品组统计
             }
             
+            # 用于构建树形结构的临时存储
+            node_relations = {}  # 存储节点之间的关系
+            
             for product in products:
                 try:
-                    # 解析categories JSON字符串
-                    if product.categories:
-                        categories = json.loads(product.categories)
-                        if isinstance(categories, list):
-                            for category_path in categories:
-                                if isinstance(category_path, list) and len(category_path) > 0:
-                                    # 主要类别统计
-                                    main_category = category_path[0]
-                                    stats["main_categories"][main_category] = stats["main_categories"].get(main_category, 0) + 1
-                                    
-                                    # 子类别统计
-                                    if len(category_path) > 1:
-                                        sub_category = category_path[1]
-                                        parent_key = f"{main_category}:{sub_category}"
-                                        stats["sub_categories"][parent_key] = stats["sub_categories"].get(parent_key, 0) + 1
-                
-                except json.JSONDecodeError as e:
-                    logger.error(f"解析商品 {product.asin} 的类别信息时出错: {str(e)}")
+                    # 处理binding (商品绑定类型)
+                    if product.binding:
+                        stats["bindings"][product.binding] = stats["bindings"].get(product.binding, 0) + 1
+                    
+                    # 处理product_group (商品组)
+                    if product.product_group:
+                        stats["product_groups"][product.product_group] = stats["product_groups"].get(product.product_group, 0) + 1
+                    
+                    # 解析browse_nodes JSON字符串
+                    if product.browse_nodes:
+                        try:
+                            browse_nodes = json.loads(product.browse_nodes)
+                            if isinstance(browse_nodes, list):
+                                for node in browse_nodes:
+                                    if isinstance(node, dict) and "id" in node and "name" in node:
+                                        node_id = node["id"]
+                                        node_name = node["name"]
+                                        
+                                        # 更新节点统计
+                                        if node_id not in stats["browse_nodes"]:
+                                            stats["browse_nodes"][node_id] = {
+                                                "id": node_id,
+                                                "name": node_name,
+                                                "count": 0,
+                                                "is_root": node.get("is_root", False)
+                                            }
+                                        stats["browse_nodes"][node_id]["count"] += 1
+                                        
+                                        # 存储节点关系用于构建树形结构
+                                        if node_id not in node_relations:
+                                            node_relations[node_id] = {
+                                                "name": node_name,
+                                                "count": 1,
+                                                "children": set(),
+                                                "parents": set()
+                                            }
+                                        else:
+                                            node_relations[node_id]["count"] += 1
+                                            
+                        except json.JSONDecodeError as e:
+                            logger.error(f"解析商品 {product.asin} 的browse_nodes时出错: {str(e)}")
+                            continue
+                            
+                except Exception as e:
+                    logger.error(f"处理商品 {product.asin} 的统计信息时出错: {str(e)}")
                     continue
             
-            # 处理binding (商品绑定类型)
-            if product.binding:
-                stats["bindings"][product.binding] = stats["bindings"].get(product.binding, 0) + 1
+            # 构建树形结构
+            def build_tree(node_id: str) -> Dict:
+                node = node_relations[node_id]
+                return {
+                    "id": node_id,
+                    "name": node["name"],
+                    "count": node["count"],
+                    "children": {
+                        child_id: build_tree(child_id) 
+                        for child_id in node["children"]
+                    }
+                }
             
-            # 处理product_group (商品组)
-            if product.product_group:
-                stats["product_groups"][product.product_group] = stats["product_groups"].get(product.product_group, 0) + 1
+            # 找出根节点（没有父节点的节点）
+            root_nodes = {node_id for node_id in node_relations if not node_relations[node_id]["parents"]}
             
-            # 对每个统计结果按数量降序排序
-            for key in stats:
-                stats[key] = dict(sorted(stats[key].items(), key=lambda x: x[1], reverse=True))
+            # 从根节点开始构建树
+            stats["browse_tree"] = {
+                root_id: build_tree(root_id)
+                for root_id in root_nodes
+            }
+            
+            # 对统计结果排序
+            stats["bindings"] = dict(sorted(stats["bindings"].items(), key=lambda x: x[1], reverse=True))
+            stats["product_groups"] = dict(sorted(stats["product_groups"].items(), key=lambda x: x[1], reverse=True))
+            stats["browse_nodes"] = dict(sorted(stats["browse_nodes"].items(), key=lambda x: x[1]["count"], reverse=True))
             
             return stats
             
         except Exception as e:
             logger.error(f"获取类别统计信息失败: {str(e)}")
             return {
-                "main_categories": {},
-                "sub_categories": {},
+                "browse_nodes": {},
+                "browse_tree": {},
                 "bindings": {},
                 "product_groups": {}
             }
@@ -475,13 +520,12 @@ class ProductService:
         sort_order: str = "desc",
         is_prime_only: bool = False,
         product_type: str = "all",
-        main_categories: Optional[List[str]] = None,
-        sub_categories: Optional[List[str]] = None,
+        browse_node_ids: Optional[List[str]] = None,  # 使用browse_node_ids替换main_categories和sub_categories
         bindings: Optional[List[str]] = None,
         product_groups: Optional[List[str]] = None,
         source: Optional[str] = None,
         min_commission: Optional[int] = None
-    ) -> List[ProductInfo]:
+    ) -> Dict[str, Any]:
         """获取商品列表"""
         try:
             # 构建基础查询
@@ -514,30 +558,16 @@ class ProductService:
                     cast(Offer.commission, Float) >= min_commission
                 )
                     
-            # 应用类别筛选
-            if main_categories:
-                main_category_conditions = []
-                for category in main_categories:
-                    # 使用JSON字符串匹配
-                    main_category_conditions.append(
-                        Product.categories.like(f'%["{category}"%')
+            # 应用browse nodes筛选
+            if browse_node_ids:
+                browse_node_conditions = []
+                for node_id in browse_node_ids:
+                    # 使用JSON字符串匹配，查找browse_nodes中包含指定id的商品
+                    browse_node_conditions.append(
+                        Product.browse_nodes.like(f'%"id": "{node_id}"%')
                     )
-                if main_category_conditions:
-                    query = query.filter(or_(*main_category_conditions))
-                    
-            if sub_categories:
-                sub_category_conditions = []
-                for category_path in sub_categories:
-                    main_cat, sub_cat = category_path.split(":")
-                    # 使用JSON字符串匹配
-                    sub_category_conditions.append(
-                        and_(
-                            Product.categories.like(f'%["{main_cat}"%'),
-                            Product.categories.like(f'%"{sub_cat}"%')
-                        )
-                    )
-                if sub_category_conditions:
-                    query = query.filter(or_(*sub_category_conditions))
+                if browse_node_conditions:
+                    query = query.filter(or_(*browse_node_conditions))
                     
             if bindings:
                 query = query.filter(Product.binding.in_(bindings))
@@ -709,8 +739,11 @@ class ProductService:
         sort_order: str = "desc",
         is_prime_only: bool = False,
         coupon_type: Optional[str] = None,
-        api_provider: Optional[str] = None,  # 修改参数名从source为api_provider
-        min_commission: Optional[int] = None
+        api_provider: Optional[str] = None,
+        min_commission: Optional[int] = None,
+        browse_node_ids: Optional[List[str]] = None,
+        bindings: Optional[List[str]] = None,
+        product_groups: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """获取优惠券商品列表"""
         try:
@@ -747,6 +780,24 @@ class ProductService:
                 query = query.filter(Product.is_prime == True)
             if coupon_type:
                 query = query.filter(CouponHistory.coupon_type == coupon_type)
+                
+            # 应用browse nodes筛选
+            if browse_node_ids:
+                browse_node_conditions = []
+                for node_id in browse_node_ids:
+                    browse_node_conditions.append(
+                        Product.browse_nodes.like(f'%"id": "{node_id}"%')
+                    )
+                if browse_node_conditions:
+                    query = query.filter(or_(*browse_node_conditions))
+                    
+            # 应用binding筛选
+            if bindings:
+                query = query.filter(Product.binding.in_(bindings))
+                
+            # 应用product_group筛选
+            if product_groups:
+                query = query.filter(Product.product_group.in_(product_groups))
                 
             # 应用排序
             query = ProductService._apply_sorting(query, sort_by, sort_order)
@@ -845,7 +896,10 @@ class ProductService:
         sort_order: str = "desc",
         is_prime_only: bool = False,
         api_provider: Optional[str] = None,  # 使用api_provider参数来筛选API来源
-        min_commission: Optional[int] = None
+        min_commission: Optional[int] = None,
+        browse_node_ids: Optional[List[str]] = None,  # 添加browse_node_ids参数
+        bindings: Optional[List[str]] = None,         # 添加bindings参数
+        product_groups: Optional[List[str]] = None    # 添加product_groups参数
     ) -> Dict[str, Any]:
         """获取折扣商品列表"""
         try:
@@ -874,6 +928,24 @@ class ProductService:
                 query = query.filter(Product.savings_percentage >= min_discount)
             if is_prime_only:
                 query = query.filter(Product.is_prime == True)
+                
+            # 应用browse nodes筛选
+            if browse_node_ids:
+                browse_node_conditions = []
+                for node_id in browse_node_ids:
+                    browse_node_conditions.append(
+                        Product.browse_nodes.like(f'%"id": "{node_id}"%')
+                    )
+                if browse_node_conditions:
+                    query = query.filter(or_(*browse_node_conditions))
+                    
+            # 应用binding筛选
+            if bindings:
+                query = query.filter(Product.binding.in_(bindings))
+                
+            # 应用product_group筛选
+            if product_groups:
+                query = query.filter(Product.product_group.in_(product_groups))
                 
             # 应用排序
             query = ProductService._apply_sorting(query, sort_by, sort_order)

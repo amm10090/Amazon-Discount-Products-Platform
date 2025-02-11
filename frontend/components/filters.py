@@ -3,74 +3,58 @@
 """
 
 import streamlit as st
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from frontend.i18n.language import get_text
 
 def render_category_filter(
-    category_stats: Dict[str, Dict[str, int]]
+    category_stats: Dict[str, Dict[str, Any]]
 ) -> Optional[Dict[str, List[str]]]:
     """渲染类别筛选组件
     
     Args:
-        category_stats: 类别统计信息
+        category_stats: 类别统计信息，包含browse_nodes和browse_tree等
         
     Returns:
-        Optional[Dict[str, List[str]]]: 选中的类别
+        Optional[Dict[str, List[str]]]: 选中的筛选条件
     """
-    selected_categories = {
-        "main_categories": [],
-        "sub_categories": [],
-        "bindings": [],
-        "product_groups": []
+    selected_filters = {
+        "browse_node_ids": [],  # 选中的browse node IDs
+        "bindings": [],         # 选中的binding类型
+        "product_groups": []    # 选中的product group
     }
     
     with st.sidebar:
         st.subheader(get_text("filter_conditions"))
         
-        # 主要类别多选
-        if category_stats["main_categories"]:
+        # Browse Nodes多选
+        if category_stats["browse_nodes"]:
             with st.expander(get_text("product_category"), expanded=True):
-                for category, count in category_stats["main_categories"].items():
-                    if st.checkbox(f"{category} ({count})", key=f"main_{category}"):
-                        selected_categories["main_categories"].append(category)
-        
-        # 子类别多选（按主类别分组显示）
-        if category_stats["sub_categories"]:
-            with st.expander(get_text("categories"), expanded=True):
-                # 按主类别分组
-                sub_categories_by_main = {}
-                for sub_path, count in category_stats["sub_categories"].items():
-                    main_cat, sub_cat = sub_path.split(":")
-                    if main_cat not in sub_categories_by_main:
-                        sub_categories_by_main[main_cat] = []
-                    sub_categories_by_main[main_cat].append((sub_cat, count))
-                
-                # 显示分组的子类别
-                for main_cat, sub_cats in sub_categories_by_main.items():
-                    with st.expander(main_cat):
-                        for sub_cat, count in sub_cats:
-                            if st.checkbox(f"{sub_cat} ({count})", key=f"sub_{main_cat}_{sub_cat}"):
-                                selected_categories["sub_categories"].append(f"{main_cat}:{sub_cat}")
+                for node_id, node_info in category_stats["browse_nodes"].items():
+                    if st.checkbox(
+                        f"{node_info['name']} ({node_info['count']})", 
+                        key=f"node_{node_id}"
+                    ):
+                        selected_filters["browse_node_ids"].append(node_id)
         
         # 商品绑定类型多选
         if category_stats["bindings"]:
             with st.expander(get_text("product_binding")):
                 for binding, count in category_stats["bindings"].items():
                     if st.checkbox(f"{binding} ({count})", key=f"binding_{binding}"):
-                        selected_categories["bindings"].append(binding)
+                        selected_filters["bindings"].append(binding)
         
         # 商品组多选
         if category_stats["product_groups"]:
             with st.expander(get_text("product_group")):
                 for group, count in category_stats["product_groups"].items():
                     if st.checkbox(f"{group} ({count})", key=f"group_{group}"):
-                        selected_categories["product_groups"].append(group)
+                        selected_filters["product_groups"].append(group)
     
-    # 如果没有选择任何类别，返回None
-    if not any(selected_categories.values()):
+    # 如果没有选择任何筛选条件，返回None
+    if not any(selected_filters.values()):
         return None
     
-    return selected_categories
+    return selected_filters
 
 def render_filter_sidebar() -> Tuple[str, float, float, int, bool, Optional[int], Optional[str], str, int]:
     """渲染侧边栏筛选条件

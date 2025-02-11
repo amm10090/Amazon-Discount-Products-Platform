@@ -22,7 +22,7 @@ class ProductService:
         prime_only: bool = False,
         sort_by: Optional[str] = None,
         sort_order: str = "desc",
-        selected_categories: Optional[Dict[str, List[str]]] = None,
+        selected_filters: Optional[Dict[str, List[str]]] = None,
         source_filter: str = "all",
         min_commission: Optional[int] = None
     ) -> Dict:
@@ -56,16 +56,14 @@ class ProductService:
                 elif source_filter == "cj":
                     params["min_commission"] = min_commission
             
-            # 添加类别筛选参数
-            if selected_categories:
-                if selected_categories.get("main_categories"):
-                    params["main_categories"] = selected_categories["main_categories"]
-                if selected_categories.get("sub_categories"):
-                    params["sub_categories"] = selected_categories["sub_categories"]
-                if selected_categories.get("bindings"):
-                    params["bindings"] = selected_categories["bindings"]
-                if selected_categories.get("product_groups"):
-                    params["product_groups"] = selected_categories["product_groups"]
+            # 添加筛选参数
+            if selected_filters:
+                if selected_filters.get("browse_node_ids"):
+                    params["browse_node_ids"] = selected_filters["browse_node_ids"]
+                if selected_filters.get("bindings"):
+                    params["bindings"] = selected_filters["bindings"]
+                if selected_filters.get("product_groups"):
+                    params["product_groups"] = selected_filters["product_groups"]
             
             # 移除None值和空列表的参数
             params = {k: v for k, v in params.items() if (isinstance(v, list) and len(v) > 0) or (not isinstance(v, list) and v is not None)}
