@@ -258,6 +258,15 @@ def render_product_card(
                     </div>
                 """, unsafe_allow_html=True)
             
+            # ASIN信息
+            if product.get("asin"):
+                st.markdown(f"""
+                    <div style="margin: 16px 0;">
+                        <span style="color: #86868b;">ASIN:</span>
+                        <span style="font-weight: 500; margin-left: 8px;">{product['asin']}</span>
+                    </div>
+                """, unsafe_allow_html=True)
+            
             # 价格信息
             if product.get("offers") and len(product["offers"]) > 0:
                 offer = product["offers"][0]

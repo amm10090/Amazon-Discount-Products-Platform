@@ -259,6 +259,10 @@ TRANSLATIONS = {
         "sort_order": "排序方向",
         "confirm": "确认",
         "cancel": "取消",
+        
+        # 类别筛选相关
+        "discount_products_categories": "折扣商品分类",
+        "coupon_products_categories": "优惠券商品分类",
     },
     
     "en": {
@@ -517,5 +521,9 @@ TRANSLATIONS = {
         "sort_order": "Sort Order",
         "confirm": "Confirm",
         "cancel": "Cancel",
+        
+        # Category filtering related
+        "discount_products_categories": "Discount Product Categories",
+        "coupon_products_categories": "Coupon Product Categories",
     }
 } 

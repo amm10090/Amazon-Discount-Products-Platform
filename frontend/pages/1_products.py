@@ -71,26 +71,12 @@ with st.sidebar:
         sort_order,
         page_size
     ) = render_filter_sidebar()
-    
-    # 根据当前活动的标签页加载对应的类别统计
-    if st.session_state.active_tab == "discount":
-        discount_stats = product_service.load_category_stats(product_type="discount")
-        selected_filters_discount = render_category_filter(
-            discount_stats,
-            product_type="discount"
-        )
-        selected_filters_coupon = None
-    else:
-        coupon_stats = product_service.load_category_stats(product_type="coupon")
-        selected_filters_coupon = render_category_filter(
-            coupon_stats,
-            product_type="coupon"
-        )
-        selected_filters_discount = None
 
 # 处理折扣商品标签页
 with tab_discount:
+    # 更新当前活动的标签页
     st.session_state.active_tab = "discount"
+    
     # 加载折扣商品数据
     discount_products = product_service.load_products(
         product_type="discount",
@@ -102,7 +88,6 @@ with tab_discount:
         prime_only=is_prime_only,
         sort_by=sort_by,
         sort_order=sort_order,
-        selected_filters=selected_filters_discount,
         source_filter=source_filter,
         min_commission=min_commission
     )
@@ -131,7 +116,9 @@ with tab_discount:
 
 # 处理优惠券商品标签页
 with tab_coupon:
+    # 更新当前活动的标签页
     st.session_state.active_tab = "coupon"
+    
     # 加载优惠券商品数据
     coupon_products = product_service.load_products(
         product_type="coupon",
@@ -143,7 +130,6 @@ with tab_coupon:
         prime_only=is_prime_only,
         sort_by=sort_by,
         sort_order=sort_order,
-        selected_filters=selected_filters_coupon,
         source_filter=source_filter,
         min_commission=min_commission
     )
