@@ -263,6 +263,24 @@ TRANSLATIONS = {
         # 类别筛选相关
         "discount_products_categories": "折扣商品分类",
         "coupon_products_categories": "优惠券商品分类",
+        
+        # 佣金相关
+        "commission_filter": "佣金筛选",
+        "min_commission": "最低佣金",
+        "commission_help": "筛选CJ商品的最低佣金比例",
+        "commission": "佣金",
+        
+        # 筛选相关
+        "source_all": "全部 (Amazon + CJ)",
+        "source_pa_api": "Amazon API",
+        "source_cj": "CJ API",
+        "sort_by_price": "按价格",
+        "sort_by_discount": "按折扣",
+        "sort_by_time": "按时间",
+        "sort_by_commission": "按佣金",
+        "sort_desc": "降序",
+        "sort_asc": "升序",
+        "items_per_page": "每页显示数量",
     },
     
     "en": {
@@ -525,5 +543,23 @@ TRANSLATIONS = {
         # Category filtering related
         "discount_products_categories": "Discount Product Categories",
         "coupon_products_categories": "Coupon Product Categories",
+        
+        # Commission Related
+        "commission_filter": "Commission Filter",
+        "min_commission": "Min Commission",
+        "commission_help": "Filter CJ products by minimum commission rate",
+        "commission": "Commission",
+        
+        # Filter Related
+        "source_all": "All (Amazon + CJ)",
+        "source_pa_api": "Amazon API",
+        "source_cj": "CJ API",
+        "sort_by_price": "By Price",
+        "sort_by_discount": "By Discount",
+        "sort_by_time": "By Time",
+        "sort_by_commission": "By Commission",
+        "sort_desc": "Descending",
+        "sort_asc": "Ascending",
+        "items_per_page": "Items Per Page",
     }
 } 

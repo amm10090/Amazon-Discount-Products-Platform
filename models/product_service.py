@@ -300,6 +300,10 @@ class ProductService:
                 
                 # 添加新的优惠信息
                 for offer_info in product_info.offers:
+                    # 添加调试日志
+                    if hasattr(offer_info, 'commission'):
+                        logger.debug(f"处理商品 {product.asin} 的佣金信息: {offer_info.commission}")
+                        
                     offer = Offer(
                         product_id=product.asin,
                         condition=offer_info.condition,
@@ -315,8 +319,13 @@ class ProductService:
                         is_buybox_winner=offer_info.is_buybox_winner,
                         deal_type=offer_info.deal_type,
                         created_at=current_time,
-                        updated_at=current_time
+                        updated_at=current_time,
+                        commission=offer_info.commission if hasattr(offer_info, 'commission') else None
                     )
+                    
+                    # 添加调试日志
+                    if offer.commission:
+                        logger.debug(f"已设置商品 {product.asin} 的佣金信息到数据库: {offer.commission}")
                     
                     # 如果包含优惠券信息，添加优惠券相关字段
                     if include_coupon and hasattr(offer_info, 'coupon_type') and hasattr(offer_info, 'coupon_value'):
@@ -332,10 +341,6 @@ class ProductService:
                             updated_at=current_time
                         )
                         db.add(coupon_history)
-                    
-                    # 添加CJ特有信息
-                    if include_cj_data and hasattr(offer_info, 'commission'):
-                        offer.commission = offer_info.commission
                     
                     db.add(offer)
                 

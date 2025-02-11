@@ -148,12 +148,13 @@ def render_filter_sidebar() -> Tuple[str, float, float, int, bool, Optional[int]
             get_text("source_filter"),
             options=["all", "pa-api", "cj"],
             format_func=lambda x: {
-                "all": f"{get_text('all')} (Amazon + CJ)",
-                "pa-api": "Amazon API",
-                "cj": "CJ API"
+                "all": get_text("source_all"),
+                "pa-api": get_text("source_pa_api"),
+                "cj": get_text("source_cj")
             }[x]
         )
         
+        st.markdown(f"### {get_text('price_range')}")
         col1, col2 = st.columns(2)
         with col1:
             min_price = st.number_input(get_text("min_price"), min_value=0.0, value=0.0)
@@ -166,24 +167,32 @@ def render_filter_sidebar() -> Tuple[str, float, float, int, bool, Optional[int]
         # 添加CJ佣金筛选
         min_commission = None
         if source_filter in ["all", "cj"]:
-            min_commission = st.slider(get_text("min_commission"), min_value=0, max_value=100, value=0)
+            st.markdown("---")  # 添加分隔线
+            st.subheader(get_text("commission_filter"))  # 添加小标题
+            min_commission = st.slider(
+                get_text("min_commission") + " (%)",  # 添加百分号单位
+                min_value=0,
+                max_value=100,
+                value=0,
+                help=get_text("commission_help")  # 添加帮助文本
+            )
         
         sort_by = st.selectbox(
             get_text("sort_by"),
             options=[None, "price", "discount", "timestamp", "commission"],
             format_func=lambda x: {
                 None: get_text("sort_by"),
-                "price": get_text("price_low_to_high"),
-                "discount": get_text("discount_low_to_high"),
-                "timestamp": get_text("time_old_to_new"),
-                "commission": get_text("commission")
+                "price": get_text("sort_by_price"),
+                "discount": get_text("sort_by_discount"),
+                "timestamp": get_text("sort_by_time"),
+                "commission": get_text("sort_by_commission")
             }[x]
         )
         
         sort_order = st.selectbox(
             get_text("sort_order"),
             options=["desc", "asc"],
-            format_func=lambda x: get_text("desc") if x == "desc" else get_text("asc")
+            format_func=lambda x: get_text("sort_desc") if x == "desc" else get_text("sort_asc")
         )
         
         page_size = st.selectbox(

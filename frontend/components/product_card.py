@@ -211,7 +211,7 @@ def render_product_card(
             
             # 佣金标签
             with tag_cols[2]:
-                if product.get("source") == "cj" and product.get("offers"):
+                if product.get("offers") and len(product["offers"]) > 0:
                     main_offer = product["offers"][0]
                     if main_offer.get("commission"):
                         st.markdown(f"""
@@ -224,8 +224,13 @@ def render_product_card(
                                 font-size: 0.85em;
                                 font-weight: 500;
                                 margin: 4px 0;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                gap: 4px;
                             ">
-                                💰 {get_text("commission")}: {main_offer['commission']}
+                                <span>💰</span>
+                                <span>{get_text("commission")}: {main_offer['commission']}%</span>
                             </div>
                         """, unsafe_allow_html=True)
             

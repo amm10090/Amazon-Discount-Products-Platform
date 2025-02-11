@@ -202,7 +202,13 @@ async def process_products_batch(
                                     product.offers = []
                                 if not product.offers:
                                     from models.product import ProductOffer
-                                    product.offers.append(ProductOffer())
+                                    product.offers.append(ProductOffer(
+                                        condition="New",  # 默认值
+                                        price=0.0,       # 默认值
+                                        currency="USD",   # 默认值
+                                        availability="Available",  # 默认值
+                                        merchant_name="Amazon"    # 默认值
+                                    ))
                                 
                                 if product.offers and len(product.offers) > 0:
                                     main_offer = product.offers[0]
@@ -210,10 +216,10 @@ async def process_products_batch(
                                     # 添加佣金信息（CJ特有）
                                     commission = cj_product.get('commission')
                                     if isinstance(commission, str):
-                                        commission_value = float(commission.rstrip('%'))
-                                        main_offer.commission = commission_value
+                                        # 移除百分号并转换为字符串
+                                        main_offer.commission = commission.rstrip('%')
                                     elif isinstance(commission, (int, float)):
-                                        main_offer.commission = float(commission)
+                                        main_offer.commission = str(commission)
                                     log_debug(f"CJ佣金信息: {product.asin} - {main_offer.commission}")
                                     
                                     # 如果CJ有优惠券信息，使用CJ的数据
