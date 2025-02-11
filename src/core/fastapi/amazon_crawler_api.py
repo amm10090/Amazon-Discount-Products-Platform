@@ -15,7 +15,7 @@ Amazon爬虫和产品API FastAPI服务
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, Depends
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 import asyncio
 import uvicorn
@@ -398,16 +398,66 @@ async def list_products(
     sort_order: str = Query("desc", description="排序方向"),
     is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
     product_type: str = Query("all", description="商品类型：discount/coupon/all"),
-    main_categories: Optional[List[str]] = Query(None, description="主要类别筛选列表"),
-    sub_categories: Optional[List[str]] = Query(None, description="子类别筛选列表"),
-    bindings: Optional[List[str]] = Query(None, description="商品绑定类型筛选列表"),
-    product_groups: Optional[List[str]] = Query(None, description="商品组筛选列表"),
+    browse_node_ids: Optional[Union[List[str], str]] = Query(None, description="Browse Node IDs，支持数组或逗号分隔的字符串"),
+    bindings: Optional[Union[List[str], str]] = Query(None, description="商品绑定类型，支持数组或逗号分隔的字符串"),
+    product_groups: Optional[Union[List[str], str]] = Query(None, description="商品组，支持数组或逗号分隔的字符串"),
     api_provider: Optional[str] = Query(None, description="数据来源：pa-api/cj-api/all"),
     min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
 ):
     """获取商品列表，支持分页、筛选和排序"""
     try:
-        products = ProductService.list_products(
+        # 处理bindings参数
+        binding_list = None
+        if bindings:
+            if isinstance(bindings, str):
+                # 处理逗号分隔的字符串
+                binding_list = [b.strip() for b in bindings.split(",") if b.strip()]
+            elif isinstance(bindings, list):
+                # 处理数组形式，并处理每个元素中可能的逗号分隔
+                binding_list = []
+                for binding in bindings:
+                    if isinstance(binding, str) and ',' in binding:
+                        binding_list.extend([b.strip() for b in binding.split(",") if b.strip()])
+                    else:
+                        binding_list.append(str(binding).strip())
+            logger.info(f"处理后的binding_list: {binding_list}")
+
+        # 处理product_groups参数
+        group_list = None
+        if product_groups:
+            if isinstance(product_groups, str):
+                # 处理逗号分隔的字符串
+                group_list = [g.strip() for g in product_groups.split(",") if g.strip()]
+            elif isinstance(product_groups, list):
+                # 处理数组形式，并处理每个元素中可能的逗号分隔
+                group_list = []
+                for group in product_groups:
+                    if isinstance(group, str) and ',' in group:
+                        group_list.extend([g.strip() for g in group.split(",") if g.strip()])
+                    else:
+                        group_list.append(str(group).strip())
+            logger.info(f"处理后的group_list: {group_list}")
+
+        # 处理browse_node_ids参数
+        node_list = None
+        if browse_node_ids:
+            if isinstance(browse_node_ids, str):
+                # 处理逗号分隔的字符串
+                if ',' in browse_node_ids:
+                    node_list = [n.strip() for n in browse_node_ids.split(",") if n.strip()]
+                else:
+                    node_list = [browse_node_ids.strip()]
+            elif isinstance(browse_node_ids, list):
+                # 处理数组形式，并处理每个元素中可能的逗号分隔
+                node_list = []
+                for node_id in browse_node_ids:
+                    if isinstance(node_id, str) and ',' in node_id:
+                        node_list.extend([n.strip() for n in node_id.split(",") if n.strip()])
+                    else:
+                        node_list.append(str(node_id).strip())
+            logger.info(f"处理后的node_list: {node_list}")
+
+        result = ProductService.list_products(
             db=db,
             page=page,
             page_size=page_size,
@@ -418,17 +468,21 @@ async def list_products(
             sort_order=sort_order,
             is_prime_only=is_prime_only,
             product_type=product_type,
-            main_categories=main_categories,
-            sub_categories=sub_categories,
-            bindings=bindings,
-            product_groups=product_groups,
-            source=api_provider,  # 使用api_provider参数
+            browse_node_ids=node_list,
+            bindings=binding_list,
+            product_groups=group_list,
+            source=api_provider,
             min_commission=min_commission
         )
-        return products if products else []
+        return result
     except Exception as e:
         logger.error(f"获取商品列表失败: {str(e)}")
-        return []
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size
+        }
 
 @app.post("/api/products/batch-delete")
 async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depends(get_db)):
@@ -756,10 +810,13 @@ async def execute_job_now(job_id: str):
         )
 
 @app.get("/api/categories/stats", response_model=CategoryStats)
-async def get_category_stats(db: Session = Depends(get_db)):
+async def get_category_stats(
+    product_type: Optional[str] = Query(None, description="商品类型: discount/coupon"),
+    db: Session = Depends(get_db)
+):
     """获取类别统计信息"""
     try:
-        stats = ProductService.get_category_stats(db)
+        stats = ProductService.get_category_stats(db, product_type)
         return CategoryStats(**stats)
     except Exception as e:
         raise HTTPException(

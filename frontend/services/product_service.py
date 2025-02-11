@@ -95,17 +95,32 @@ class ProductService:
             st.error(f"加载商品列表失败: {str(e)}")
             return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-    def load_category_stats(self) -> Dict[str, Dict[str, int]]:
-        """加载类别统计信息"""
+    def load_category_stats(self, product_type: Optional[str] = None) -> Dict[str, Dict[str, int]]:
+        """加载类别统计信息
+        
+        Args:
+            product_type: 商品类型 ('discount'/'coupon'/None)
+            
+        Returns:
+            Dict[str, Dict[str, int]]: 类别统计信息
+        """
         try:
-            response = requests.get(f"{self.api_base_url}/api/categories/stats")
+            # 构建请求参数
+            params = {}
+            if product_type:
+                params["product_type"] = product_type
+            
+            response = requests.get(
+                f"{self.api_base_url}/api/categories/stats",
+                params=params
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             st.error(f"加载类别统计信息失败: {str(e)}")
             return {
-                "main_categories": {},
-                "sub_categories": {},
+                "browse_nodes": {},
+                "browse_tree": {},
                 "bindings": {},
                 "product_groups": {}
             }

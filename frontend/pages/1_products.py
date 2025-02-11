@@ -45,41 +45,56 @@ product_service = ProductService(API_BASE_URL)
 # 页面标题
 st.title(get_text("products_title"))
 
-# 加载类别统计信息
-category_stats = product_service.load_category_stats()
-
-# 渲染类别筛选组件
-selected_filters = render_category_filter(category_stats)
-
-# 渲染其他筛选条件
-(
-    source_filter,
-    min_price,
-    max_price,
-    min_discount,
-    is_prime_only,
-    min_commission,
-    sort_by,
-    sort_order,
-    page_size
-) = render_filter_sidebar()
-
 # 创建标签页
 tab_discount, tab_coupon = st.tabs([
     f"🏷️ {get_text('discount_products')}",
     f"🎫 {get_text('coupon_products')}"
 ])
 
+# 跟踪当前活动的标签页
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "discount"
+
+# 渲染侧边栏筛选条件
+with st.sidebar:
+    st.title(get_text("filter_conditions"))
+    
+    # 渲染基本筛选条件
+    (
+        source_filter,
+        min_price,
+        max_price,
+        min_discount,
+        is_prime_only,
+        min_commission,
+        sort_by,
+        sort_order,
+        page_size
+    ) = render_filter_sidebar()
+    
+    # 根据当前活动的标签页加载对应的类别统计
+    if st.session_state.active_tab == "discount":
+        discount_stats = product_service.load_category_stats(product_type="discount")
+        selected_filters_discount = render_category_filter(
+            discount_stats,
+            product_type="discount"
+        )
+        selected_filters_coupon = None
+    else:
+        coupon_stats = product_service.load_category_stats(product_type="coupon")
+        selected_filters_coupon = render_category_filter(
+            coupon_stats,
+            product_type="coupon"
+        )
+        selected_filters_discount = None
+
 # 处理折扣商品标签页
 with tab_discount:
-    # 分页控制
-    if "discount_page" not in st.session_state:
-        st.session_state.discount_page = 1
-    
+    st.session_state.active_tab = "discount"
     # 加载折扣商品数据
     discount_products = product_service.load_products(
         product_type="discount",
-        page=st.session_state.discount_page,
+        page=st.session_state.get("discount_page", 1),
         page_size=page_size,
         min_price=min_price,
         max_price=max_price,
@@ -87,7 +102,7 @@ with tab_discount:
         prime_only=is_prime_only,
         sort_by=sort_by,
         sort_order=sort_order,
-        selected_filters=selected_filters,
+        selected_filters=selected_filters_discount,
         source_filter=source_filter,
         min_commission=min_commission
     )
@@ -104,7 +119,7 @@ with tab_discount:
         # 处理分页
         st.session_state.discount_page = handle_pagination(
             discount_products["total"],
-            st.session_state.discount_page,
+            st.session_state.get("discount_page", 1),
             page_size,
             "discount"
         )
@@ -116,14 +131,11 @@ with tab_discount:
 
 # 处理优惠券商品标签页
 with tab_coupon:
-    # 分页控制
-    if "coupon_page" not in st.session_state:
-        st.session_state.coupon_page = 1
-    
+    st.session_state.active_tab = "coupon"
     # 加载优惠券商品数据
     coupon_products = product_service.load_products(
         product_type="coupon",
-        page=st.session_state.coupon_page,
+        page=st.session_state.get("coupon_page", 1),
         page_size=page_size,
         min_price=min_price,
         max_price=max_price,
@@ -131,7 +143,7 @@ with tab_coupon:
         prime_only=is_prime_only,
         sort_by=sort_by,
         sort_order=sort_order,
-        selected_filters=selected_filters,
+        selected_filters=selected_filters_coupon,
         source_filter=source_filter,
         min_commission=min_commission
     )
@@ -148,7 +160,7 @@ with tab_coupon:
         # 处理分页
         st.session_state.coupon_page = handle_pagination(
             coupon_products["total"],
-            st.session_state.coupon_page,
+            st.session_state.get("coupon_page", 1),
             page_size,
             "coupon"
         )
