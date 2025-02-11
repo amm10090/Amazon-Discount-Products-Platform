@@ -44,7 +44,7 @@ def load_config(config_path: str = None) -> dict:
         },
         "api": {
             "host": "localhost",
-            "port": 8000
+            "port": 5001
         },
         "logging": {
             "level": "INFO",

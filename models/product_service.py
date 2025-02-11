@@ -1092,4 +1092,134 @@ class ProductService:
                 "total": 0,
                 "page": page,
                 "page_size": page_size
-            } 
+            }
+
+    @staticmethod
+    def get_products_stats(db: Session, product_type: Optional[str] = None) -> dict:
+        """获取商品统计信息
+        
+        Args:
+            db: 数据库会话
+            product_type: 商品类型筛选
+            
+        Returns:
+            dict: 统计信息
+        """
+        try:
+            # 基础查询
+            query = db.query(Product)
+            
+            # 根据商品类型筛选
+            if product_type:
+                if product_type == "discount":
+                    query = query.join(Offer).filter(Offer.savings_percentage.isnot(None))
+                elif product_type == "coupon":
+                    query = query.join(Offer).filter(Offer.coupon_type.isnot(None))
+            
+            # 获取基本统计信息
+            total_products = query.count()
+            
+            # 获取折扣商品数量
+            discount_products = db.query(Product).join(Offer).filter(
+                Offer.savings_percentage.isnot(None)
+            ).count()
+            
+            # 获取优惠券商品数量
+            coupon_products = db.query(Product).join(Offer).filter(
+                Offer.coupon_type.isnot(None)
+            ).count()
+            
+            # 获取Prime商品数量
+            prime_products = db.query(Product).join(Offer).filter(
+                Offer.is_prime.is_(True)
+            ).count()
+            
+            # 获取价格和折扣统计
+            price_stats = db.query(
+                func.avg(Offer.price).label('avg_price'),
+                func.min(Offer.price).label('min_price'),
+                func.max(Offer.price).label('max_price'),
+                func.avg(Offer.savings_percentage).label('avg_discount'),
+                func.min(Offer.savings_percentage).label('min_discount'),
+                func.max(Offer.savings_percentage).label('max_discount'),
+                func.avg(Offer.savings).label('avg_savings'),
+                func.min(Offer.savings).label('min_savings'),
+                func.max(Offer.savings).label('max_savings')
+            ).select_from(Product).join(Offer).first()
+            
+            # 获取优惠券统计
+            coupon_stats = db.query(
+                func.count(Offer.coupon_type).label('total_coupons'),
+                func.avg(Offer.coupon_value).label('avg_coupon_value'),
+                func.min(Offer.coupon_value).label('min_coupon_value'),
+                func.max(Offer.coupon_value).label('max_coupon_value')
+            ).select_from(Product).join(Offer).filter(
+                Offer.coupon_type.isnot(None)
+            ).first()
+            
+            # 获取商品分类统计
+            category_stats = db.query(
+                Product.binding,
+                func.count(Product.id).label('count')
+            ).group_by(Product.binding).all()
+            
+            # 获取商品组统计
+            group_stats = db.query(
+                Product.product_group,
+                func.count(Product.id).label('count')
+            ).group_by(Product.product_group).all()
+            
+            # 获取商品品牌统计
+            brand_stats = db.query(
+                Product.brand,
+                func.count(Product.id).label('count')
+            ).group_by(Product.brand).all()
+            
+            return {
+                # 基本统计
+                "total_products": total_products,
+                "discount_products": discount_products,
+                "coupon_products": coupon_products,
+                "prime_products": prime_products,
+                
+                # 价格统计
+                "avg_price": float(price_stats.avg_price or 0),
+                "min_price": float(price_stats.min_price or 0),
+                "max_price": float(price_stats.max_price or 0),
+                
+                # 折扣统计
+                "avg_discount": float(price_stats.avg_discount or 0),
+                "min_discount": float(price_stats.min_discount or 0),
+                "max_discount": float(price_stats.max_discount or 0),
+                
+                # 节省金额统计
+                "avg_savings": float(price_stats.avg_savings or 0),
+                "min_savings": float(price_stats.min_savings or 0),
+                "max_savings": float(price_stats.max_savings or 0),
+                
+                # 优惠券统计
+                "total_coupons": int(coupon_stats.total_coupons or 0),
+                "avg_coupon_value": float(coupon_stats.avg_coupon_value or 0),
+                "min_coupon_value": float(coupon_stats.min_coupon_value or 0),
+                "max_coupon_value": float(coupon_stats.max_coupon_value or 0),
+                
+                # 分类统计
+                "categories": {
+                    "bindings": {
+                        cat.binding: cat.count for cat in category_stats if cat.binding
+                    },
+                    "groups": {
+                        group.product_group: group.count for group in group_stats if group.product_group
+                    },
+                    "brands": {
+                        brand.brand: brand.count for brand in brand_stats if brand.brand
+                    }
+                },
+                
+                # 时间统计
+                "last_update": db.query(func.max(Product.updated_at)).scalar()
+            }
+            
+        except Exception as e:
+            logger.error(f"获取商品统计信息失败: {str(e)}")
+            raise 

@@ -548,6 +548,36 @@ async def get_products(request: ProductRequest):
         logger.error(f"获取商品信息时出错: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取商品信息时出错: {str(e)}")
 
+@app.get("/api/products/stats")
+async def get_products_stats(
+    db: Session = Depends(get_db),
+    product_type: Optional[str] = Query(None, description="商品类型：discount/coupon/all")
+):
+    """获取商品统计信息
+    
+    Args:
+        db: 数据库会话
+        product_type: 商品类型筛选
+        
+    Returns:
+        dict: 统计信息
+    """
+    try:
+        stats = ProductService.get_products_stats(db, product_type)
+        return stats
+    except Exception as e:
+        logger.error(f"获取商品统计信息失败: {str(e)}")
+        return {
+            "total_products": 0,
+            "discount_products": 0,
+            "coupon_products": 0,
+            "prime_products": 0,
+            "avg_discount": 0,
+            "avg_price": 0,
+            "min_price": 0,
+            "max_price": 0
+        }
+
 @app.get("/api/products/{asin}", response_model=ProductInfo)
 async def get_product(
     asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
