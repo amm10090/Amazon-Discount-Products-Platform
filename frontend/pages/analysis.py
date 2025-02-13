@@ -84,7 +84,7 @@ def load_products_data(api_url: str, product_type: str = "all") -> pd.DataFrame:
             st.error(f"{get_text('loading_failed')}: API返回状态码 {response.status_code}")
             return pd.DataFrame()
             
-            data = response.json()
+        data = response.json()
         if not isinstance(data, dict) or "items" not in data:
             st.error(f"{get_text('loading_failed')}: API响应格式不正确")
             return pd.DataFrame()
@@ -150,7 +150,7 @@ def load_products_data(api_url: str, product_type: str = "all") -> pd.DataFrame:
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
             
-            return df
+        return df
         
     except requests.exceptions.ConnectionError:
         st.error(f"{get_text('loading_failed')}: 无法连接到API服务")
@@ -920,7 +920,7 @@ def main():
     else:
         # 如果没有任何数据，显示提示信息
         if not stats_data or stats_data.get("total_products", 0) == 0:
-        st.warning(get_text("no_products"))
+            st.warning(get_text("no_products"))
 
 if __name__ == "__main__":
     main() 
