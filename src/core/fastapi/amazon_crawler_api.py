@@ -15,6 +15,7 @@ Amazon爬虫和产品API FastAPI服务
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 import asyncio
@@ -62,6 +63,15 @@ app = FastAPI(
     title="Amazon Data API",
     description="API for crawling Amazon deals and retrieving product information",
     version="1.0.0"
+)
+
+# 配置CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # 允许的前端域名
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有HTTP方法
+    allow_headers=["*"],  # 允许所有请求头
 )
 
 # 存储任务状态的字典
