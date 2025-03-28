@@ -38,6 +38,7 @@ from models.scheduler import SchedulerManager
 from models.scheduler_models import JobConfig, JobStatus, SchedulerStatus, JobHistory
 import pytz
 import logging
+from contextlib import asynccontextmanager
 
 # 添加项目根目录到Python路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -58,17 +59,28 @@ load_dotenv()
 # 初始化数据库
 init_db()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 创建并启动调度器
+    scheduler_manager = SchedulerManager()
+    scheduler_manager.start()
+    logger.info("调度器已启动")
+    yield
+    # 在这里可以添加应用关闭时需要执行的清理代码
+
 # 创建FastAPI应用
 app = FastAPI(
     title="Amazon Data API",
     description="API for crawling Amazon deals and retrieving product information",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # 配置CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # 允许的前端域名
+    allow_origins=["*"],  # 允许的前端域名
     allow_credentials=True,
     allow_methods=["*"],  # 允许所有HTTP方法
     allow_headers=["*"],  # 允许所有请求头
@@ -133,6 +145,18 @@ class CategoryStats(BaseModel):
     browse_tree: Dict[str, Any]              # 浏览节点树形结构
     bindings: Dict[str, int]                 # 商品绑定类型统计
     product_groups: Dict[str, int]           # 商品组统计
+
+class BrandStats(BaseModel):
+    """品牌统计响应模型"""
+    brands: Dict[str, int]                  # 品牌统计
+    total_brands: int                       # 品牌总数
+    pagination: Dict[str, Any]              # 分页信息
+
+class ProductQueryRequest(BaseModel):
+    """商品查询请求模型"""
+    asin: str = Field(..., min_length=10, max_length=10, description="产品ASIN")
+    include_metadata: bool = Field(False, description="是否包含元数据")
+    include_browse_nodes: Optional[List[str]] = Field(None, description="要包含的浏览节点ID列表，为空则包含所有节点")
 
 def get_db():
     """
@@ -239,7 +263,7 @@ async def health_check():
     }
 
 # 爬虫任务相关API
-@app.post("/api/crawl", response_model=CrawlerResponse)
+@app.post("/api/crawl", response_model=CrawlerResponse, include_in_schema=False)
 async def start_crawler(params: CrawlerRequest, background_tasks: BackgroundTasks):
     """启动爬虫任务"""
     task_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -260,7 +284,7 @@ async def start_crawler(params: CrawlerRequest, background_tasks: BackgroundTask
         timestamp=datetime.now()
     )
 
-@app.get("/api/status/{task_id}", response_model=CrawlerResult)
+@app.get("/api/status/{task_id}", response_model=CrawlerResult, include_in_schema=False)
 async def get_task_status(task_id: str):
     """获取任务状态"""
     if task_id not in tasks_status:
@@ -283,7 +307,7 @@ async def get_task_status(task_id: str):
         timestamp=task_info["timestamp"]
     )
 
-@app.get("/api/download/{task_id}")
+@app.get("/api/download/{task_id}", include_in_schema=False)
 async def download_results(task_id: str):
     """下载爬虫结果"""
     if task_id not in tasks_status:
@@ -319,7 +343,8 @@ async def list_discount_products(
     min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例"),
     browse_node_ids: Optional[List[str]] = Query(None, description="Browse Node IDs"),
     bindings: Optional[List[str]] = Query(None, description="商品绑定类型"),
-    product_groups: Optional[List[str]] = Query(None, description="商品组")
+    product_groups: Optional[List[str]] = Query(None, description="商品组"),
+    brands: Optional[List[str]] = Query(None, description="品牌")
 ):
     """获取折扣商品列表"""
     try:
@@ -337,7 +362,8 @@ async def list_discount_products(
             min_commission=min_commission,
             browse_node_ids=browse_node_ids,
             bindings=bindings,
-            product_groups=product_groups
+            product_groups=product_groups,
+            brands=brands
         )
         return result
     except Exception as e:
@@ -365,7 +391,8 @@ async def list_coupon_products(
     min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例"),
     browse_node_ids: Optional[List[str]] = Query(None, description="Browse Node IDs"),
     bindings: Optional[List[str]] = Query(None, description="商品绑定类型"),
-    product_groups: Optional[List[str]] = Query(None, description="商品组")
+    product_groups: Optional[List[str]] = Query(None, description="商品组"),
+    brands: Optional[List[str]] = Query(None, description="品牌")
 ):
     """获取优惠券商品列表"""
     try:
@@ -384,7 +411,8 @@ async def list_coupon_products(
             min_commission=min_commission,
             browse_node_ids=browse_node_ids,
             bindings=bindings,
-            product_groups=product_groups
+            product_groups=product_groups,
+            brands=brands
         )
         return products
     except Exception as e:
@@ -412,7 +440,8 @@ async def list_products(
     bindings: Optional[Union[List[str], str]] = Query(None, description="商品绑定类型，支持数组或逗号分隔的字符串"),
     product_groups: Optional[Union[List[str], str]] = Query(None, description="商品组，支持数组或逗号分隔的字符串"),
     api_provider: Optional[str] = Query(None, description="数据来源：pa-api/cj-api/all"),
-    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例")
+    min_commission: Optional[int] = Query(None, ge=0, le=100, description="最低佣金比例"),
+    brands: Optional[Union[List[str], str]] = Query(None, description="品牌，支持数组或逗号分隔的字符串")
 ):
     """获取商品列表，支持分页、筛选和排序"""
     try:
@@ -466,6 +495,22 @@ async def list_products(
                     else:
                         node_list.append(str(node_id).strip())
             logger.info(f"处理后的node_list: {node_list}")
+            
+        # 处理brands参数
+        brand_list = None
+        if brands:
+            if isinstance(brands, str):
+                # 处理逗号分隔的字符串
+                brand_list = [b.strip() for b in brands.split(",") if b.strip()]
+            elif isinstance(brands, list):
+                # 处理数组形式，并处理每个元素中可能的逗号分隔
+                brand_list = []
+                for brand in brands:
+                    if isinstance(brand, str) and ',' in brand:
+                        brand_list.extend([b.strip() for b in brand.split(",") if b.strip()])
+                    else:
+                        brand_list.append(str(brand).strip())
+            logger.info(f"处理后的brand_list: {brand_list}")
 
         result = ProductService.list_products(
             db=db,
@@ -482,7 +527,8 @@ async def list_products(
             bindings=binding_list,
             product_groups=group_list,
             source=api_provider,
-            min_commission=min_commission
+            min_commission=min_commission,
+            brands=brand_list
         )
         return result
     except Exception as e:
@@ -494,7 +540,7 @@ async def list_products(
             "page_size": page_size
         }
 
-@app.post("/api/products/batch-delete")
+@app.post("/api/products/batch-delete", include_in_schema=False)
 async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depends(get_db)):
     """批量删除商品"""
     try:
@@ -514,7 +560,7 @@ async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depen
             detail=f"批量删除失败: {str(e)}"
         )
 
-@app.post("/api/products/save")
+@app.post("/api/products/save", include_in_schema=False)
 async def save_products(request: ProductRequest, output_file: str):
     """保存商品信息到文件"""
     try:
@@ -610,8 +656,38 @@ async def get_product(
             detail=f"获取产品信息失败: {str(e)}"
         )
 
+@app.post("/api/products/query", response_model=ProductInfo)
+async def query_product(
+    request: ProductQueryRequest,
+    db: Session = Depends(get_db)
+):
+    """通过ASIN查询商品详细信息，支持自定义返回内容"""
+    try:
+        product = ProductService.get_product_details_by_asin(
+            db, 
+            request.asin,
+            include_metadata=request.include_metadata,
+            include_browse_nodes=request.include_browse_nodes
+        )
+        
+        if not product:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到ASIN为 {request.asin} 的产品"
+            )
+            
+        return product
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取产品信息失败: {str(e)}"
+        )
+
 # 缓存管理相关API
-@app.get("/api/cache/stats")
+@app.get("/api/cache/stats", include_in_schema=False)
 async def get_cache_stats():
     """获取缓存统计信息"""
     try:
@@ -658,7 +734,7 @@ async def get_cache_stats():
             }
         )
 
-@app.post("/api/cache/clear")
+@app.post("/api/cache/clear", include_in_schema=False)
 async def clear_cache():
     """清理过期缓存"""
     try:
@@ -671,7 +747,7 @@ async def clear_cache():
             detail=f"清理缓存失败: {str(e)}"
         )
 
-@app.post("/api/cache/clear-all")
+@app.post("/api/cache/clear-all", include_in_schema=False)
 async def clear_all_cache():
     """清理所有缓存"""
     try:
@@ -685,7 +761,7 @@ async def clear_all_cache():
         )
 
 # 调度器相关API
-@app.post("/api/scheduler/jobs")
+@app.post("/api/scheduler/jobs", include_in_schema=False)
 async def add_job(job_config: JobConfig):
     """添加新的定时任务"""
     try:
@@ -695,7 +771,7 @@ async def add_job(job_config: JobConfig):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/api/scheduler/jobs", response_model=List[JobStatus])
+@app.get("/api/scheduler/jobs", response_model=List[JobStatus], include_in_schema=False)
 async def list_jobs():
     """获取所有定时任务"""
     try:
@@ -711,7 +787,7 @@ async def list_jobs():
             detail=f"获取任务列表失败: {str(e)}"
         )
 
-@app.delete("/api/scheduler/jobs/{job_id}")
+@app.delete("/api/scheduler/jobs/{job_id}", include_in_schema=False)
 async def delete_job(job_id: str):
     """删除定时任务"""
     try:
@@ -721,7 +797,7 @@ async def delete_job(job_id: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/api/scheduler/jobs/{job_id}/pause")
+@app.post("/api/scheduler/jobs/{job_id}/pause", include_in_schema=False)
 async def pause_job(job_id: str):
     """暂停任务"""
     try:
@@ -737,7 +813,7 @@ async def pause_job(job_id: str):
             detail=str(e)
         )
 
-@app.post("/api/scheduler/jobs/{job_id}/resume")
+@app.post("/api/scheduler/jobs/{job_id}/resume", include_in_schema=False)
 async def resume_job(job_id: str):
     """恢复任务"""
     try:
@@ -753,7 +829,7 @@ async def resume_job(job_id: str):
             detail=str(e)
         )
 
-@app.get("/api/scheduler/jobs/{job_id}/history", response_model=List[JobHistory])
+@app.get("/api/scheduler/jobs/{job_id}/history", response_model=List[JobHistory], include_in_schema=False)
 async def get_job_history(job_id: str):
     """获取任务执行历史"""
     try:
@@ -762,7 +838,7 @@ async def get_job_history(job_id: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/api/scheduler/status", response_model=SchedulerStatus)
+@app.get("/api/scheduler/status", response_model=SchedulerStatus, include_in_schema=False)
 async def get_scheduler_status():
     """获取调度器状态"""
     try:
@@ -771,7 +847,7 @@ async def get_scheduler_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/scheduler/start")
+@app.post("/api/scheduler/start", include_in_schema=False)
 async def start_scheduler():
     """启动调度器"""
     try:
@@ -781,7 +857,7 @@ async def start_scheduler():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/scheduler/stop")
+@app.post("/api/scheduler/stop", include_in_schema=False)
 async def stop_scheduler():
     """停止调度器"""
     try:
@@ -791,7 +867,7 @@ async def stop_scheduler():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/scheduler/reload")
+@app.post("/api/scheduler/reload", include_in_schema=False)
 async def reload_scheduler():
     """重新加载调度器"""
     try:
@@ -801,7 +877,7 @@ async def reload_scheduler():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/scheduler/timezone")
+@app.post("/api/scheduler/timezone", include_in_schema=False)
 async def update_timezone(timezone_update: TimezoneUpdate):
     """更新调度器时区
     
@@ -826,7 +902,7 @@ async def update_timezone(timezone_update: TimezoneUpdate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/scheduler/jobs/{job_id}/execute")
+@app.post("/api/scheduler/jobs/{job_id}/execute", include_in_schema=False)
 async def execute_job_now(job_id: str):
     """立即执行任务
     
@@ -849,20 +925,134 @@ async def execute_job_now(job_id: str):
             detail=str(e)
         )
 
-@app.get("/api/categories/stats", response_model=CategoryStats)
+@app.get("/api/categories/stats", response_model=CategoryStats, include_in_schema=False)
 async def get_category_stats(
     product_type: Optional[str] = Query(None, description="商品类型: discount/coupon"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(50, ge=1, le=200, description="每页数量"),
+    sort_by: str = Query("count", description="排序字段: group/count"),
+    sort_order: str = Query("desc", description="排序方向: asc/desc"),
     db: Session = Depends(get_db)
 ):
     """获取类别统计信息"""
     try:
-        stats = ProductService.get_category_stats(db, product_type)
+        stats = ProductService.get_category_stats(
+            db, 
+            product_type=product_type,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
         return CategoryStats(**stats)
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"获取类别统计信息失败: {str(e)}"
         )
+
+@app.post("/api/categories/stats/clear-cache", include_in_schema=False)
+async def clear_category_stats_cache():
+    """清空类别统计缓存"""
+    try:
+        result = ProductService.clear_category_stats_cache()
+        return JSONResponse(
+            content={"status": "success", "message": "类别统计缓存已清空", "result": result},
+            status_code=200
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清空类别统计缓存失败: {str(e)}"
+        )
+
+@app.get("/api/brands/stats", response_model=BrandStats)
+async def get_brand_stats(
+    product_type: Optional[str] = Query(None, description="商品类型: discount/coupon"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(50, ge=1, le=200, description="每页数量"),
+    sort_by: str = Query("count", description="排序字段: brand/count"),
+    sort_order: str = Query("desc", description="排序方向: asc/desc"),
+    db: Session = Depends(get_db)
+):
+    """获取品牌统计信息"""
+    try:
+        stats = ProductService.get_brand_stats(
+            db, 
+            product_type=product_type,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
+        return BrandStats(**stats)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取品牌统计信息失败: {str(e)}"
+        )
+
+@app.post("/api/brands/stats/clear-cache", include_in_schema=False)
+async def clear_brand_stats_cache():
+    """清空品牌统计缓存"""
+    try:
+        result = ProductService.clear_brand_stats_cache()
+        return JSONResponse(
+            content={"status": "success", "message": "品牌统计缓存已清空", "result": result},
+            status_code=200
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"清空品牌统计缓存失败: {str(e)}"
+        )
+
+@app.get("/api/search/products")
+async def search_products(
+    keyword: str = Query(..., description="搜索关键词"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    sort_by: Optional[str] = Query("relevance", description="排序字段：relevance/price/discount/created"),
+    sort_order: str = Query("desc", description="排序方向：asc/desc"),
+    min_price: Optional[float] = Query(None, ge=0, description="最低价格"),
+    max_price: Optional[float] = Query(None, ge=0, description="最高价格"),
+    min_discount: Optional[int] = Query(None, ge=0, le=100, description="最低折扣率"),
+    is_prime_only: bool = Query(False, description="是否只显示Prime商品"),
+    product_groups: Optional[str] = Query(None, description="商品分类，逗号分隔"),
+    brands: Optional[str] = Query(None, description="品牌，逗号分隔"),
+    api_provider: Optional[str] = Query(None, description="数据来源：pa-api/cj-api"),
+    db: Session = Depends(get_db)
+):
+    """根据关键词搜索产品"""
+    try:
+        result = ProductService.search_products(
+            db=db,
+            keyword=keyword,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            min_price=min_price,
+            max_price=max_price,
+            min_discount=min_discount,
+            is_prime_only=is_prime_only,
+            product_groups=product_groups,
+            brands=brands,
+            api_provider=api_provider
+        )
+        return result
+    except Exception as e:
+        logger.error(f"搜索产品失败: {str(e)}")
+        return {
+            "success": False,
+            "data": {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size
+            },
+            "error": str(e)
+        }
 
 @app.post("/api/cj/check-products")
 async def check_cj_products(request: ProductRequest):
@@ -905,14 +1095,6 @@ async def generate_cj_link(asin: str = Path(..., description="商品ASIN")):
             status_code=500,
             detail=f"生成推广链接失败: {str(e)}"
         )
-
-@app.on_event("startup")
-def startup_event():
-    """应用启动时的初始化操作"""
-    # 创建并启动调度器
-    scheduler_manager = SchedulerManager()
-    scheduler_manager.start()
-    logger.info("调度器已启动")
 
 if __name__ == "__main__":
     """
