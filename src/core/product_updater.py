@@ -40,6 +40,7 @@ from src.core.amazon_product_api import AmazonProductAPI
 from src.core.cj_api_client import CJAPIClient
 from models.database import SessionLocal, Product
 from models.product import ProductInfo, ProductOffer
+from models.product_service import ProductService
 from src.utils.logger_manager import (
     log_info, log_debug, log_warning, 
     log_error, log_success, log_progress,
@@ -485,6 +486,50 @@ class ProductUpdater:
             task_logger.info("=" * 50)  # 添加分隔线
             return False
     
+    async def process_batch_pa_api(self, asins: List[str]) -> Dict[str, ProductInfo]:
+        """批量处理PA-API请求
+        
+        将ASIN列表分批处理，每批最多10个ASIN，减少API请求次数
+        
+        Args:
+            asins: ASIN列表
+            
+        Returns:
+            Dict[str, ProductInfo]: ASIN到商品信息的映射
+        """
+        batch_logger = TaskLoggerAdapter(self.logger.logger, {'task_id': f'PA-API-BATCH'})
+        results = {}
+        
+        # 将ASIN列表分成每组10个的批次
+        batch_size = 10
+        for i in range(0, len(asins), batch_size):
+            batch_asins = asins[i:i + batch_size]
+            batch_logger.info(f"处理PA-API批次 {i//batch_size + 1}, ASINs: {', '.join(batch_asins)}")
+            
+            try:
+                products = await self.amazon_api.get_products_by_asins(batch_asins)
+                if products:
+                    for product in products:
+                        results[product.asin] = product
+                    batch_logger.info(f"批次处理成功，获取到 {len(products)} 个商品信息")
+            except Exception as e:
+                batch_logger.error(f"批次处理失败: {str(e)}")
+                # 如果批处理失败，尝试单个处理
+                batch_logger.info("尝试单个处理失败的ASINs")
+                for asin in batch_asins:
+                    try:
+                        products = await self.amazon_api.get_products_by_asins([asin])
+                        if products and len(products) > 0:
+                            results[asin] = products[0]
+                            batch_logger.info(f"单个处理成功: {asin}")
+                    except Exception as e:
+                        batch_logger.error(f"单个处理失败 {asin}: {str(e)}")
+            
+            # 添加短暂延迟，避免请求过于频繁
+            await asyncio.sleep(0.5)
+        
+        return results
+
     async def update_batch(
         self,
         asins: List[str],
@@ -496,15 +541,12 @@ class ProductUpdater:
             await self.initialize_clients()
         
         batch_logger = TaskLoggerAdapter(self.logger.logger, {'task_id': f'BATCH:{len(asins)}'})
-        
         batch_logger.info(f"开始批量更新 {len(asins)} 个商品")
-        batch_logger.info("=" * 50)  # 添加分隔线
+        batch_logger.info("=" * 50)
         
         # 获取商品记录
         with SessionLocal() as db:
             products = db.query(Product).filter(Product.asin.in_(asins)).all()
-            
-            # 创建ASIN到Product的映射
             asin_to_product = {product.asin: product for product in products}
             
             # 找出不存在的ASIN
@@ -512,32 +554,76 @@ class ProductUpdater:
             if missing_asins:
                 batch_logger.warning(f"数据库中不存在的ASIN: {', '.join(missing_asins)}")
         
-        # 按批次处理
-        total = len(products)
+        # 首先批量检查CJ平台可用性
+        try:
+            batch_logger.info("批量检查CJ平台可用性")
+            cj_availability = await self.cj_client.check_products_availability(asins)
+            batch_logger.info(f"CJ平台检查完成，{sum(cj_availability.values())}个商品可用")
+        except Exception as e:
+            batch_logger.error(f"CJ平台批量检查失败: {str(e)}")
+            cj_availability = {asin: False for asin in asins}
+        
+        # 批量获取PA-API数据
+        batch_logger.info("开始批量获取PA-API数据")
+        pa_api_results = await self.process_batch_pa_api(asins)
+        batch_logger.info(f"PA-API数据获取完成，成功获取{len(pa_api_results)}个商品信息")
+        
+        # 处理每个商品
         success_count = 0
+        total = len(products)
         
-        # 使用asyncio.Semaphore限制并发数量
-        semaphore = asyncio.Semaphore(self.config.parallel_requests)
-        
-        async def update_with_semaphore(product):
-            async with semaphore:
-                return await self.process_product_update(product, force_update)
-        
-        # 创建任务列表
-        tasks = [update_with_semaphore(product) for product in products]
-        
-        # 等待所有任务完成
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 统计成功数量
-        for result in results:
-            if isinstance(result, bool) and result:
-                success_count += 1
-            elif isinstance(result, Exception):
-                batch_logger.error(f"批量更新中发生异常: {str(result)}")
+        for product in products:
+            asin = product.asin
+            task_logger = TaskLoggerAdapter(self.logger.logger, {'task_id': f'ASIN:{asin}'})
+            
+            try:
+                # 检查是否需要更新
+                if not force_update and not self._should_update(product):
+                    task_logger.info("无需更新 - 未达到更新间隔")
+                    continue
+                
+                # 获取PA-API数据
+                product_info = pa_api_results.get(asin)
+                if not product_info:
+                    task_logger.warning("无法获取PA-API数据")
+                    continue
+                
+                # 处理CJ平台数据
+                cj_available = cj_availability.get(asin, False)
+                if cj_available:
+                    try:
+                        task_logger.info("获取CJ商品数据")
+                        cj_product = await self.cj_client.get_product_details(asin)
+                        cj_url = await self.cj_client.generate_product_link(asin)
+                        
+                        if cj_product and isinstance(cj_product, dict):
+                            task_logger.info("更新CJ相关数据")
+                            product_info.api_provider = "cj-api"
+                            product_info.cj_url = cj_url
+                            # ... 现有的CJ数据处理代码 ...
+                    except Exception as e:
+                        task_logger.error(f"CJ数据处理失败: {str(e)}")
+                
+                # 更新数据库
+                with SessionLocal() as db:
+                    try:
+                        task_logger.info("更新数据库记录")
+                        updated_product = ProductService.update_product(db, product_info)
+                        if updated_product:
+                            success_count += 1
+                            task_logger.info("数据库更新成功")
+                        else:
+                            task_logger.warning("数据库更新失败")
+                    except Exception as e:
+                        task_logger.error(f"数据库更新错误: {str(e)}")
+                
+            except Exception as e:
+                task_logger.error(f"处理失败: {str(e)}")
+            
+            task_logger.info("=" * 50)
         
         batch_logger.info(f"批量更新完成: 成功 {success_count}/{total}")
-        batch_logger.info("=" * 50)  # 添加分隔线
+        batch_logger.info("=" * 50)
         return success_count, total
     
     async def run_scheduled_update(self, batch_size: Optional[int] = None) -> Tuple[int, int]:
@@ -586,7 +672,7 @@ async def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=10,
+        default=100,
         help="批处理大小"
     )
     
