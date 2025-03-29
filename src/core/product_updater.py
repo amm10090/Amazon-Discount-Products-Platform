@@ -305,7 +305,7 @@ class ProductUpdater:
         """获取需要更新的商品列表"""
         log_info = TaskLoggerAdapter(self.logger.logger, {'task_id': 'QUERY'})
         
-        # 首先获取价格为0的商品
+        # 首先获取所有价格为0的商品
         urgent_products = db.query(Product).filter(Product.current_price == 0).all()
         urgent_count = len(urgent_products)
         
@@ -316,30 +316,24 @@ class ProductUpdater:
             for product in urgent_products:
                 log_info.info(f"- {product.asin} | 标题: {product.title[:50]}...")
         
-        if urgent_count >= limit:
-            # 如果紧急商品数量已经达到限制，只返回紧急商品
-            log_info.info(f"紧急更新商品数量({urgent_count})已达到限制({limit})")
-            return urgent_products[:limit]
+        # 如果有紧急商品，直接返回所有紧急商品，不考虑limit限制
+        if urgent_count > 0:
+            log_info.info(f"返回所有需要紧急更新的商品 ({urgent_count}个)")
+            return urgent_products
         
-        # 查询其他需要更新的商品
-        remaining_limit = limit - urgent_count
+        # 如果没有紧急商品，查询常规需要更新的商品
         regular_products = []
-        
-        # 查询所有非紧急商品
         products = db.query(Product).filter(Product.current_price != 0).all()
         
         # 筛选需要更新的商品
         for product in products:
             if self._should_update(product):
                 regular_products.append(product)
-                if len(regular_products) >= remaining_limit:
+                if len(regular_products) >= limit:
                     break
         
-        # 合并紧急商品和常规商品
-        to_update = urgent_products + regular_products
-        log_info.info(f"总计需要更新 {len(to_update)} 个商品（其中紧急更新：{urgent_count}个，常规更新：{len(regular_products)}个）")
-        
-        return to_update
+        log_info.info(f"找到 {len(regular_products)} 个常规商品需要更新")
+        return regular_products
         
     async def process_product_update(
         self,
@@ -623,6 +617,15 @@ class ProductUpdater:
             task_logger.info("=" * 50)
         
         batch_logger.info(f"批量更新完成: 成功 {success_count}/{total}")
+        
+        # 检查剩余的紧急更新商品
+        with SessionLocal() as db:
+            remaining_urgent = db.query(Product).filter(Product.current_price == 0).count()
+            if remaining_urgent > 0:
+                batch_logger.warning(f"注意：系统中还有 {remaining_urgent} 个商品价格为0，需要紧急更新")
+            else:
+                batch_logger.info("当前没有需要紧急更新的商品")
+        
         batch_logger.info("=" * 50)
         return success_count, total
     
@@ -654,7 +657,19 @@ class ProductUpdater:
             asins = [product.asin for product in products_to_update]
         
         # 执行批量更新
-        return await self.update_batch(asins)
+        success_count, total = await self.update_batch(asins)
+        
+        # 检查剩余的紧急更新商品
+        with SessionLocal() as db:
+            remaining_urgent = db.query(Product).filter(Product.current_price == 0).count()
+            if remaining_urgent > 0:
+                schedule_logger.warning(f"计划更新完成后，系统中还有 {remaining_urgent} 个商品价格为0，需要紧急更新")
+                schedule_logger.warning("建议增加更新频率或批量大小")
+            else:
+                schedule_logger.info("系统中没有需要紧急更新的商品")
+        
+        schedule_logger.info("=" * 50)
+        return success_count, total
 
 # 用于CLI运行
 async def main():
