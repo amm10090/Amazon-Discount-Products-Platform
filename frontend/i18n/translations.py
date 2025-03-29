@@ -197,6 +197,8 @@ TRANSLATIONS = {
         "status_completed": "已完成",
         "status_failed": "失败",
         "status_paused": "已暂停",
+        "not_finished": "未完成",
+        "running": "运行中",
         
         # 爬虫类型
         "crawler_bestseller": "畅销商品",
@@ -569,6 +571,8 @@ TRANSLATIONS = {
         "status_completed": "Completed",
         "status_failed": "Failed",
         "status_paused": "Paused",
+        "not_finished": "Not Finished",
+        "running": "Running",
         
         # Crawler Types
         "crawler_bestseller": "Bestsellers",

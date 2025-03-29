@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import pytz
 from frontend.i18n.language import init_language, get_text
 import pandas as pd
@@ -679,10 +679,17 @@ def main():
                         )
                         
                         # 添加持续时间列
-                        history_df['duration'] = (history_df['end_time'] - history_df['start_time']).dt.total_seconds().round().astype(int)
-                        history_df['duration'] = history_df['duration'].apply(
-                            lambda x: f"{x} {get_text('seconds')}"
-                        )
+                        def calculate_duration(row):
+                            if pd.isna(row['end_time']):
+                                if row['status'] == get_text('status_running'):
+                                    # 如果任务正在运行，计算从开始到现在的时间
+                                    duration = (datetime.now(UTC) - row['start_time']).total_seconds()
+                                    return f"{int(duration)} {get_text('seconds')} ({get_text('running')})"
+                                return get_text('not_finished')
+                            duration = (row['end_time'] - row['start_time']).total_seconds()
+                            return f"{int(duration)} {get_text('seconds')}"
+                        
+                        history_df['duration'] = history_df.apply(calculate_duration, axis=1)
                         
                         st.dataframe(
                             history_df[[
