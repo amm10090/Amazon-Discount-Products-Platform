@@ -28,7 +28,7 @@ from sqlalchemy import or_, and_
 from fastapi.responses import FileResponse, JSONResponse
 from models.crawler import CrawlerRequest, CrawlerResponse, CrawlerResult
 from models.product import ProductInfo, ProductOffer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from models.database import SessionLocal, init_db, Product, ProductVariant
@@ -154,9 +154,18 @@ class BrandStats(BaseModel):
 
 class ProductQueryRequest(BaseModel):
     """商品查询请求模型"""
-    asin: str = Field(..., min_length=10, max_length=10, description="产品ASIN")
+    asins: List[str] = Field(..., min_items=1, max_items=50, description="产品ASIN列表,最多50个")
     include_metadata: bool = Field(False, description="是否包含元数据")
     include_browse_nodes: Optional[List[str]] = Field(None, description="要包含的浏览节点ID列表，为空则包含所有节点")
+
+    @field_validator('asins')
+    @classmethod
+    def validate_asins(cls, v):
+        """验证每个ASIN的格式"""
+        for asin in v:
+            if not isinstance(asin, str) or len(asin) != 10:
+                raise ValueError(f"无效的ASIN格式: {asin}")
+        return v
 
 def get_db():
     """
@@ -656,34 +665,56 @@ async def get_product(
             detail=f"获取产品信息失败: {str(e)}"
         )
 
-@app.post("/api/products/query", response_model=ProductInfo)
+@app.post("/api/products/query", response_model=Union[ProductInfo, List[Optional[ProductInfo]]])
 async def query_product(
     request: ProductQueryRequest,
     db: Session = Depends(get_db)
 ):
-    """通过ASIN查询商品详细信息，支持自定义返回内容"""
+    """通过ASIN查询商品详细信息，支持批量查询
+    
+    Args:
+        request: 包含ASIN列表和查询选项的请求对象
+        db: 数据库会话
+        
+    Returns:
+        单个ASIN时返回单个ProductInfo对象
+        ASIN列表时返回ProductInfo对象列表，未找到的项为None
+        
+    Raises:
+        HTTPException: 当查询失败时抛出
+    """
     try:
-        product = ProductService.get_product_details_by_asin(
+        products = ProductService.get_product_details_by_asin(
             db, 
-            request.asin,
+            request.asins,
             include_metadata=request.include_metadata,
             include_browse_nodes=request.include_browse_nodes
         )
         
-        if not product:
+        if not products:
             raise HTTPException(
                 status_code=404,
-                detail=f"未找到ASIN为 {request.asin} 的产品"
+                detail="未找到任何商品"
             )
             
-        return product
+        # 如果是单个ASIN的查询，直接返回结果
+        if isinstance(request.asins, str):
+            if products is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"未找到ASIN为 {request.asins} 的商品"
+                )
+            return products
+            
+        # 如果是批量查询，返回结果列表
+        return products
         
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"获取产品信息失败: {str(e)}"
+            detail=f"获取商品信息失败: {str(e)}"
         )
 
 # 缓存管理相关API

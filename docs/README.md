@@ -5,6 +5,7 @@
 ## 可用API文档
 
 - [产品搜索API](./product_search_api.md) - 通过关键词搜索产品
+- [商品查询API](./product_query_api.md) - 通过ASIN批量查询商品详情
 - 产品列表API - 获取折扣/优惠券商品列表
 - 产品详情API - 获取单个产品的详细信息
 - 品牌统计API - 获取品牌相关统计数据

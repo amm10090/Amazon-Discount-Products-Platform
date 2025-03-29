@@ -157,11 +157,136 @@ class ProductService:
     @staticmethod
     def get_product_details_by_asin(
         db: Session, 
-        asin: str, 
+        asins: Union[str, List[str]], 
+        include_metadata: bool = False,
+        include_browse_nodes: Optional[List[str]] = None
+    ) -> Union[Optional[ProductInfo], List[Optional[ProductInfo]]]:
+        """根据ASIN获取商品详细信息，支持单个或批量查询
+        
+        Args:
+            db: 数据库会话
+            asins: 单个ASIN字符串或ASIN列表
+            include_metadata: 是否包含元数据
+            include_browse_nodes: 要包含的浏览节点ID列表
+            
+        Returns:
+            单个ASIN时返回单个ProductInfo对象或None
+            ASIN列表时返回ProductInfo对象列表，未找到的项为None
+        """
+        try:
+            # 处理单个ASIN的情况
+            if isinstance(asins, str):
+                return ProductService._get_single_product_details(
+                    db, asins, include_metadata, include_browse_nodes
+                )
+            
+            # 处理ASIN列表的情况
+            products = db.query(Product).filter(Product.asin.in_(asins)).all()
+            product_dict = {p.asin: p for p in products}
+            
+            # 获取所有相关的优惠信息
+            offers = db.query(Offer).filter(Offer.product_id.in_(asins)).all()
+            offers_dict = {}
+            for offer in offers:
+                if offer.product_id not in offers_dict:
+                    offers_dict[offer.product_id] = []
+                offers_dict[offer.product_id].append(offer)
+            
+            # 构建结果列表
+            results = []
+            for asin in asins:
+                product = product_dict.get(asin)
+                if not product:
+                    results.append(None)
+                    continue
+                
+                try:
+                    # 解析JSON字符串
+                    categories = json.loads(product.categories) if product.categories else []
+                    browse_nodes = json.loads(product.browse_nodes) if product.browse_nodes else []
+                    features = json.loads(product.features) if product.features else []
+                    
+                    # 确保解析后的数据是列表类型
+                    if not isinstance(categories, list):
+                        categories = []
+                    if not isinstance(browse_nodes, list):
+                        browse_nodes = []
+                    if not isinstance(features, list):
+                        features = []
+                    
+                    # 如果提供了include_browse_nodes参数，进行筛选
+                    if include_browse_nodes:
+                        browse_nodes = [
+                            node for node in browse_nodes 
+                            if node.get('id') in include_browse_nodes
+                        ]
+                    
+                    # 获取商品的优惠信息
+                    product_offers = offers_dict.get(asin, [])
+                    
+                    # 构建商品信息对象
+                    product_info = ProductInfo(
+                        asin=product.asin,
+                        title=product.title,
+                        url=product.url,
+                        brand=product.brand,
+                        main_image=product.main_image,
+                        timestamp=product.timestamp or datetime.utcnow(),
+                        binding=product.binding,
+                        product_group=product.product_group,
+                        categories=categories,
+                        browse_nodes=browse_nodes,
+                        features=features,
+                        cj_url=product.cj_url if product.api_provider == "cj-api" else None,
+                        api_provider=product.api_provider,
+                        offers=[
+                            ProductOffer(
+                                condition=o.condition or "New",
+                                price=o.price or 0.0,
+                                currency=o.currency or "USD",
+                                savings=o.savings,
+                                savings_percentage=o.savings_percentage,
+                                is_prime=o.is_prime or False,
+                                availability=o.availability or "Available",
+                                merchant_name=o.merchant_name or "Amazon",
+                                is_buybox_winner=o.is_buybox_winner or False,
+                                deal_type=o.deal_type,
+                                coupon_type=getattr(o, 'coupon_type', None),
+                                coupon_value=getattr(o, 'coupon_value', None),
+                                commission=o.commission if hasattr(o, 'commission') and product.api_provider == "cj-api" else None
+                            ) for o in product_offers
+                        ]
+                    )
+                    
+                    # 添加元数据（如果需要）
+                    if include_metadata and product.raw_data:
+                        try:
+                            raw_data = json.loads(product.raw_data)
+                            product_info.raw_data = raw_data
+                        except:
+                            pass
+                        
+                    results.append(product_info)
+                    
+                except Exception as e:
+                    logger.error(f"处理商品 {asin} 时出错: {str(e)}")
+                    results.append(None)
+                    continue
+                
+            return results
+            
+        except Exception as e:
+            logger.error(f"获取商品详情时出错: {str(e)}")
+            raise e
+
+    @staticmethod
+    def _get_single_product_details(
+        db: Session, 
+        asin: str,
         include_metadata: bool = False,
         include_browse_nodes: Optional[List[str]] = None
     ) -> Optional[ProductInfo]:
-        """根据ASIN获取商品详细信息，支持自定义返回内容"""
+        """获取单个商品的详细信息(内部方法)"""
         try:
             product = db.query(Product).filter(Product.asin == asin).first()
             
@@ -227,8 +352,8 @@ class ProductService:
                         merchant_name=o.merchant_name or "Amazon",
                         is_buybox_winner=o.is_buybox_winner or False,
                         deal_type=o.deal_type,
-                        coupon_type=o.coupon_type if hasattr(o, 'coupon_type') else None,
-                        coupon_value=o.coupon_value if hasattr(o, 'coupon_value') else None,
+                        coupon_type=getattr(o, 'coupon_type', None),
+                        coupon_value=getattr(o, 'coupon_value', None),
                         commission=o.commission if hasattr(o, 'commission') and product.api_provider == "cj-api" else None
                     ) for o in offers
                 ]
@@ -238,7 +363,6 @@ class ProductService:
             if include_metadata and product.raw_data:
                 try:
                     raw_data = json.loads(product.raw_data)
-                    # 这里可以添加更多元数据处理逻辑
                     product_info.raw_data = raw_data
                 except:
                     pass
