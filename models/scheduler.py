@@ -11,6 +11,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from loguru import logger
 from pathlib import Path
+import logging
+from logging.handlers import RotatingFileHandler
 
 Base = declarative_base()
 
@@ -38,8 +40,9 @@ class SchedulerManager:
     _instance = None
     _initialized = False
     _scheduler = None
-    _db_path = None  # 将在初始化时设置
+    _db_path = None
     _timezone = os.getenv('SCHEDULER_TIMEZONE', 'Asia/Shanghai')
+    _logger = None  # 添加日志记录器引用
     
     def __new__(cls):
         if cls._instance is None:
@@ -48,6 +51,9 @@ class SchedulerManager:
     
     def __init__(self):
         if not self._initialized:
+            # 初始化日志记录器
+            self._setup_logger()
+            
             # 优先使用环境变量中的数据库路径
             if "SCHEDULER_DB_PATH" in os.environ:
                 db_file = os.environ["SCHEDULER_DB_PATH"]
@@ -61,6 +67,46 @@ class SchedulerManager:
             self._setup_database()
             self._init_scheduler()
             SchedulerManager._initialized = True
+            
+            self._logger.info("调度器管理器初始化完成")
+    
+    def _setup_logger(self):
+        """设置日志记录器"""
+        # 创建日志目录
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        
+        # 配置调度器专用日志
+        scheduler_log_file = log_dir / "scheduler.log"
+        
+        # 创建日志记录器
+        logger = logging.getLogger("SchedulerManager")
+        logger.setLevel(logging.INFO)
+        
+        # 移除现有的处理器
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # 创建文件处理器
+        file_handler = RotatingFileHandler(
+            scheduler_log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        
+        # 设置格式化器
+        formatter = logging.Formatter(
+            '%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        
+        # 添加处理器
+        logger.addHandler(file_handler)
+        
+        # 保存日志记录器引用
+        self._logger = logger
     
     def _setup_database(self):
         """设置数据库"""
@@ -94,7 +140,7 @@ class SchedulerManager:
         """执行爬虫任务
         
         Args:
-            crawler_type: 爬虫类型 (bestseller/coupon/all)
+            crawler_type: 爬虫类型 (bestseller/coupon/all/update)
             max_items: 最大采集数量
             
         Returns:
@@ -102,19 +148,13 @@ class SchedulerManager:
         """
         from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
         from src.core.amazon_product_api import AmazonProductAPI
+        from src.core.product_updater import ProductUpdater, UpdateConfiguration
         
         # 检查必要的环境变量
         required_env_vars = ["AMAZON_ACCESS_KEY", "AMAZON_SECRET_KEY", "AMAZON_PARTNER_TAG"]
         for var in required_env_vars:
             if not os.getenv(var):
                 raise ValueError(f"缺少必要的环境变量: {var}")
-        
-        # 初始化API客户端
-        api = AmazonProductAPI(
-            access_key=os.getenv("AMAZON_ACCESS_KEY"),
-            secret_key=os.getenv("AMAZON_SECRET_KEY"),
-            partner_tag=os.getenv("AMAZON_PARTNER_TAG")
-        )
         
         # 从环境变量读取配置参数
         config = Config(
@@ -124,9 +164,25 @@ class SchedulerManager:
             headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
         )
         
+        logger = logging.getLogger("SchedulerManager.Crawler")
+        
         logger.info(f"爬虫配置: {config}")
         
         try:
+            # 如果是更新任务，使用ProductUpdater
+            if crawler_type == "update":
+                updater = ProductUpdater()
+                await updater.initialize_clients()
+                success_count, total = await updater.run_scheduled_update(batch_size=max_items)
+                return success_count
+                
+            # 初始化API客户端
+            api = AmazonProductAPI(
+                access_key=os.getenv("AMAZON_ACCESS_KEY"),
+                secret_key=os.getenv("AMAZON_SECRET_KEY"),
+                partner_tag=os.getenv("AMAZON_PARTNER_TAG")
+            )
+            
             # 根据类型执行不同的爬虫
             if crawler_type == "bestseller":
                 return await crawl_bestseller_products(
@@ -174,7 +230,11 @@ class SchedulerManager:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         
+        logger = logging.getLogger("SchedulerManager.JobExecutor")
+        
         try:
+            logger.info(f"开始执行任务 {job_id}，类型：{crawler_type}，目标数量：{max_items}")
+            
             # 优先使用环境变量中的数据库路径
             if "SCHEDULER_DB_PATH" in os.environ:
                 db_file = os.environ["SCHEDULER_DB_PATH"]
@@ -203,7 +263,7 @@ class SchedulerManager:
             session.commit()
             
             try:
-                logger.info(f"开始执行爬虫任务: {crawler_type}, 目标数量: {max_items}")
+                logger.info(f"任务 {job_id} 开始执行爬虫")
                 
                 # 创建新的事件循环来运行异步任务
                 loop = asyncio.new_event_loop()
@@ -214,13 +274,12 @@ class SchedulerManager:
                     SchedulerManager._crawl_products(crawler_type, max_items)
                 )
                 
-                # 修改日志记录方式，直接使用返回的数量
-                logger.info(f"爬虫任务完成，收集到 {items_collected} 个商品")
+                logger.info(f"任务 {job_id} 执行完成，采集到 {items_collected} 个商品")
                 
                 # 更新历史记录
                 history.end_time = datetime.now()
                 history.status = 'completed'
-                history.items_collected = items_collected  # 直接使用返回的数量
+                history.items_collected = items_collected
                 history.result = f"成功收集 {items_collected} 个商品"
                 session.commit()
                 
@@ -228,10 +287,10 @@ class SchedulerManager:
                 loop.close()
                 
             except Exception as e:
-                logger.error(f"爬虫任务执行失败: {str(e)}")
+                logger.error(f"任务 {job_id} 执行失败: {str(e)}")
                 history.end_time = datetime.now()
                 history.status = 'failed'
-                history.result = f"执行失败: {str(e)}"
+                history.error = str(e)
                 session.commit()
                 raise
             
@@ -239,13 +298,15 @@ class SchedulerManager:
                 session.close()
                 
         except Exception as e:
-            logger.error(f"任务执行失败: {str(e)}")
+            logger.error(f"任务 {job_id} 执行过程中发生错误: {str(e)}")
             raise
 
     def add_job(self, job_config: Dict[str, Any]):
         """添加新任务"""
         job_id = job_config["id"]
         job_type = job_config["type"]
+        
+        self._logger.info(f"正在添加新任务：{job_id}，类型：{job_type}")
         
         # 创建触发器
         if job_type == "cron":
@@ -276,7 +337,7 @@ class SchedulerManager:
             replace_existing=True
         )
         
-        logger.info(f"已添加任务: {job_id}")
+        self._logger.info(f"成功添加任务：{job_id}")
     
     def get_jobs(self) -> List[Dict[str, Any]]:
         """获取所有任务"""
@@ -317,18 +378,33 @@ class SchedulerManager:
     
     def remove_job(self, job_id: str):
         """删除任务"""
-        self.scheduler.remove_job(job_id)
-        logger.info(f"已删除任务: {job_id}")
+        self._logger.info(f"正在删除任务：{job_id}")
+        try:
+            self.scheduler.remove_job(job_id)
+            self._logger.info(f"成功删除任务：{job_id}")
+        except Exception as e:
+            self._logger.error(f"删除任务 {job_id} 失败: {str(e)}")
+            raise
     
     def pause_job(self, job_id: str):
         """暂停任务"""
-        self.scheduler.pause_job(job_id)
-        logger.info(f"已暂停任务: {job_id}")
+        self._logger.info(f"正在暂停任务：{job_id}")
+        try:
+            self.scheduler.pause_job(job_id)
+            self._logger.info(f"成功暂停任务：{job_id}")
+        except Exception as e:
+            self._logger.error(f"暂停任务 {job_id} 失败: {str(e)}")
+            raise
     
     def resume_job(self, job_id: str):
         """恢复任务"""
-        self.scheduler.resume_job(job_id)
-        logger.info(f"已恢复任务: {job_id}")
+        self._logger.info(f"正在恢复任务：{job_id}")
+        try:
+            self.scheduler.resume_job(job_id)
+            self._logger.info(f"成功恢复任务：{job_id}")
+        except Exception as e:
+            self._logger.error(f"恢复任务 {job_id} 失败: {str(e)}")
+            raise
     
     def get_job_history(self, job_id: str) -> List[Dict[str, Any]]:
         """获取任务执行历史"""
@@ -425,21 +501,36 @@ class SchedulerManager:
     
     def start(self):
         """启动调度器"""
-        if not self.scheduler.running:
-            self.scheduler.start()
-            logger.info("调度器已启动")
+        self._logger.info("正在启动调度器")
+        try:
+            if not self.scheduler.running:
+                self.scheduler.start()
+                self._logger.info("调度器启动成功")
+        except Exception as e:
+            self._logger.error(f"启动调度器失败: {str(e)}")
+            raise
     
     def stop(self):
         """停止调度器"""
-        if self.scheduler.running:
-            self.scheduler.shutdown()
-            logger.info("调度器已停止")
+        self._logger.info("正在停止调度器")
+        try:
+            if self.scheduler.running:
+                self.scheduler.shutdown()
+                self._logger.info("调度器已停止")
+        except Exception as e:
+            self._logger.error(f"停止调度器失败: {str(e)}")
+            raise
     
     def reload(self):
         """重新加载调度器"""
-        self.stop()
-        self._init_scheduler()
-        logger.info("调度器已重新加载")
+        self._logger.info("正在重新加载调度器")
+        try:
+            self.stop()
+            self._init_scheduler()
+            self._logger.info("调度器重新加载完成")
+        except Exception as e:
+            self._logger.error(f"重新加载调度器失败: {str(e)}")
+            raise
 
     def execute_job_now(self, job_id: str):
         """立即执行任务
@@ -450,6 +541,7 @@ class SchedulerManager:
         Raises:
             ValueError: 任务不存在时抛出
         """
+        self._logger.info(f"正在立即执行任务：{job_id}")
         try:
             job = self.scheduler.get_job(job_id)
             if not job:
@@ -459,6 +551,8 @@ class SchedulerManager:
             crawler_type = job.args[1]
             max_items = job.args[2]
             
+            self._logger.info(f"开始执行任务 {job_id}，类型：{crawler_type}，目标数量：{max_items}")
+            
             # 在后台执行任务
             import threading
             thread = threading.Thread(
@@ -467,8 +561,8 @@ class SchedulerManager:
             )
             thread.start()
             
-            logger.info(f"已开始执行任务: {job_id}")
+            self._logger.info(f"任务 {job_id} 已在后台开始执行")
             
         except Exception as e:
-            logger.error(f"立即执行任务 {job_id} 失败: {str(e)}")
+            self._logger.error(f"立即执行任务 {job_id} 失败: {str(e)}")
             raise 

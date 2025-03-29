@@ -72,46 +72,92 @@ class ProductService:
         return db_product
     
     @staticmethod
-    def update_product(db: Session, product_info: ProductInfo, source: str = "pa-api") -> Optional[Product]:
-        """更新商品信息"""
-        db_product = db.query(Product).filter(Product.asin == product_info.asin).first()
-        if not db_product:
-            return None
+    def update_product(db: Session, product_info: ProductInfo, source: str = "update") -> Optional[Product]:
+        """
+        更新商品信息
+        
+        Args:
+            db: 数据库会话
+            product_info: 商品信息对象
+            source: 数据来源（已弃用，保留参数是为了兼容性）
             
-        best_offer = product_info.offers[0] if product_info.offers else None
-        
-        # 更新产品信息
-        db_product.title = product_info.title
-        db_product.url = product_info.url
-        db_product.brand = product_info.brand
-        db_product.main_image = product_info.main_image
-        
-        # 更新价格信息
-        if best_offer:
-            db_product.current_price = best_offer.price
-            db_product.original_price = best_offer.price + best_offer.savings if best_offer.savings else None
-            db_product.currency = best_offer.currency
-            db_product.savings_amount = best_offer.savings
-            db_product.savings_percentage = best_offer.savings_percentage
+        Returns:
+            Optional[Product]: 更新后的商品对象，如果失败则返回None
+        """
+        try:
+            # 查找现有商品
+            product = db.query(Product).filter(Product.asin == product_info.asin).first()
+            if not product:
+                return None
+                
+            # 准备更新数据
+            update_data = product_info.dict()
             
-            # 更新Prime信息
-            db_product.is_prime = best_offer.is_prime
+            # 确保raw_data是JSON字符串
+            if 'raw_data' in update_data and update_data['raw_data'] is not None:
+                if isinstance(update_data['raw_data'], dict):
+                    update_data['raw_data'] = json.dumps(update_data['raw_data'])
+                elif isinstance(update_data['raw_data'], str):
+                    # 验证是否为有效的JSON字符串
+                    try:
+                        json.loads(update_data['raw_data'])
+                    except json.JSONDecodeError:
+                        update_data['raw_data'] = json.dumps(update_data['raw_data'])
             
-            # 更新商品状态
-            db_product.condition = best_offer.condition
-            db_product.availability = best_offer.availability
-            db_product.merchant_name = best_offer.merchant_name
-            db_product.is_buybox_winner = best_offer.is_buybox_winner
-            db_product.deal_type = best_offer.deal_type
-        
-        # 更新元数据
-        db_product.updated_at = datetime.utcnow()
-        db_product.source = source
-        db_product.raw_data = product_info.dict()
-        
-        db.commit()
-        db.refresh(db_product)
-        return db_product
+            # 更新商品基本信息
+            product.title = update_data.get('title', product.title)
+            product.url = update_data.get('url', product.url)
+            product.brand = update_data.get('brand', product.brand)
+            product.main_image = update_data.get('main_image', product.main_image)
+            
+            # 更新CJ相关信息
+            if update_data.get('cj_url'):
+                product.cj_url = update_data['cj_url']
+            
+            # 更新价格信息
+            if update_data.get('offers'):
+                main_offer = update_data['offers'][0]
+                product.current_price = main_offer.get('price')
+                product.original_price = main_offer.get('price') + (main_offer.get('savings', 0) or 0)
+                product.currency = main_offer.get('currency', 'USD')
+                
+                # 更新Prime信息
+                product.is_prime = main_offer.get('is_prime', False)
+                
+                # 更新商品状态
+                product.condition = main_offer.get('condition', product.condition)
+                product.availability = main_offer.get('availability', product.availability)
+                product.merchant_name = main_offer.get('merchant_name', product.merchant_name)
+                product.is_buybox_winner = main_offer.get('is_buybox_winner', False)
+                
+                # 更新优惠类型
+                product.deal_type = main_offer.get('deal_type')
+            
+            # 更新分类信息
+            if update_data.get('categories'):
+                product.categories = json.dumps(update_data['categories'])
+            if update_data.get('browse_nodes'):
+                product.browse_nodes = json.dumps(update_data['browse_nodes'])
+            if update_data.get('features'):
+                product.features = json.dumps(update_data['features'])
+            
+            # 更新API提供者和原始数据
+            product.api_provider = update_data.get('api_provider', product.api_provider)
+            if 'raw_data' in update_data:
+                product.raw_data = update_data['raw_data']
+            
+            # 只更新时间戳，不更新source
+            product.updated_at = datetime.now()
+            
+            # 提交更改
+            db.commit()
+            db.refresh(product)
+            
+            return product
+            
+        except Exception as e:
+            db.rollback()
+            raise Exception(f"更新商品失败: {str(e)}")
     
     @staticmethod
     def get_product_by_asin(db: Session, asin: str) -> Optional[ProductInfo]:
@@ -253,7 +299,7 @@ class ProductService:
                                 deal_type=o.deal_type,
                                 coupon_type=getattr(o, 'coupon_type', None),
                                 coupon_value=getattr(o, 'coupon_value', None),
-                                commission=o.commission if hasattr(o, 'commission') and product.api_provider == "cj-api" else None
+                                commission=o.commission if product.api_provider == "cj-api" else None
                             ) for o in product_offers
                         ]
                     )
@@ -354,7 +400,7 @@ class ProductService:
                         deal_type=o.deal_type,
                         coupon_type=getattr(o, 'coupon_type', None),
                         coupon_value=getattr(o, 'coupon_value', None),
-                        commission=o.commission if hasattr(o, 'commission') and product.api_provider == "cj-api" else None
+                        commission=o.commission if product.api_provider == "cj-api" else None
                     ) for o in offers
                 ]
             )
@@ -391,9 +437,7 @@ class ProductService:
         db: Session, 
         products: List[ProductInfo], 
         include_coupon: bool = False,
-        include_cj_data: bool = False,
         source: Optional[str] = None,
-        api_provider: str = "pa-api",
         include_metadata: bool = False
     ) -> List[ProductInfo]:
         """批量创建或更新商品信息"""
@@ -457,17 +501,13 @@ class ProductService:
                         raw_data=raw_data,
                         
                         # CJ特有信息
-                        cj_url=product_info.cj_url if include_cj_data and hasattr(product_info, 'cj_url') else None
+                        cj_url=product_info.cj_url if hasattr(product_info, 'cj_url') else None
                     )
                     
                     # 添加分类相关信息
                     if include_metadata:
                         product.binding = product_info.binding
                         product.product_group = product_info.product_group
-                        
-                    # 添加CJ相关信息
-                    if include_cj_data and hasattr(product_info, 'cj_url'):
-                        product.cj_url = product_info.cj_url
                         
                     db.add(product)
                 else:
@@ -503,8 +543,8 @@ class ProductService:
                         product.binding = product_info.binding
                         product.product_group = product_info.product_group
                     
-                    # 更新CJ相关信息
-                    if include_cj_data and hasattr(product_info, 'cj_url'):
+                    # 更新CJ URL
+                    if hasattr(product_info, 'cj_url'):
                         product.cj_url = product_info.cj_url
                     
                     # 更新时间和元数据
@@ -512,7 +552,7 @@ class ProductService:
                     product.timestamp = current_time
                     if source:  # 只在明确指定source时更新
                         product.source = source
-                    product.api_provider = product_info.api_provider  # 使用ProductInfo对象中的api_provider
+                    product.api_provider = product_info.api_provider
                     product.raw_data = raw_data
                 
                 # 删除旧的优惠信息
@@ -520,10 +560,6 @@ class ProductService:
                 
                 # 添加新的优惠信息
                 for offer_info in product_info.offers:
-                    # 添加调试日志
-                    if hasattr(offer_info, 'commission'):
-                        logger.debug(f"处理商品 {product.asin} 的佣金信息: {offer_info.commission}")
-                        
                     offer = Offer(
                         product_id=product.asin,
                         condition=offer_info.condition,
@@ -542,10 +578,6 @@ class ProductService:
                         updated_at=current_time,
                         commission=offer_info.commission if hasattr(offer_info, 'commission') else None
                     )
-                    
-                    # 添加调试日志
-                    if offer.commission:
-                        logger.debug(f"已设置商品 {product.asin} 的佣金信息到数据库: {offer.commission}")
                     
                     # 如果包含优惠券信息，添加优惠券相关字段
                     if include_coupon and hasattr(offer_info, 'coupon_type') and hasattr(offer_info, 'coupon_value'):
@@ -567,18 +599,15 @@ class ProductService:
                 saved_products.append(product_info)
                 
             except Exception as e:
-                logger.error(f"处理商品时出错 {product_info.asin}: {str(e)}")
-                continue
+                raise Exception(f"处理商品时出错 {product_info.asin}: {str(e)}")
         
         try:
             # 提交事务
             db.commit()
+            return saved_products
         except Exception as e:
-            logger.error(f"提交事务时出错: {str(e)}")
             db.rollback()
-            raise
-        
-        return saved_products
+            raise Exception(f"提交事务时出错: {str(e)}")
 
     @staticmethod
     @lru_cache(maxsize=128)  # 设置缓存大小为128

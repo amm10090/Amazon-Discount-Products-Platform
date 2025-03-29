@@ -11,6 +11,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
 from models.scheduler import SchedulerManager
+from loguru import logger
 
 class ServiceManager:
     """服务管理器，用于管理FastAPI、Streamlit和调度器服务"""
@@ -82,6 +83,16 @@ class ServiceManager:
                 ),
                 logging.StreamHandler()
             ]
+        )
+        
+        # 配置collector日志
+        from src.utils.logger_manager import set_log_config
+        set_log_config(
+            log_level="INFO",
+            log_file=str(log_dir / "collector.log"),
+            use_colors=True,
+            max_file_size=10*1024*1024,
+            backup_count=5
         )
         
         # 设置其他模块的日志级别
@@ -276,7 +287,6 @@ class ServiceManager:
                 return False
             
             self.logger.info("\n服务启动完成!")
-            self.logger.info("按 Ctrl+C 停止服务\n")
             
             while True:
                 for process in self.processes[:]:

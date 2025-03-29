@@ -358,8 +358,29 @@ def format_datetime(dt: Union[str, datetime], timezone: Optional[str] = None) ->
     
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
+def format_duration(seconds: float) -> str:
+    """格式化持续时间
+    
+    Args:
+        seconds: 持续时间（秒）
+        
+    Returns:
+        str: 格式化后的持续时间字符串
+    """
+    if seconds < 60:
+        return f"{seconds:.2f} {get_text('seconds')}"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        return f"{minutes} {get_text('minutes')}"
+    else:
+        hours = int(seconds / 3600)
+        return f"{hours} {get_text('hours')}"
+
 def main():
     st.title("⏰ " + get_text("scheduler_title"))
+    
+    # 初始化状态变量
+    show_scheduler_stats = False
     
     # API地址
     api_url = f"http://{config['api']['host']}:{config['api']['port']}"
@@ -367,6 +388,20 @@ def main():
     # 获取调度器状态和当前时区
     scheduler_status = get_scheduler_status(api_url)
     current_timezone = scheduler_status.get('timezone', 'UTC')
+    
+    # 创建任务类型分类
+    task_categories = {
+        "crawler": {
+            "title": get_text("crawler_tasks"),
+            "types": ["bestseller", "coupon", "all"],
+            "icon": "🕷️"
+        },
+        "update": {
+            "title": get_text("update_tasks"),
+            "types": ["update"],
+            "icon": "🔄"
+        }
+    }
     
     # 添加新任务表单
     with st.form("add_job"):
@@ -386,11 +421,20 @@ def main():
                 help=get_text("job_type_help")
             )
             
-            crawler_type = st.selectbox(
-                get_text("crawler_type"),
-                options=["bestseller", "coupon", "all"],
+            # 先选择任务分类
+            task_category = st.selectbox(
+                get_text("task_category"),
+                options=list(task_categories.keys()),
+                format_func=lambda x: f"{task_categories[x]['icon']} {task_categories[x]['title']}",
+                help=get_text("task_category_help")
+            )
+            
+            # 根据分类显示具体任务类型
+            task_type = st.selectbox(
+                get_text("task_type"),
+                options=task_categories[task_category]["types"],
                 format_func=lambda x: get_text(f"crawler_{x}"),
-                help=get_text("crawler_type_help")
+                help=get_text("task_type_help")
             )
         
         with col2:
@@ -399,7 +443,8 @@ def main():
                 min_value=10,
                 max_value=1000,
                 value=100,
-                step=10
+                step=10,
+                help=get_text("max_items_help")
             )
             
             if job_type == "cron":
@@ -434,7 +479,7 @@ def main():
             job_config = {
                 "id": job_id,
                 "type": job_type,
-                "crawler_type": crawler_type,
+                "crawler_type": task_type,  # 使用选择的任务类型
                 "max_items": max_items
             }
             
@@ -456,21 +501,92 @@ def main():
     
     # 显示现有任务
     st.markdown("---")
+    
+    # 添加任务过滤选项
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        selected_category = st.selectbox(
+            get_text("filter_by_category"),
+            options=["all"] + list(task_categories.keys()),
+            format_func=lambda x: get_text("all_categories") if x == "all" else f"{task_categories[x]['icon']} {task_categories[x]['title']}"
+        )
+    
+    with col2:
+        status_filter = st.selectbox(
+            get_text("filter_by_status"),
+            options=["all", "running", "paused"],
+            format_func=lambda x: get_text(f"status_filter_{x}")
+        )
+    
+    with col3:
+        sort_by = st.selectbox(
+            get_text("sort_by"),
+            options=["next_run", "name", "type"],
+            format_func=lambda x: get_text(f"sort_by_{x}")
+        )
+    
     st.subheader(get_text("existing_jobs"))
     
     jobs = load_jobs(api_url)
     
+    # 应用过滤
+    if selected_category != "all":
+        jobs = [job for job in jobs if job['crawler_type'] in task_categories[selected_category]['types']]
+    
+    if status_filter != "all":
+        jobs = [job for job in jobs if (job.get('paused', False) and status_filter == "paused") or 
+                (not job.get('paused', False) and status_filter == "running")]
+    
+    # 应用排序
+    if sort_by == "next_run":
+        jobs.sort(key=lambda x: x.get('next_run_time', float('inf')), reverse=True)
+    elif sort_by == "name":
+        jobs.sort(key=lambda x: x['id'])
+    elif sort_by == "type":
+        jobs.sort(key=lambda x: x['crawler_type'])
+    
     if not jobs:
         st.info(get_text("no_jobs"))
     else:
+        # 添加批量操作按钮
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("▶️ " + get_text("resume_all")):
+                for job in jobs:
+                    if job.get('paused', False):
+                        resume_job(api_url, job['id'])
+                st.success(get_text("all_jobs_resumed"))
+                st.rerun()
+        
+        with col2:
+            if st.button("⏸️ " + get_text("pause_all")):
+                for job in jobs:
+                    if not job.get('paused', False):
+                        pause_job(api_url, job['id'])
+                st.success(get_text("all_jobs_paused"))
+                st.rerun()
+        
+        with col3:
+            if st.button("🗑️ " + get_text("delete_all")):
+                if st.warning(get_text("confirm_delete_all")):
+                    for job in jobs:
+                        delete_job(api_url, job['id'])
+                    st.success(get_text("all_jobs_deleted"))
+                    st.rerun()
+        
+        # 显示任务卡片
         for job in jobs:
             with st.container():
+                # 根据任务类型获取图标
+                task_icon = next((cat['icon'] for cat_name, cat in task_categories.items() 
+                                if job['crawler_type'] in cat['types']), "📋")
+                
                 col1, col2, col3 = st.columns([3, 2, 1])
                 
                 with col1:
-                    st.markdown(f"**{get_text('job_id')}:** {job['id']}")
+                    st.markdown(f"{task_icon} **{get_text('job_id')}:** {job['id']}")
                     st.markdown(
-                        f"**{get_text('crawler_type')}:** "
+                        f"**{get_text('task_type')}:** "
                         f"{get_text(f'crawler_{job['crawler_type']}')}"
                     )
                     st.markdown(f"**{get_text('max_items')}:** {job['max_items']}")
@@ -498,40 +614,49 @@ def main():
                         )
                 
                 with col3:
-                    # 暂停/恢复按钮
-                    if job.get('paused', False):
+                    # 任务控制按钮
+                    button_col1, button_col2 = st.columns(2)
+                    
+                    with button_col1:
+                        # 暂停/恢复按钮
+                        if job.get('paused', False):
+                            if st.button(
+                                "▶️",
+                                key=f"resume_{job['id']}",
+                                help=get_text("resume_help")
+                            ):
+                                if resume_job(api_url, job['id']):
+                                    st.success(get_text("job_resumed"))
+                                    st.rerun()
+                        else:
+                            if st.button(
+                                "⏸️",
+                                key=f"pause_{job['id']}",
+                                help=get_text("pause_help")
+                            ):
+                                if pause_job(api_url, job['id']):
+                                    st.success(get_text("job_paused"))
+                                    st.rerun()
+                    
+                    with button_col2:
+                        # 删除按钮
                         if st.button(
-                            "▶️ " + get_text("resume"),
-                            key=f"resume_{job['id']}"
+                            "🗑️",
+                            key=f"delete_{job['id']}",
+                            help=get_text("delete_help")
                         ):
-                            if resume_job(api_url, job['id']):
-                                st.success(get_text("job_resumed"))
-                                st.rerun()
-                    else:
-                        if st.button(
-                            "⏸️ " + get_text("pause"),
-                            key=f"pause_{job['id']}"
-                        ):
-                            if pause_job(api_url, job['id']):
-                                st.success(get_text("job_paused"))
+                            if delete_job(api_url, job['id']):
+                                st.success(get_text("job_deleted"))
                                 st.rerun()
                     
                     # 立即执行按钮
                     if st.button(
-                        "⚡ " + get_text("execute_now"),
-                        key=f"execute_{job['id']}"
+                        "⚡",
+                        key=f"execute_{job['id']}",
+                        help=get_text("execute_now_help")
                     ):
                         if execute_job(api_url, job['id']):
                             st.success(get_text("job_started"))
-                            st.rerun()
-                    
-                    # 删除按钮
-                    if st.button(
-                        "🗑️ " + get_text("delete"),
-                        key=f"delete_{job['id']}"
-                    ):
-                        if delete_job(api_url, job['id']):
-                            st.success(get_text("job_deleted"))
                             st.rerun()
                 
                 # 显示最近执行记录
@@ -553,10 +678,17 @@ def main():
                             lambda x: get_text(f"status_{x}")
                         )
                         
+                        # 添加持续时间列
+                        history_df['duration'] = (history_df['end_time'] - history_df['start_time']).dt.total_seconds().round().astype(int)
+                        history_df['duration'] = history_df['duration'].apply(
+                            lambda x: f"{x} {get_text('seconds')}"
+                        )
+                        
                         st.dataframe(
                             history_df[[
                                 'start_time',
                                 'end_time',
+                                'duration',
                                 'status',
                                 'items_collected',
                                 'error'
@@ -565,6 +697,7 @@ def main():
                             column_config={
                                 'start_time': get_text('start_time'),
                                 'end_time': get_text('end_time'),
+                                'duration': get_text('duration'),
                                 'status': get_text('status'),
                                 'items_collected': get_text('items_collected'),
                                 'error': get_text('error')
@@ -595,19 +728,10 @@ def main():
             )
         
         with col3:
-            # 显示当前时区并提供修改功能
-            new_timezone = st.selectbox(
-                get_text("timezone"),
-                options=COMMON_TIMEZONES + sorted(list(set(pytz.all_timezones) - set(COMMON_TIMEZONES))),
-                index=([*COMMON_TIMEZONES, *sorted(list(set(pytz.all_timezones) - set(COMMON_TIMEZONES)))].index(current_timezone)
-                      if current_timezone in pytz.all_timezones else 0)
+            st.metric(
+                get_text("scheduler_uptime"),
+                format_duration(scheduler_status.get('uptime', 0))
             )
-            
-            if new_timezone != current_timezone:
-                if st.button(get_text("update_timezone")):
-                    if update_timezone(api_url, new_timezone):
-                        st.success(get_text("timezone_updated"))
-                        st.rerun()
         
         # 调度器控制按钮
         col1, col2, col3 = st.columns(3)
@@ -629,6 +753,28 @@ def main():
                 if reload_scheduler(api_url):
                     st.success(get_text("scheduler_reloaded"))
                     st.rerun()
+        
+        with col3:
+            if st.button("📊 " + get_text("view_stats")):
+                st.session_state.show_scheduler_stats = not st.session_state.get('show_scheduler_stats', False)
+    
+    # 显示调度器统计信息
+    if st.session_state.get('show_scheduler_stats', False):
+        st.markdown("---")
+        st.subheader(get_text("scheduler_statistics"))
+        
+        # 这里可以添加更多统计信息的展示
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"**{get_text('total_executions')}:** {scheduler_status.get('total_executions', 0)}")
+            st.markdown(f"**{get_text('successful_executions')}:** {scheduler_status.get('successful_executions', 0)}")
+            st.markdown(f"**{get_text('failed_executions')}:** {scheduler_status.get('failed_executions', 0)}")
+        
+        with col2:
+            st.markdown(f"**{get_text('avg_execution_time')}:** {format_duration(scheduler_status.get('avg_execution_time', 0))}")
+            st.markdown(f"**{get_text('total_items_collected')}:** {scheduler_status.get('total_items_collected', 0)}")
+            st.markdown(f"**{get_text('last_execution')}:** {format_datetime(scheduler_status.get('last_execution_time'), current_timezone)}")
 
 if __name__ == "__main__":
     main() 

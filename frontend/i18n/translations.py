@@ -202,6 +202,7 @@ TRANSLATIONS = {
         "crawler_bestseller": "畅销商品",
         "crawler_coupon": "优惠券商品",
         "crawler_all": "全部商品",
+        "crawler_update": "商品更新",
         
         # 调度器相关
         "start_time": "开始时间",
@@ -316,6 +317,62 @@ TRANSLATIONS = {
         "sort_desc": "降序",
         "sort_asc": "升序",
         "items_per_page": "每页显示数量",
+        
+        # 任务分类
+        "task_category": "任务分类",
+        "task_category_help": "选择任务的类型分类",
+        "task_type": "任务类型",
+        "task_type_help": "选择具体的任务类型",
+        "crawler_tasks": "爬虫任务",
+        "update_tasks": "更新任务",
+        "all_categories": "所有分类",
+        
+        # 任务过滤
+        "filter_by_category": "按分类筛选",
+        "filter_by_status": "按状态筛选",
+        "status_filter_all": "所有状态",
+        "status_filter_running": "运行中",
+        "status_filter_paused": "已暂停",
+        
+        # 任务排序
+        "sort_by_next_run": "按下次执行时间",
+        "sort_by_name": "按名称",
+        "sort_by_type": "按类型",
+        
+        # 批量操作
+        "resume_all": "恢复所有任务",
+        "pause_all": "暂停所有任务",
+        "delete_all": "删除所有任务",
+        "all_jobs_resumed": "所有任务已恢复",
+        "all_jobs_paused": "所有任务已暂停",
+        "all_jobs_deleted": "所有任务已删除",
+        "confirm_delete_all": "确定要删除所有任务吗？此操作不可恢复！",
+        
+        # 按钮提示
+        "resume_help": "恢复任务执行",
+        "pause_help": "暂停任务执行",
+        "delete_help": "删除任务",
+        "execute_now_help": "立即执行任务",
+        
+        # 统计信息
+        "scheduler_statistics": "调度器统计",
+        "scheduler_uptime": "运行时间",
+        "total_executions": "总执行次数",
+        "successful_executions": "成功执行",
+        "failed_executions": "失败执行",
+        "avg_execution_time": "平均执行时间",
+        "total_items_collected": "总采集数量",
+        "last_execution": "最后执行时间",
+        "view_stats": "查看统计",
+        
+        # 时间相关
+        "duration": "持续时间",
+        "hours": "小时",
+        "minutes": "分钟",
+        "seconds": "秒",
+        
+        # 最大数量帮助
+        "max_items_help": "设置每次执行时处理的最大商品数量",
     },
     
     "en": {
@@ -517,6 +574,7 @@ TRANSLATIONS = {
         "crawler_bestseller": "Bestsellers",
         "crawler_coupon": "Coupon Products",
         "crawler_all": "All Products",
+        "crawler_update": "Product Update",
         
         # Scheduler Related
         "start_time": "Start Time",
@@ -631,5 +689,61 @@ TRANSLATIONS = {
         "sort_desc": "Descending",
         "sort_asc": "Ascending",
         "items_per_page": "Items Per Page",
+        
+        # Task Categories
+        "task_category": "Task Category",
+        "task_category_help": "Select the category of the task",
+        "task_type": "Task Type",
+        "task_type_help": "Select the specific type of task",
+        "crawler_tasks": "Crawler Tasks",
+        "update_tasks": "Update Tasks",
+        "all_categories": "All Categories",
+        
+        # Task Filtering
+        "filter_by_category": "Filter by Category",
+        "filter_by_status": "Filter by Status",
+        "status_filter_all": "All Status",
+        "status_filter_running": "Running",
+        "status_filter_paused": "Paused",
+        
+        # Task Sorting
+        "sort_by_next_run": "By Next Run Time",
+        "sort_by_name": "By Name",
+        "sort_by_type": "By Type",
+        
+        # Batch Operations
+        "resume_all": "Resume All",
+        "pause_all": "Pause All",
+        "delete_all": "Delete All",
+        "all_jobs_resumed": "All jobs resumed",
+        "all_jobs_paused": "All jobs paused",
+        "all_jobs_deleted": "All jobs deleted",
+        "confirm_delete_all": "Are you sure you want to delete all jobs? This action cannot be undone!",
+        
+        # Button Tooltips
+        "resume_help": "Resume job execution",
+        "pause_help": "Pause job execution",
+        "delete_help": "Delete job",
+        "execute_now_help": "Execute job immediately",
+        
+        # Statistics
+        "scheduler_statistics": "Scheduler Statistics",
+        "scheduler_uptime": "Uptime",
+        "total_executions": "Total Executions",
+        "successful_executions": "Successful",
+        "failed_executions": "Failed",
+        "avg_execution_time": "Average Execution Time",
+        "total_items_collected": "Total Items Collected",
+        "last_execution": "Last Execution",
+        "view_stats": "View Statistics",
+        
+        # Time Related
+        "duration": "Duration",
+        "hours": "hours",
+        "minutes": "minutes",
+        "seconds": "seconds",
+        
+        # Max Items Help
+        "max_items_help": "Set the maximum number of items to process in each execution",
     }
 } 

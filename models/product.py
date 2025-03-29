@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict
 from datetime import datetime
 from pydantic import BaseModel
+import json
 
 class ProductOffer(BaseModel):
     """商品优惠信息模型"""
@@ -62,9 +63,14 @@ class ProductInfo(BaseModel):
         }
         
     def dict(self, *args, **kwargs):
-        """重写dict方法以支持datetime序列化"""
+        """重写dict方法以支持datetime序列化和raw_data的JSON序列化"""
         d = super().dict(*args, **kwargs)
         d['timestamp'] = self.timestamp.isoformat()
+        
+        # 处理raw_data的序列化
+        if 'raw_data' in d and d['raw_data'] is not None:
+            d['raw_data'] = json.dumps(d['raw_data'])
+            
         if 'cj_url' in d and d['cj_url'] is None:
             del d['cj_url']
         return d

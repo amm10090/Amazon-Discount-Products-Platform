@@ -26,6 +26,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
 from src.core.amazon_product_api import AmazonProductAPI
+from src.core.product_updater import ProductUpdater, UpdateConfiguration
 from models.database import SessionLocal
 from models.scheduler import JobHistoryModel
 
@@ -103,6 +104,13 @@ class SchedulerManager:
                         "hours": 1,  # 每小时执行一次
                         "crawler_type": "coupon",
                         "max_items": 50
+                    },
+                    {
+                        "id": "product_update",
+                        "type": "interval",
+                        "hours": 2,  # 每2小时执行一次
+                        "crawler_type": "update",
+                        "max_items": 100  # 每次更新100个商品
                     }
                 ],
                 "timezone": "Asia/Shanghai",
@@ -177,7 +185,7 @@ class SchedulerManager:
         
         Args:
             job_id: 任务ID
-            crawler_type: 爬虫类型（bestseller/coupon/all）
+            crawler_type: 爬虫类型（bestseller/coupon/update）
             max_items: 最大采集商品数量
             
         Raises:
@@ -187,51 +195,58 @@ class SchedulerManager:
             logger.info(f"开始执行任务 {job_id} - {crawler_type}")
             start_time = datetime.now()
             
-            # 从环境变量获取配置
-            headless = os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
-            timeout = int(os.getenv("CRAWLER_TIMEOUT", "30"))
-            batch_size = int(os.getenv("CRAWLER_BATCH_SIZE", "10"))
-            
-            # 创建任务配置
-            config = Config(
-                max_items=max_items,
-                batch_size=batch_size,
-                timeout=timeout,
-                headless=headless,
-                crawler_types=[crawler_type]  # 设置爬虫类型
-            )
-            
-            # 初始化API客户端
-            api = AmazonProductAPI(
-                access_key=os.getenv("AMAZON_ACCESS_KEY"),
-                secret_key=os.getenv("AMAZON_SECRET_KEY"),
-                partner_tag=os.getenv("AMAZON_PARTNER_TAG")
-            )
-            
-            # 根据类型执行不同的爬虫
-            if crawler_type == "bestseller":
-                result = await crawl_bestseller_products(
-                    api,
-                    config.max_items,
-                    config.batch_size,
-                    config.timeout,
-                    config.headless
-                )
-            elif crawler_type == "coupon":
-                result = await crawl_coupon_products(
-                    api,
-                    config.max_items,
-                    config.batch_size,
-                    config.timeout,
-                    config.headless
-                )
+            if crawler_type == "update":
+                # 执行商品更新任务
+                updater = ProductUpdater()
+                success_count, total = await updater.run_scheduled_update(batch_size=max_items)
+                result = success_count
+                logger.success(f"商品更新任务完成，成功更新 {success_count}/{total} 个商品")
             else:
-                raise ValueError(f"不支持的爬虫类型: {crawler_type}")
+                # 从环境变量获取配置
+                headless = os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
+                timeout = int(os.getenv("CRAWLER_TIMEOUT", "30"))
+                batch_size = int(os.getenv("CRAWLER_BATCH_SIZE", "10"))
                 
+                # 创建任务配置
+                config = Config(
+                    max_items=max_items,
+                    batch_size=batch_size,
+                    timeout=timeout,
+                    headless=headless,
+                    crawler_types=[crawler_type]  # 设置爬虫类型
+                )
+                
+                # 初始化API客户端
+                api = AmazonProductAPI(
+                    access_key=os.getenv("AMAZON_ACCESS_KEY"),
+                    secret_key=os.getenv("AMAZON_SECRET_KEY"),
+                    partner_tag=os.getenv("AMAZON_PARTNER_TAG")
+                )
+                
+                # 根据类型执行不同的爬虫
+                if crawler_type == "bestseller":
+                    result = await crawl_bestseller_products(
+                        api,
+                        config.max_items,
+                        config.batch_size,
+                        config.timeout,
+                        config.headless
+                    )
+                elif crawler_type == "coupon":
+                    result = await crawl_coupon_products(
+                        api,
+                        config.max_items,
+                        config.batch_size,
+                        config.timeout,
+                        config.headless
+                    )
+                else:
+                    raise ValueError(f"不支持的爬虫类型: {crawler_type}")
+            
             duration = (datetime.now() - start_time).total_seconds()
             logger.success(
                 f"任务 {job_id} 完成! "
-                f"采集数量: {result}, "
+                f"处理数量: {result}, "
                 f"耗时: {duration:.2f}秒"
             )
             

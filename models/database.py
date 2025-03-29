@@ -10,11 +10,14 @@
 """
 
 import os
+import json
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from pathlib import Path
+from sqlalchemy.orm import Session
+from typing import Optional, Dict, Any
 
 # 确保数据存储目录存在
 data_dir = Path(__file__).parent.parent / "data" / "db"
@@ -108,6 +111,24 @@ class Product(Base):
     offers = relationship("Offer", back_populates="product", cascade="all, delete-orphan")
     coupons = relationship("CouponHistory", back_populates="product", cascade="all, delete-orphan")
     variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan")
+
+    @property
+    def raw_data_dict(self) -> Optional[Dict[str, Any]]:
+        """获取反序列化后的raw_data"""
+        if self.raw_data:
+            try:
+                return json.loads(self.raw_data)
+            except json.JSONDecodeError:
+                return None
+        return None
+    
+    @raw_data_dict.setter
+    def raw_data_dict(self, value: Optional[Dict[str, Any]]):
+        """设置raw_data，自动进行序列化"""
+        if value is not None:
+            self.raw_data = json.dumps(value)
+        else:
+            self.raw_data = None
 
     def __repr__(self):
         """对象的字符串表示"""
