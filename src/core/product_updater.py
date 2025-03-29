@@ -268,10 +268,10 @@ class ProductUpdater:
             return UpdatePriority.VERY_LOW
             
     def _should_update(self, product: Product) -> bool:
-        """
-        判断商品是否需要更新
+        """判断商品是否需要更新
         
         基于上次更新时间和商品优先级决定是否需要更新
+        对于价格为0的商品，忽略更新间隔，直接返回True
         
         Args:
             product: 商品数据库记录
@@ -279,10 +279,14 @@ class ProductUpdater:
         Returns:
             bool: 是否需要更新
         """
+        # 如果价格为0，立即更新
+        if product.current_price == 0:
+            return True
+        
         # 如果没有更新时间，则需要更新
         if not product.updated_at:
             return True
-            
+        
         # 计算商品优先级
         priority = self._calculate_priority(product)
         
