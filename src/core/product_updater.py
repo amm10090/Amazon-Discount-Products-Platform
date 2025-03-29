@@ -71,7 +71,7 @@ class UpdateConfiguration:
                  medium_priority_hours: int = 24,     # 中优先级商品更新间隔（小时）
                  low_priority_hours: int = 72,        # 低优先级商品更新间隔（小时）
                  very_low_priority_hours: int = 168,  # 非常低优先级商品更新间隔（小时）
-                 batch_size: int = 10,                # 每批处理的商品数量
+                 batch_size: int = 500,                # 每批处理的商品数量
                  max_retries: int = 3,                # 最大重试次数
                  retry_delay: float = 2.0,            # 重试延迟时间（秒）
                  update_category_info: bool = False,  # 是否更新品类信息（不常变化）
