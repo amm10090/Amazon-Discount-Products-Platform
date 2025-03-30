@@ -358,20 +358,24 @@ class ProductUpdater:
         return False
     
     async def delete_zero_price_products(self, db: Session) -> int:
-        """删除所有价格为0的商品"""
+        """删除所有价格为0或null的商品"""
         log_info = TaskLoggerAdapter(self.logger.logger, {'task_id': 'DELETE_BATCH'})
         
-        # 查询价格为0的商品
-        zero_price_products = db.query(Product).filter(Product.current_price == 0).all()
+        # 查询价格为0或null的商品
+        zero_price_products = db.query(Product).filter(
+            (Product.current_price == 0) | (Product.current_price == None)
+        ).all()
+        
         if not zero_price_products:
             return 0
             
         deleted_count = 0
         for product in zero_price_products:
             try:
+                price_str = "0" if product.current_price == 0 else "null"
                 db.delete(product)
                 deleted_count += 1
-                log_info.info(f"已删除价格为0的商品: {product.asin}")
+                log_info.info(f"已删除价格为{price_str}的商品: {product.asin}")
             except Exception as e:
                 log_info.error(f"删除商品失败 {product.asin}: {str(e)}")
                 
