@@ -239,7 +239,7 @@ class AmazonProductAPI:
         uncached_asins = []
         
         # 首先检查缓存
-        logger.info(f"开始检查商品缓存: ASINs={asins}")
+        logger.info(f"开始检查商品缓存: 商品数量={len(asins)}")
         for asin in asins:
             cached_data = self.cache_manager.get(asin, "products")
             if cached_data:
@@ -257,10 +257,10 @@ class AmazonProductAPI:
                 
         # 如果所有商品都在缓存中，直接返回
         if not uncached_asins:
-            logger.info(f"所有商品均命中缓存: ASINs={asins}")
+            logger.info(f"所有商品均命中缓存: 商品数量={len(asins)}")
             return products
             
-        logger.info(f"开始从API获取未缓存商品: ASINs={uncached_asins}")
+        logger.info(f"开始从API获取未缓存商品: 商品数量={len(uncached_asins)}")
         session = None
         try:
             # 准备请求数据
