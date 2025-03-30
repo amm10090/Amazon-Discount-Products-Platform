@@ -282,7 +282,6 @@ async def process_products_batch(
                         saved_products = ProductService.bulk_create_or_update_products(
                             db, 
                             products,
-                            include_cj_data=True,  # 包含CJ数据
                             include_coupon=True,  # 包含优惠券数据
                             source="coupon" if coupon_info else "discount",  # 根据是否有优惠券信息决定来源类型
                             include_metadata=True  # 包含元数据
