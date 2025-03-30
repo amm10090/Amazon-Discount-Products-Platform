@@ -169,19 +169,13 @@ class ProductUpdater:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         
-        # 设置格式化器
-        file_formatter = logging.Formatter(
-            '%(asctime)s [%(levelname)s] [%(name)s] [%(task_id)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        # 控制台格式更简洁
-        console_formatter = logging.Formatter(
+        # 设置格式化器 - 只保留一种格式，避免重复输出
+        log_formatter = logging.Formatter(
             '[%(levelname)s] [%(task_id)s] %(message)s'
         )
         
-        file_handler.setFormatter(file_formatter)
-        console_handler.setFormatter(console_formatter)
+        file_handler.setFormatter(log_formatter)
+        console_handler.setFormatter(log_formatter)
         
         # 配置日志记录器
         logger.addHandler(file_handler)
@@ -355,18 +349,23 @@ class ProductUpdater:
         # 这样可以避免所有商品都在同一时间点需要更新
         if time_since_update > timedelta(hours=hours * 0.9):
             # 创建一个基于ASIN的确定性随机数，确保同一商品在短时间内得到一致的结果
-            seed = int(product.asin.replace('B', '').replace('0', '')[:4] or '1234', 16)
-            random.seed(seed + int(now.timestamp() / 3600))  # 每小时变化一次
-            
-            # 高优先级的商品有更高概率被提前更新
-            chance = {
-                UpdatePriority.HIGH: 0.4,      # 高优先级有40%概率被提前更新
-                UpdatePriority.MEDIUM: 0.2,    # 中优先级有20%概率被提前更新
-                UpdatePriority.LOW: 0.1,       # 低优先级有10%概率被提前更新
-                UpdatePriority.VERY_LOW: 0.05  # 非常低优先级有5%概率被提前更新
-            }.get(priority, 0)
-            
-            return random.random() < chance
+            try:
+                # 使用ASIN的哈希值作为种子，更安全且适用于所有ASIN格式
+                seed = hash(product.asin) % 10000
+                random.seed(seed + int(now.timestamp() / 3600))  # 每小时变化一次
+                
+                # 高优先级的商品有更高概率被提前更新
+                chance = {
+                    UpdatePriority.HIGH: 0.4,      # 高优先级有40%概率被提前更新
+                    UpdatePriority.MEDIUM: 0.2,    # 中优先级有20%概率被提前更新
+                    UpdatePriority.LOW: 0.1,       # 低优先级有10%概率被提前更新
+                    UpdatePriority.VERY_LOW: 0.05  # 非常低优先级有5%概率被提前更新
+                }.get(priority, 0)
+                
+                return random.random() < chance
+            except Exception as e:
+                # 如果计算随机概率时出错，默认不更新
+                return False
             
         return False
     
@@ -380,7 +379,7 @@ class ProductUpdater:
         ).all()
         
         if not zero_price_products:
-            log_info.info("未找到价格为0或为null的商品")
+            log_info.debug("未找到价格为0或为null的商品")
             return 0
             
         log_info.info(f"开始删除价格为0或null的商品，共 {len(zero_price_products)} 个")
@@ -453,32 +452,38 @@ class ProductUpdater:
         # 筛选需要更新的商品
         log_info.info(f"正在筛选需要更新的商品...")
         selection_count = 0
+        total_need_update = 0
         
         for product in products:
-            if self._should_update(product):
-                # 记录每个选中商品的详细信息（降级为DEBUG）
-                priority = self._calculate_priority(product)
-                last_update = product.updated_at.strftime('%Y-%m-%d %H:%M:%S') if product.updated_at else "从未更新"
-                log_info.debug(
-                    f"选中商品更新: ASIN={product.asin}, "
-                    f"最后更新时间={last_update}, "
-                    f"优先级={priority.value}, "
-                    f"API来源={product.api_provider or 'unknown'}"
-                )
-                regular_products.append(product)
-                selection_count += 1
-                # 显示选择进度
-                if selection_count % 100 == 0:
-                    log_info.debug(f"已选择 {selection_count} 个商品...")
-                
-                if len(regular_products) >= limit:
-                    break
+            try:
+                if self._should_update(product):
+                    total_need_update += 1
+                    # 如果未达到limit限制，添加到更新列表
+                    if len(regular_products) < limit:
+                        # 记录每个选中商品的详细信息（降级为DEBUG）
+                        priority = self._calculate_priority(product)
+                        last_update = product.updated_at.strftime('%Y-%m-%d %H:%M:%S') if product.updated_at else "从未更新"
+                        log_info.debug(
+                            f"选中商品更新: ASIN={product.asin}, "
+                            f"最后更新时间={last_update}, "
+                            f"优先级={priority.value}, "
+                            f"API来源={product.api_provider or 'unknown'}"
+                        )
+                        regular_products.append(product)
+                        selection_count += 1
+                        # 显示选择进度
+                        if selection_count % 100 == 0:
+                            log_info.debug(f"已选择 {selection_count} 个商品...")
+            except Exception as e:
+                log_info.debug(f"商品 {product.asin} 检查更新状态时出错: {str(e)}，已跳过")
+                continue
         
         # 只在INFO级别记录汇总信息
         cj_count = sum(1 for p in regular_products if p.api_provider == 'cj-api')
         pa_count = sum(1 for p in regular_products if p.api_provider == 'pa-api')
         log_info.info(
-            f"找到 {len(regular_products)} 个商品需要更新 (CJ商品: {cj_count}, PA商品: {pa_count})"
+            f"找到 {len(regular_products)} 个商品需要更新 (CJ商品: {cj_count}, PA商品: {pa_count}), "
+            f"数据库中还有 {total_need_update - len(regular_products)} 个商品等待更新"
         )
         return regular_products
         
@@ -850,7 +855,7 @@ class ProductUpdater:
                     else:
                         # 无法获取价格信息，删除商品
                         reason = "无法获取价格信息" if pa_product else "获取PAAPI信息失败"
-                        log_info.error(f"商品 {asin} 更新失败: {reason}，将删除该商品")
+                        log_info.debug(f"商品 {asin} 更新失败: {reason}，将删除该商品")
                         if await self.delete_product(product, db, reason):
                             deleted_count += 1
                         else:
@@ -887,10 +892,46 @@ class ProductUpdater:
             with SessionLocal() as db:
                 success_count, failed_count, deleted_count = await self.update_batch(db, batch_size or 100)
                 
-                # 只保留总结信息
-                schedule_logger.info(
-                    f"计划更新完成: 成功={success_count}, 失败={failed_count}, 删除={deleted_count}"
-                )
+                # 计算剩余需要更新的商品数量
+                try:
+                    # 获取所有非零价格的商品
+                    products = db.query(Product).filter(
+                        Product.current_price != 0
+                    ).all()
+                    
+                    # 计算需要更新的商品总数
+                    remaining_products_count = 0
+                    
+                    # 使用进度条显示统计进度
+                    schedule_logger.info(f"正在统计剩余需要更新的商品数量，共 {len(products)} 个商品...")
+                    
+                    # 分批处理，避免处理大量商品时耗时过长
+                    batch_size = 1000
+                    for i in range(0, len(products), batch_size):
+                        batch = products[i:i+batch_size]
+                        for product in batch:
+                            try:
+                                if self._should_update(product):
+                                    remaining_products_count += 1
+                            except Exception as product_e:
+                                # 单个商品处理错误不影响整体计数
+                                schedule_logger.debug(f"计算更新状态时单个商品出错，已忽略: {str(product_e)}")
+                                continue
+                        # 显示进度
+                        schedule_logger.debug(f"已检查 {min(i+batch_size, len(products))}/{len(products)} 个商品...")
+                    
+                    # 添加剩余需要更新的商品数量到总结信息
+                    schedule_logger.info(
+                        f"计划更新完成: 成功={success_count}, 失败={failed_count}, 删除={deleted_count}, "
+                        f"剩余需要更新的商品数量={remaining_products_count}"
+                    )
+                except Exception as count_e:
+                    # 计算剩余商品出错不影响主要功能
+                    schedule_logger.warning(f"计算剩余需要更新的商品数量时出错: {str(count_e)}")
+                    schedule_logger.info(
+                        f"计划更新完成: 成功={success_count}, 失败={failed_count}, 删除={deleted_count}"
+                    )
+                
                 return success_count, failed_count, deleted_count
                 
         except Exception as e:
@@ -916,16 +957,23 @@ if __name__ == "__main__":
     logging.basicConfig(level=log_level)
     
     async def main():
-        updater = ProductUpdater()
-        await updater.initialize_clients()
-        
-        if args.scheduled:
-            success, failed, deleted = await updater.run_scheduled_update(args.batch_size)
-            log_section("计划更新任务完成")
-            log_info(f"成功更新: {success}/{success + failed}")
-            log_info(f"删除价格为0的商品: {deleted}")
-        else:
-            print("请使用 --scheduled 参数来执行计划更新任务")
-            print("例如: python product_updater.py --scheduled --batch-size 100")
+        try:
+            updater = ProductUpdater()
+            await updater.initialize_clients()
+            
+            if args.scheduled:
+                success, failed, deleted = await updater.run_scheduled_update(args.batch_size)
+                log_section("计划更新任务完成")
+                log_info(f"成功更新: {success}/{success + failed}")
+                if deleted > 0:
+                    log_info(f"删除价格为0的商品: {deleted}")
+            else:
+                print("请使用 --scheduled 参数来执行计划更新任务")
+                print("例如: python product_updater.py --scheduled --batch-size 100")
+        except Exception as e:
+            log_error(f"主程序运行异常: {str(e)}")
+            import traceback
+            log_error(traceback.format_exc())
+            sys.exit(1)
     
     asyncio.run(main()) 
