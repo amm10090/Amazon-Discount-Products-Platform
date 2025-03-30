@@ -136,6 +136,12 @@ class ProductUpdater:
         self.cj_client = None
         self._initialize_logger()
         
+        # API请求限制相关变量
+        self.last_pa_api_request_time = None
+        self.pa_api_request_interval = 1.0  # 每秒允许的请求数量的倒数（秒）
+        self.last_cj_api_request_time = None
+        self.cj_api_request_interval = 0.5  # 每秒允许的请求数量的倒数（秒）
+        
     def _initialize_logger(self):
         """初始化日志配置"""
         # 创建日志目录
@@ -212,6 +218,26 @@ class ProductUpdater:
         self.cj_client = CJAPIClient()
         
         log_success("API客户端初始化完成")
+        
+    async def _rate_limit_pa_api(self):
+        """限制PA API请求频率，避免429错误"""
+        now = datetime.now()
+        if self.last_pa_api_request_time:
+            elapsed = (now - self.last_pa_api_request_time).total_seconds()
+            if elapsed < self.pa_api_request_interval:
+                wait_time = self.pa_api_request_interval - elapsed
+                await asyncio.sleep(wait_time)
+        self.last_pa_api_request_time = datetime.now()
+        
+    async def _rate_limit_cj_api(self):
+        """限制CJ API请求频率"""
+        now = datetime.now()
+        if self.last_cj_api_request_time:
+            elapsed = (now - self.last_cj_api_request_time).total_seconds()
+            if elapsed < self.cj_api_request_interval:
+                wait_time = self.cj_api_request_interval - elapsed
+                await asyncio.sleep(wait_time)
+        self.last_cj_api_request_time = datetime.now()
         
     def _calculate_priority(self, product: Product) -> UpdatePriority:
         """
@@ -357,6 +383,30 @@ class ProductUpdater:
             return 0
             
         return deleted_count
+        
+    async def delete_product(self, product: Product, db: Session, reason: str) -> bool:
+        """删除单个商品
+        
+        Args:
+            product: 要删除的商品
+            db: 数据库会话
+            reason: 删除原因
+            
+        Returns:
+            bool: 删除是否成功
+        """
+        task_id = f"DELETE:{product.asin}"
+        log_info = TaskLoggerAdapter(self.logger.logger, {'task_id': task_id})
+        
+        try:
+            db.delete(product)
+            db.commit()
+            log_info.info(f"已删除商品: ASIN={product.asin}, 原因={reason}")
+            return True
+        except Exception as e:
+            log_info.error(f"删除商品失败 {product.asin}: {str(e)}")
+            db.rollback()
+            return False
 
     async def get_products_to_update(self, db: Session, limit: int = 100) -> List[Product]:
         """获取需要更新的商品列表"""
@@ -443,14 +493,18 @@ class ProductUpdater:
             try:
                 pa_products = await self.amazon_api.get_products_by_asins([product.asin])
                 if not pa_products:
-                    log_info.error("无法从PAAPI获取商品信息")
-                    return False
+                    log_info.error("无法从PAAPI获取商品信息，商品可能已下架或缺货")
+                    # 删除不可用的商品
+                    return await self.delete_product(product, db, "商品不可用，无法从PAAPI获取信息")
                 
                 pa_info = pa_products[0]
                 # 更新商品信息
                 product.current_price = pa_info.offers[0].price if pa_info.offers else 0
                 product.stock = "in_stock" if pa_info.offers and pa_info.offers[0].availability == "Available" else "out_of_stock"
-                product.last_update_time = datetime.now()
+                # 更新商品的时间戳
+                product.timestamp = datetime.now(UTC)
+                # 更新商品的updated_at字段
+                product.updated_at = datetime.now(UTC)
                 
                 db.commit()
                 log_info.info("商品信息更新成功")
@@ -458,8 +512,8 @@ class ProductUpdater:
                 
             except Exception as e:
                 log_info.error(f"PAAPI获取商品信息失败: {str(e)}")
-                db.rollback()
-                return False
+                # 删除无法获取信息的商品
+                return await self.delete_product(product, db, f"PAAPI获取商品信息失败: {str(e)}")
             
         except Exception as e:
             log_info.error(f"更新商品信息失败: {str(e)}")
@@ -475,16 +529,32 @@ class ProductUpdater:
         Returns:
             Dict[str, bool]: 商品可用性字典，key为ASIN，value为是否可用
         """
+        log_info = TaskLoggerAdapter(self.logger.logger, {'task_id': 'CJ-CHECK'})
         batch_size = 10
         results = {}
         
         for i in range(0, len(asins), batch_size):
             batch_asins = asins[i:i + batch_size]
             try:
+                log_info.info(f"检查CJ平台可用性: ASINs={batch_asins}")
+                
+                # 应用请求频率限制
+                await self._rate_limit_cj_api()
+                
                 batch_results = await self.cj_client.check_products_availability(batch_asins)
                 results.update(batch_results)
+                
+                # 记录可用和不可用的商品数量
+                available_count = sum(1 for asin, available in batch_results.items() if available)
+                log_info.info(f"批次检查结果: 总数={len(batch_results)}, 可用={available_count}, 不可用={len(batch_results) - available_count}")
+                
             except Exception as e:
-                self.logger.error(f"批量检查CJ平台可用性失败: {str(e)}")
+                log_info.error(
+                    f"批量检查CJ平台可用性失败: "
+                    f"ASINs={batch_asins}, "
+                    f"错误类型={type(e).__name__}, "
+                    f"错误信息={str(e)}"
+                )
                 # 如果批处理失败，将该批次的所有商品标记为不可用
                 for asin in batch_asins:
                     results[asin] = False
@@ -500,17 +570,29 @@ class ProductUpdater:
         Returns:
             Dict[str, str]: 商品推广链接字典，key为ASIN，value为推广链接
         """
+        log_info = TaskLoggerAdapter(self.logger.logger, {'task_id': 'CJ-LINKS'})
         batch_size = 10
         results = {}
         
         for i in range(0, len(available_asins), batch_size):
             batch_asins = available_asins[i:i + batch_size]
+            log_info.info(f"获取CJ推广链接: ASINs={batch_asins}")
+            
             for asin in batch_asins:
                 try:
+                    # 每个链接请求都应用请求频率限制
+                    await self._rate_limit_cj_api()
+                    
                     link = await self.cj_client.generate_product_link(asin)
                     results[asin] = link
+                    log_info.info(f"成功获取CJ推广链接: ASIN={asin}")
+                    
                 except Exception as e:
-                    self.logger.error(f"获取商品 {asin} 的CJ推广链接失败: {str(e)}")
+                    log_info.error(
+                        f"获取商品 {asin} 的CJ推广链接失败: "
+                        f"错误类型={type(e).__name__}, "
+                        f"错误信息={str(e)}"
+                    )
                     results[asin] = None
                     
         return results
@@ -526,6 +608,11 @@ class ProductUpdater:
             asins = [p.asin for p in batch]
             try:
                 log_info.info(f"开始获取PAAPI信息: ASINs={asins}")
+                
+                # 应用请求频率限制
+                await self._rate_limit_pa_api()
+                
+                # 使用正确的方法名 get_products_by_asins 替代 get_items
                 pa_products = await self.amazon_api.get_products_by_asins(asins)
                 
                 # 处理返回的产品信息
@@ -561,31 +648,86 @@ class ProductUpdater:
                         results[asin] = None
                     
             except Exception as e:
-                log_info.error(
-                    f"批量获取PAAPI信息失败: "
-                    f"ASINs={asins}, "
-                    f"错误类型={type(e).__name__}, "
-                    f"错误信息={str(e)}, "
-                    f"错误详情={e.__dict__ if hasattr(e, '__dict__') else '无详情'}"
-                )
-                # 添加详细的API错误记录
-                if hasattr(e, 'response') and hasattr(e.response, 'json'):
+                # 检查是否是请求过多错误(429)
+                if hasattr(e, 'status') and e.status == 429:
+                    log_info.error(
+                        f"API请求过多(429 Too Many Requests): "
+                        f"ASINs={asins}, "
+                        f"错误信息={str(e)}"
+                    )
+                    # 添加更长的等待时间，然后重试
+                    log_info.info(f"等待5秒后重试...")
+                    await asyncio.sleep(5)  # 等待5秒
                     try:
-                        error_detail = e.response.json()
-                        log_info.error(f"API错误响应: {error_detail}")
+                        log_info.info(f"重试获取PAAPI信息: ASINs={asins}")
                         
-                        # 检查是否有ItemNotAccessible错误
-                        if 'Errors' in error_detail:
-                            for error in error_detail['Errors']:
-                                if error.get('Code') == 'ItemNotAccessible':
-                                    asin = error.get('Message', '').split(' ')[2] if len(error.get('Message', '').split(' ')) > 2 else 'unknown'
-                                    log_info.error(f"商品 {asin} 通过API无法访问，可能已下架或限制访问")
-                    except:
-                        log_info.error("无法解析API错误响应")
-                
-                for asin in asins:
-                    if asin not in results:
-                        results[asin] = None
+                        # 重试时再次应用请求频率限制
+                        await self._rate_limit_pa_api()
+                        
+                        pa_products = await self.amazon_api.get_products_by_asins(asins)
+                        
+                        # 处理返回的产品信息
+                        for product in pa_products:
+                            if not product:
+                                continue
+                                
+                            price = product.offers[0].price if product.offers else 0
+                            in_stock = "Available" == product.offers[0].availability if product.offers else False
+                            
+                            results[product.asin] = {
+                                'price': price,
+                                'stock': in_stock,
+                                'title': product.title if hasattr(product, 'title') else '',
+                                'availability_status': product.offers[0].availability if product.offers else 'Unavailable'
+                            }
+                            
+                            log_info.info(
+                                f"重试成功获取商品信息: ASIN={product.asin}, "
+                                f"价格={price}, "
+                                f"库存={in_stock}"
+                            )
+                        
+                        for asin in asins:
+                            if asin not in results and not any(p.asin == asin for p in pa_products if p):
+                                results[asin] = None
+                                
+                    except Exception as retry_e:
+                        log_info.error(
+                            f"重试失败: "
+                            f"ASINs={asins}, "
+                            f"错误类型={type(retry_e).__name__}, "
+                            f"错误信息={str(retry_e)}"
+                        )
+                        # 所有重试失败的商品标记为None
+                        for asin in asins:
+                            if asin not in results:
+                                results[asin] = None
+                else:
+                    # 非429错误的处理
+                    log_info.error(
+                        f"批量获取PAAPI信息失败: "
+                        f"ASINs={asins}, "
+                        f"错误类型={type(e).__name__}, "
+                        f"错误信息={str(e)}"
+                    )
+                    # 添加详细的API错误记录
+                    if hasattr(e, 'response') and hasattr(e.response, 'json'):
+                        try:
+                            error_detail = e.response.json()
+                            log_info.error(f"API错误响应: {error_detail}")
+                            
+                            # 检查是否有ItemNotAccessible错误
+                            if 'Errors' in error_detail:
+                                for error in error_detail['Errors']:
+                                    if error.get('Code') == 'ItemNotAccessible':
+                                        asin = error.get('Message', '').split(' ')[2] if len(error.get('Message', '').split(' ')) > 2 else 'unknown'
+                                        log_info.error(f"商品 {asin} 通过API无法访问，可能已下架或限制访问")
+                        except:
+                            log_info.error("无法解析API错误响应")
+                    
+                    for asin in asins:
+                        if asin not in results:
+                            results[asin] = None
                         
         return results
 
@@ -649,7 +791,10 @@ class ProductUpdater:
                 if pa_product and pa_product.get('price'):
                     product.current_price = pa_product['price']
                     product.stock = "in_stock" if pa_product['stock'] else "out_of_stock"
-                    product.last_update_time = datetime.now()
+                    # 更新商品的时间戳
+                    product.timestamp = datetime.now(UTC)
+                    # 更新商品的updated_at字段
+                    product.updated_at = datetime.now(UTC)
                     success_count += 1
                     
                     # 根据api_provider统计更新成功的商品数量
@@ -666,9 +811,13 @@ class ProductUpdater:
                         f"库存={product.stock}"
                     )
                 else:
-                    failed_count += 1
+                    # 无法获取价格信息，删除商品
                     reason = "无法获取价格信息" if pa_product else "获取PAAPI信息失败"
-                    log_info.error(f"商品 {asin} 更新失败: {reason}")
+                    log_info.error(f"商品 {asin} 更新失败: {reason}，将删除该商品")
+                    if await self.delete_product(product, db, reason):
+                        deleted_count += 1
+                    else:
+                        failed_count += 1
                     
             except Exception as e:
                 failed_count += 1
