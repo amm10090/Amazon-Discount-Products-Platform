@@ -1,7 +1,10 @@
 """
 Amazon Discount Products Platform
-
-该包提供了Amazon商品数据采集和管理的核心功能。
+主要功能包括：
+1. 商品信息抓取
+2. 优惠信息更新
+3. 数据库管理
+4. 反爬虫策略
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

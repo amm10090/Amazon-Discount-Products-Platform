@@ -374,6 +374,17 @@ async def list_discount_products(
             product_groups=product_groups,
             brands=brands
         )
+        
+        # 确保使用数据库中的current_price字段
+        if "items" in result and result["items"]:
+            for product_info in result["items"]:
+                if product_info.offers and len(product_info.offers) > 0:
+                    # 从数据库查询当前价格
+                    db_product = db.query(Product).filter(Product.asin == product_info.asin).first()
+                    if db_product and db_product.current_price is not None:
+                        # 更新第一个offer中的价格为数据库中的current_price
+                        product_info.offers[0].price = db_product.current_price
+                    
         return result
     except Exception as e:
         logger.error(f"获取折扣商品列表失败: {str(e)}")
@@ -423,6 +434,17 @@ async def list_coupon_products(
             product_groups=product_groups,
             brands=brands
         )
+        
+        # 确保使用数据库中的current_price字段
+        if "items" in products and products["items"]:
+            for product_info in products["items"]:
+                if product_info.offers and len(product_info.offers) > 0:
+                    # 从数据库查询当前价格
+                    db_product = db.query(Product).filter(Product.asin == product_info.asin).first()
+                    if db_product and db_product.current_price is not None:
+                        # 更新第一个offer中的价格为数据库中的current_price
+                        product_info.offers[0].price = db_product.current_price
+        
         return products
     except Exception as e:
         logger.error(f"获取优惠券商品列表失败: {str(e)}")
@@ -539,6 +561,17 @@ async def list_products(
             min_commission=min_commission,
             brands=brand_list
         )
+        
+        # 确保使用数据库中的current_price字段
+        if "items" in result and result["items"]:
+            for product_info in result["items"]:
+                if product_info.offers and len(product_info.offers) > 0:
+                    # 从数据库查询当前价格
+                    db_product = db.query(Product).filter(Product.asin == product_info.asin).first()
+                    if db_product and db_product.current_price is not None:
+                        # 更新第一个offer中的价格为数据库中的current_price
+                        product_info.offers[0].price = db_product.current_price
+                        
         return result
     except Exception as e:
         logger.error(f"获取商品列表失败: {str(e)}")
@@ -656,6 +689,15 @@ async def get_product(
                 status_code=404,
                 detail=f"未找到ASIN为 {asin} 的产品"
             )
+            
+        # 确保使用products表中的current_price
+        if product.offers and len(product.offers) > 0:
+            # 从数据库查询当前价格
+            db_product = db.query(Product).filter(Product.asin == asin).first()
+            if db_product and db_product.current_price is not None:
+                # 更新第一个offer中的价格为数据库中的current_price
+                product.offers[0].price = db_product.current_price
+                
         return product
     except HTTPException:
         raise
