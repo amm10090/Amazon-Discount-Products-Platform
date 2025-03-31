@@ -228,23 +228,33 @@ class ProductUpdater:
         
     async def _rate_limit_pa_api(self):
         """限制PA API请求频率，避免429错误"""
-        now = datetime.now()
+        now = datetime.now(UTC)
         if self.last_pa_api_request_time:
-            elapsed = (now - self.last_pa_api_request_time).total_seconds()
+            # 确保last_pa_api_request_time有时区信息
+            last_time = self.last_pa_api_request_time
+            if last_time.tzinfo is None:
+                last_time = last_time.replace(tzinfo=UTC)
+                
+            elapsed = (now - last_time).total_seconds()
             if elapsed < self.pa_api_request_interval:
                 wait_time = self.pa_api_request_interval - elapsed
                 await asyncio.sleep(wait_time)
-        self.last_pa_api_request_time = datetime.now()
+        self.last_pa_api_request_time = now
         
     async def _rate_limit_cj_api(self):
         """限制CJ API请求频率"""
-        now = datetime.now()
+        now = datetime.now(UTC)
         if self.last_cj_api_request_time:
-            elapsed = (now - self.last_cj_api_request_time).total_seconds()
+            # 确保last_cj_api_request_time有时区信息
+            last_time = self.last_cj_api_request_time
+            if last_time.tzinfo is None:
+                last_time = last_time.replace(tzinfo=UTC)
+                
+            elapsed = (now - last_time).total_seconds()
             if elapsed < self.cj_api_request_interval:
                 wait_time = self.cj_api_request_interval - elapsed
                 await asyncio.sleep(wait_time)
-        self.last_cj_api_request_time = datetime.now()
+        self.last_cj_api_request_time = now
         
     def _calculate_priority(self, product: Product) -> UpdatePriority:
         """

@@ -14,10 +14,10 @@ import json
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Generator
 
 # 确保数据存储目录存在
 data_dir = Path(__file__).parent.parent / "data" / "db"
@@ -98,9 +98,10 @@ class Product(Base):
     features = Column(Text)  # 商品特性列表，存储为JSON字符串
     
     # 时间信息，用于追踪记录的生命周期
-    created_at = Column(DateTime, default=datetime.utcnow)  # 记录创建时间
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # 记录更新时间
-    timestamp = Column(DateTime, default=datetime.utcnow)  # 数据采集时间
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 记录创建时间
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))  # 记录更新时间
+    discount_updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 折扣信息最后更新时间
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 数据采集时间
     
     # 元数据
     source = Column(String(50))  # 数据来源：bestseller/coupon/cj
@@ -172,13 +173,14 @@ class Offer(Base):
     is_amazon_fulfilled = Column(Boolean, default=False)  # 是否由亚马逊配送
     is_free_shipping_eligible = Column(Boolean, default=False)  # 是否符合免运费条件
     deal_type = Column(String(50))  # 优惠类型
+    deal_badge = Column(String(200))  # 促销标签信息
     
     # 关联商品
     product = relationship("Product", back_populates="offers")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow)  # 记录创建时间
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # 记录更新时间
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 记录创建时间
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))  # 记录更新时间
 
 class CouponHistory(Base):
     """
@@ -198,8 +200,8 @@ class CouponHistory(Base):
     coupon_value = Column(Float)  # 优惠券面值
     
     # 时间信息
-    created_at = Column(DateTime, default=datetime.utcnow)  # 记录创建时间
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # 记录更新时间
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 记录创建时间
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))  # 记录更新时间
     
     # 关联商品
     product = relationship("Product", back_populates="coupons")
@@ -222,8 +224,8 @@ class ProductVariant(Base):
     parent_asin = Column(String(10), index=True)  # 父商品ASIN
     variant_asin = Column(String(10), ForeignKey("products.asin"), index=True)  # 变体商品ASIN
     variant_attributes = Column(JSON)  # 变体特有属性，如颜色、尺寸等
-    created_at = Column(DateTime, default=datetime.utcnow)  # 记录创建时间
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # 记录更新时间
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 记录创建时间
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))  # 记录更新时间
 
     # 关联到主商品表
     product = relationship("Product", back_populates="variants")
@@ -236,16 +238,8 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     print("数据库初始化完成")
 
-def get_db():
-    """
-    获取数据库会话的生成器函数
-    
-    用法:
-    with get_db() as db:
-        # 使用db进行数据库操作
-    
-    确保在操作完成后自动关闭会话
-    """
+def get_db() -> Generator[Session, None, None]:
+    """获取数据库会话"""
     db = SessionLocal()
     try:
         yield db

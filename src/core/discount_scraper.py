@@ -24,8 +24,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from tqdm import tqdm  # 添加tqdm库支持进度条
+from tqdm import tqdm
 import re
+import asyncio
+import math
+from dataclasses import dataclass
+from queue import PriorityQueue
+import heapq
+from sqlalchemy import func, desc
 
 # 添加项目根目录到Python路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -34,18 +40,8 @@ if project_root not in sys.path:
 
 from models.database import Product, CouponHistory, Offer, get_db
 from src.utils.webdriver_manager import WebDriverConfig
-from src.utils.logger_manager import (
-    log_info, log_debug, log_warning, 
-    log_error, log_success, log_progress,
-    log_section, set_log_config
-)
 from src.utils.config_loader import config_loader
-
-class TaskLoggerAdapter(logging.LoggerAdapter):
-    """为日志添加任务ID的适配器"""
-    def process(self, msg, kwargs):
-        kwargs.setdefault('extra', {}).setdefault('task_id', self.extra.get('task_id', 'SYSTEM'))
-        return msg, kwargs
+from src.core.discount_scheduler import DiscountUpdateScheduler, TaskLoggerAdapter  # 更新导入
 
 # 初始化组件日志配置
 def init_logger():
@@ -112,13 +108,15 @@ def parse_arguments():
     parser.add_argument('--asin-list', type=str, help='要处理的多个商品ASIN列表，用逗号分隔')
     parser.add_argument('--asin-file', type=str, help='包含多个商品ASIN的文件路径，每行一个ASIN')
     parser.add_argument('--log-level', type=str, default=None, help='日志级别 (DEBUG, INFO, WARNING, ERROR)')
+    parser.add_argument('--force-update', action='store_true', help='强制更新所有商品，忽略时间间隔检查')
     return parser.parse_args()
 
 class DiscountScraper:
     """优惠信息抓取器类"""
     
     def __init__(self, db: Session, batch_size: int = 50, headless: bool = True,
-                 min_delay: float = 2.0, max_delay: float = 4.0, specific_asins: list = None):
+                 min_delay: float = 2.0, max_delay: float = 4.0, specific_asins: list = None,
+                 use_scheduler: bool = True, scheduler: DiscountUpdateScheduler = None):  # 添加use_scheduler和scheduler参数
         """
         初始化抓取器
         
@@ -129,6 +127,8 @@ class DiscountScraper:
             min_delay: 最小请求延迟(秒)
             max_delay: 最大请求延迟(秒)
             specific_asins: 指定要处理的商品ASIN列表
+            use_scheduler: 是否使用调度器
+            scheduler: 调度器实例
         """
         self.db = db
         self.batch_size = batch_size
@@ -138,6 +138,10 @@ class DiscountScraper:
         self.specific_asins = specific_asins
         self.driver = None
         self.logger = TaskLoggerAdapter(logger, {'task_id': 'SYSTEM'})
+        
+        # 初始化调度器
+        self.use_scheduler = use_scheduler
+        self.scheduler = scheduler if use_scheduler else None
         
     def _init_driver(self):
         """初始化WebDriver"""
@@ -164,6 +168,7 @@ class DiscountScraper:
             Tuple[Optional[float], Optional[int], Optional[float]]: (折扣金额, 折扣百分比, 实际当前价格)
         """
         actual_current_price = None
+        original_price_from_page = None
         try:
             # 首先尝试从页面获取当前实际价格 - 使用更精确的选择器
             try:
@@ -196,85 +201,175 @@ class DiscountScraper:
             except (NoSuchElementException, ValueError) as e:
                 self.logger.warning(f"无法从页面提取当前实际价格: {str(e)}")
 
-            # 同时尝试获取List Price作为原价
-            try:
-                list_price_element = self.driver.find_element(By.CSS_SELECTOR, ".a-price.a-text-price[data-a-strike='true'] .a-offscreen")
-                list_price_text = list_price_element.get_attribute("textContent").replace("$", "").strip()
-                list_price = float(list_price_text)
-                self.logger.info(f"从页面提取到List Price: ${list_price}")
+            # 提取优惠券信息，检查是否为只有优惠券的情况
+            coupon_type, coupon_value = self._extract_coupon_info()
+            
+            # 如果有优惠券，检查是否只有优惠券没有折扣的情况
+            if coupon_type and coupon_value and actual_current_price:
+                # 先尝试提取折扣百分比，判断是否有明显折扣
+                discount_selectors = [
+                    ".savingPriceOverride", 
+                    ".savingsPercentage",
+                    ".a-color-price.a-size-large.aok-align-center.reinventPriceSavingsPercentageMargin", 
+                    ".a-color-base.a-text-bold",
+                    "[id*='savings']",
+                    ".dealBadgeSavingsPercentage"
+                ]
                 
-                # 如果数据库没有原价或原价为0，使用List Price更新
-                if not product.original_price or product.original_price == 0:
-                    product.original_price = list_price
-                    self.logger.info(f"使用List Price ${list_price} 更新商品原价")
-            except (NoSuchElementException, ValueError) as e:
-                self.logger.debug(f"无法从页面提取List Price: {str(e)}")
-
-            # 方法1: 直接从折扣元素中提取百分比 
-            discount_selectors = [
-                ".savingPriceOverride", 
-                ".savingsPercentage",
-                ".a-color-price.a-size-large.aok-align-center.reinventPriceSavingsPercentageMargin", 
-                ".a-color-base.a-text-bold",
-                "[id*='savings']",
-                ".dealBadgeSavingsPercentage"
+                # 寻找百分比折扣标记
+                percentage = None
+                for selector in discount_selectors:
+                    discount_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for discount_element in discount_elements:
+                        text = discount_element.text.strip()
+                        if "%" in text:
+                            # 提取百分比数字，处理格式如"-34%"或"Save 34%"
+                            percentage_text = ''.join(c for c in text.replace("-", "").replace("%", "") if c.isdigit())
+                            if percentage_text:
+                                percentage = int(percentage_text)
+                                self.logger.info(f"直接从页面提取到折扣百分比: {percentage}%")
+                                break
+                    if percentage:
+                        break
+                
+                # 如果没有提取到折扣百分比，说明是只有优惠券没有折扣的情况
+                if not percentage:
+                    self.logger.info(f"只有优惠券没有折扣的情况，使用当前价格${actual_current_price}作为原价")
+                    product.original_price = actual_current_price
+                    return None, None, actual_current_price
+            
+            # 从页面提取原价（List Price）- 使用多种选择器增加提取成功率
+            list_price_selectors = [
+                # 选择器1: 标准的List Price元素
+                ".a-price.a-text-price[data-a-strike='true'] .a-offscreen",
+                # 选择器2: 通用的删除线价格
+                ".a-price[data-a-strike='true'] .a-offscreen",
+                # 选择器3: 特定的基准价格元素
+                ".basisPrice .a-price.a-text-price[data-a-strike='true'] .a-offscreen",
+                # 选择器4: 原始价格标签
+                "[data-a-strike='true'] .a-offscreen"
             ]
             
-            # 寻找百分比折扣标记
-            percentage = None
-            for selector in discount_selectors:
-                discount_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                for discount_element in discount_elements:
-                    text = discount_element.text.strip()
-                    if "%" in text:
-                        # 提取百分比数字，处理格式如"-34%"或"Save 34%"
-                        percentage_text = ''.join(c for c in text.replace("-", "").replace("%", "") if c.isdigit())
-                        if percentage_text:
-                            percentage = int(percentage_text)
-                            self.logger.info(f"直接从页面提取到折扣百分比: {percentage}%")
-                            break
-                if percentage:
-                    break
-            
-            # 如果找到了折扣百分比，计算节省金额
-            if percentage and product.original_price:
-                # 使用数据库中的原价计算节省金额
-                savings = product.original_price * (percentage / 100)
-                self.logger.info(f"使用数据库原价${product.original_price}和折扣{percentage}%，计算节省金额${savings:.2f}")
-                
-                # 如果我们提取到了实际当前价格，记录一下计算价格与实际价格的差异
-                if actual_current_price:
-                    calculated_price = product.original_price - savings
-                    diff = abs(calculated_price - actual_current_price)
-                    self.logger.info(f"计算价格(${calculated_price:.2f})与实际价格(${actual_current_price:.2f})差异: ${diff:.2f}")
-                
-                return savings, percentage, actual_current_price
-            elif percentage and product.current_price and (not product.original_price or product.original_price == 0):
-                # 如果数据库中没有original_price但有current_price，直接使用current_price作为original_price
-                # 将current_price设为original_price
-                product.original_price = product.current_price
-                # 计算节省金额
-                savings = product.current_price * (percentage / 100)
-                self.logger.info(f"数据库中无原价但有当前价格${product.current_price}，直接使用当前价格作为原价，计算节省金额${savings:.2f}")
-                return savings, percentage, actual_current_price
-            elif percentage:
-                # 如果数据库中没有原价，也没有获取到实际当前价格，尝试从页面获取当前价格
+            for selector in list_price_selectors:
                 try:
-                    if not actual_current_price:
-                        # 再次尝试获取当前价格（以防之前的代码改变）
-                        price_element = self.driver.find_element(By.CSS_SELECTOR, ".a-price .a-offscreen")
-                        actual_current_price = float(price_element.get_attribute("textContent").replace("$", "").strip())
-                        self.logger.info(f"提取到当前价格: ${actual_current_price}")
+                    list_price_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    list_price_text = list_price_element.get_attribute("textContent").replace("$", "").replace(",", "").strip()
+                    original_price_from_page = float(list_price_text)
                     
-                    # 直接使用当前价格作为原价
+                    # 验证提取的原价是否合理 - 原价应该大于或等于当前价格
+                    if actual_current_price and original_price_from_page < actual_current_price:
+                        self.logger.warning(f"提取到的原价(${original_price_from_page})小于当前价格(${actual_current_price})，可能不准确，将使用当前价格作为原价")
+                        original_price_from_page = actual_current_price
+                    else:
+                        self.logger.info(f"从页面提取到List Price原价: ${original_price_from_page}")
+                    break
+                except (NoSuchElementException, ValueError) as e:
+                    self.logger.debug(f"使用选择器 '{selector}' 提取List Price失败: {str(e)}")
+            
+            # 尝试从包含"List Price"文本的元素中提取
+            if original_price_from_page is None:
+                try:
+                    # 使用XPath查找包含"List Price"文本的元素
+                    list_price_elements = self.driver.find_elements(By.XPATH, "//span[contains(text(), 'List Price')]")
+                    if list_price_elements:
+                        for element in list_price_elements:
+                            price_text = element.text
+                            # 提取价格字符串中的数字
+                            price_match = re.search(r'\$([0-9,]+\.\d{2}|\d+,\d{3}\.\d{2}|\d+\.\d{2})', price_text)
+                            if price_match:
+                                price_str = price_match.group(1).replace(',', '')
+                                extracted_price = float(price_str)
+                                
+                                # 验证提取的原价是否合理
+                                if actual_current_price and extracted_price < actual_current_price:
+                                    self.logger.warning(f"提取到的原价(${extracted_price})小于当前价格(${actual_current_price})，可能不准确，将使用当前价格作为原价")
+                                    original_price_from_page = actual_current_price
+                                else:
+                                    original_price_from_page = extracted_price
+                                    self.logger.info(f"从List Price文本提取到原价: ${original_price_from_page}")
+                                break
+                except Exception as e:
+                    self.logger.debug(f"从List Price文本提取原价失败: {str(e)}")
+            
+            # 尝试从basisPrice元素中获取List Price
+            if original_price_from_page is None:
+                try:
+                    basis_price_elements = self.driver.find_elements(By.CSS_SELECTOR, ".basisPrice")
+                    for element in basis_price_elements:
+                        price_text = element.text
+                        if "List Price:" in price_text:
+                            price_match = re.search(r'\$([0-9,]+\.\d{2})', price_text)
+                            if price_match:
+                                price_str = price_match.group(1).replace(',', '')
+                                extracted_price = float(price_str)
+                                
+                                # 验证提取的原价是否合理
+                                if actual_current_price and extracted_price < actual_current_price:
+                                    self.logger.warning(f"提取到的原价(${extracted_price})小于当前价格(${actual_current_price})，可能不准确，将使用当前价格作为原价")
+                                    original_price_from_page = actual_current_price
+                                else:
+                                    original_price_from_page = extracted_price
+                                    self.logger.info(f"从basisPrice元素提取到List Price原价: ${original_price_from_page}")
+                                break
+                except Exception as e:
+                    self.logger.debug(f"从basisPrice元素提取List Price失败: {str(e)}")
+
+            # 如果找到了页面原价，更新数据库中的商品原价
+            if original_price_from_page:
+                product.original_price = original_price_from_page
+                self.logger.info(f"使用页面提取的List Price ${original_price_from_page} 更新商品原价")
+                
+            # 如果找到了页面原价和实际当前价格，可以直接计算折扣百分比
+            if original_price_from_page and actual_current_price and not percentage:
+                if original_price_from_page > actual_current_price:
+                    savings = original_price_from_page - actual_current_price
+                    percentage = int(round((savings / original_price_from_page) * 100))
+                    self.logger.info(f"根据页面原价${original_price_from_page}和当前价格${actual_current_price}计算折扣百分比: {percentage}%")
+            
+            # 当只有优惠券没有折扣时的处理：将当前价格同时作为原价和当前价格
+            if actual_current_price and not percentage and not original_price_from_page:
+                self.logger.info(f"无折扣信息，使用当前价格${actual_current_price}同时作为原价")
+                original_price_from_page = actual_current_price
+                product.original_price = actual_current_price
+                # 返回无折扣信息，但带有当前价格
+                return None, None, actual_current_price
+            
+            # 计算节省金额的逻辑
+            if percentage:
+                # 优先使用页面提取的原价
+                if original_price_from_page:
+                    savings = original_price_from_page * (percentage / 100)
+                    self.logger.info(f"使用页面原价${original_price_from_page}和折扣{percentage}%，计算节省金额${savings:.2f}")
+                    return savings, percentage, actual_current_price
+                # 其次使用数据库中的原价
+                elif product.original_price:
+                    savings = product.original_price * (percentage / 100)
+                    self.logger.info(f"使用数据库原价${product.original_price}和折扣{percentage}%，计算节省金额${savings:.2f}")
+                    
+                    # 如果我们提取到了实际当前价格，记录一下计算价格与实际价格的差异
+                    if actual_current_price:
+                        calculated_price = product.original_price - savings
+                        diff = abs(calculated_price - actual_current_price)
+                        self.logger.info(f"计算价格(${calculated_price:.2f})与实际价格(${actual_current_price:.2f})差异: ${diff:.2f}")
+                    
+                    return savings, percentage, actual_current_price
+                # 最后使用数据库中的当前价格
+                elif product.current_price:
+                    # 记录我们是在使用当前价格作为原价
+                    self.logger.warning("无法从页面或数据库获取原价，使用当前价格作为原价")
+                    product.original_price = product.current_price
+                    # 计算节省金额
+                    savings = product.current_price * (percentage / 100)
+                    self.logger.info(f"数据库中无原价但有当前价格${product.current_price}，使用当前价格作为原价，计算节省金额${savings:.2f}")
+                    return savings, percentage, actual_current_price
+                # 如果数据库中也没有当前价格，尝试使用页面获取的当前价格
+                elif actual_current_price:
+                    self.logger.warning("数据库中无原价和当前价格，使用页面提取的当前价格作为原价")
                     product.original_price = actual_current_price
                     # 计算节省金额
                     savings = actual_current_price * (percentage / 100)
-                    self.logger.info(f"数据库中无原价，使用页面当前价格${actual_current_price}作为原价，计算节省金额${savings:.2f}")
+                    self.logger.info(f"使用页面当前价格${actual_current_price}作为原价，计算节省金额${savings:.2f}")
                     return savings, percentage, actual_current_price
-                except (NoSuchElementException, ValueError) as e:
-                    self.logger.warning(f"无法提取当前价格且数据库无原价: {str(e)}")
-                    return None, percentage, actual_current_price
             
         except NoSuchElementException:
             self.logger.warning("找不到折扣元素")
@@ -485,45 +580,18 @@ class DiscountScraper:
         else:
             return "None"
             
-    def _update_product_discount(self, 
-                               product: Product,
-                               savings: Optional[float],
-                               savings_percentage: Optional[int],
-                               coupon_type: Optional[str],
-                               coupon_value: Optional[float],
-                               deal_badge: Optional[str] = None,
-                               actual_current_price: Optional[float] = None) -> None:
-        """
-        更新商品优惠信息
+    def _update_product_discount(self, product: Product, savings: float, savings_percentage: int,
+                          coupon_type: str, coupon_value: float, deal_badge: str,
+                          actual_current_price: float = None):
+        """更新商品折扣信息"""
+        task_log = TaskLoggerAdapter(self.logger, {'task_id': f'UPDATE:{product.asin}'})
         
-        Args:
-            product: 商品对象
-            savings: 节省金额
-            savings_percentage: 折扣百分比
-            coupon_type: 优惠券类型
-            coupon_value: 优惠券值
-            deal_badge: 特殊促销标签
-            actual_current_price: 从网页直接抓取的当前价格
-        """
-        task_log = TaskLoggerAdapter(logger, {'task_id': f'UPDATE:{product.asin}'})
-        
-        # 如果存在旧的优惠券信息，保存到历史记录
-        if product.offers and (product.offers[0].coupon_type or product.offers[0].coupon_value):
-            old_coupon = CouponHistory(
-                product_id=product.asin,
-                coupon_type=product.offers[0].coupon_type,
-                coupon_value=product.offers[0].coupon_value,
-                created_at=datetime.now(UTC)
-            )
-            self.db.add(old_coupon)
-            task_log.info(f"保存旧优惠券信息: 类型={product.offers[0].coupon_type}, 值={product.offers[0].coupon_value}")
-            
-        # 更新商品优惠信息
+        # 如果没有优惠信息记录，创建一个新的
         if not product.offers:
             offer = Offer(product_id=product.asin)
             product.offers.append(offer)
             task_log.info(f"创建新的优惠信息记录")
-            
+        
         # 更新Offer表中的优惠信息
         product.offers[0].savings = savings
         product.offers[0].savings_percentage = savings_percentage
@@ -539,7 +607,8 @@ class DiscountScraper:
         product.savings_amount = savings
         product.savings_percentage = savings_percentage
         product.deal_type = product.offers[0].deal_type
-        product.updated_at = datetime.now(UTC)
+        product.updated_at = datetime.now(UTC)  # 更新一般更新时间
+        product.discount_updated_at = datetime.now(UTC)  # 更新折扣更新时间
         
         # 安全处理可能为None的数值
         savings_str = f"${savings:.2f}" if savings is not None else "无"
@@ -552,33 +621,12 @@ class DiscountScraper:
         
         # 更新商品当前价格
         if actual_current_price:
-            # 优先使用从网页抓取的实际价格作为当前显示价格
             product.current_price = actual_current_price
-            
-            # 如果之前没有设置原价，也使用当前价格作为原价
-            if not product.original_price or product.original_price == 0:
+            # 对于只有优惠券没有折扣的情况，将当前价格同时作为原价
+            if (not product.original_price or product.original_price == 0 or 
+                (coupon_type and not savings and not savings_percentage)):
                 product.original_price = actual_current_price
-                
-            task_log.info(f"使用从网页抓取的实际当前价格: ${actual_current_price:.2f}")
-        elif savings and product.original_price:
-            # 如果有折扣金额且有原价，计算折扣后的价格
-            product.current_price = product.original_price - savings
-            task_log.info(f"通过计算得出当前价格: ${product.current_price:.2f} (原价${product.original_price:.2f} - 节省${savings:.2f})")
-        
-        # 记录优惠券信息，但不再改变当前价格
-        # 注意：优惠券只是记录用，不会从当前价格中减去
-        if coupon_type and coupon_value:
-            coupon_discount_str = ""
-            if coupon_type == "percentage":
-                if product.current_price:
-                    coupon_discount = product.current_price * (coupon_value / 100)
-                    coupon_discount_str = f"${coupon_discount:.2f}"
-                task_log.info(f"记录百分比优惠券: {coupon_value}% (约合{coupon_discount_str})")
-            elif coupon_type == "fixed":
-                task_log.info(f"记录固定金额优惠券: ${coupon_value}")
-            
-            # 添加注释说明不再从当前价格中减去优惠券金额
-            task_log.info(f"优惠券信息仅供记录，不会从当前价格中减去")
+                task_log.info(f"只有优惠券没有折扣，使用当前价格 ${actual_current_price} 同时作为原价")
         
     def process_product(self, product: Product) -> bool:
         """
@@ -604,8 +652,10 @@ class DiscountScraper:
             
             # 提取折扣和优惠券信息
             task_log.debug("提取折扣信息...")
+            # _extract_discount_info内部已经调用了_extract_coupon_info
             savings, savings_percentage, actual_current_price = self._extract_discount_info(product)
             
+            # 提取优惠券信息 - 如果_extract_discount_info已经调用过，则重用结果
             task_log.debug("提取优惠券信息...")
             coupon_type, coupon_value = self._extract_coupon_info()
             
@@ -690,64 +740,58 @@ class DiscountScraper:
             main_log.info("              开始优惠信息抓取任务")
             main_log.info("=====================================================")
             
-            # 处理特定的ASIN列表或从数据库获取商品
+            # 处理特定的ASIN列表或从调度器获取商品
             if self.specific_asins:
                 main_log.info(f"将处理指定的 {len(self.specific_asins)} 个商品ASIN")
-                
-                # 使用tqdm添加进度条
-                for idx, asin in enumerate(tqdm(self.specific_asins, desc="处理商品"), 1):
-                    task_log = TaskLoggerAdapter(logger, {'task_id': f'BATCH:{idx}/{len(self.specific_asins)}'})
-                    task_log.info(f"处理商品 ASIN: {asin}")
-                    
-                    # 处理商品
-                    success = self.process_asin(asin)
-                    processed_count += 1
-                    
-                    if success:
-                        success_count += 1
-                        task_log.info(f"商品处理成功")
-                        # 成功后等待随机时间
-                        delay = random.uniform(self.min_delay, self.max_delay)
-                        task_log.debug(f"等待 {delay:.1f} 秒...")
-                        time.sleep(delay)
-                    else:
-                        task_log.warning(f"商品处理失败")
-                        # 失败后等待较长时间
-                        delay = random.uniform(5, 10)
-                        task_log.debug(f"失败后等待 {delay:.1f} 秒...")
-                        time.sleep(delay)
+                asins_to_process = self.specific_asins
+            elif self.use_scheduler:
+                main_log.info("使用调度器获取待处理商品...")
+                # 更新调度器任务队列
+                self.scheduler.update_task_queue()
+                # 获取下一批要处理的商品
+                asins_to_process = self.scheduler.get_next_batch()
+                main_log.info(f"调度器返回 {len(asins_to_process)} 个待处理商品")
             else:
                 # 获取按创建时间排序的商品
                 main_log.info("从数据库获取待处理商品列表...")
                 products = self.db.query(Product).order_by(
                     Product.created_at
                 ).limit(self.batch_size).all()
+                asins_to_process = [p.asin for p in products]
+                main_log.info(f"获取到 {len(asins_to_process)} 个待处理商品")
+            
+            # 使用tqdm添加进度条
+            for idx, asin in enumerate(tqdm(asins_to_process, desc="处理商品"), 1):
+                task_log = TaskLoggerAdapter(logger, {'task_id': f'BATCH:{idx}/{len(asins_to_process)}'})
+                task_log.info(f"处理商品 ASIN: {asin}")
                 
-                total_products = len(products)
-                main_log.info(f"本次任务将处理 {total_products} 个商品")
+                # 记录处理开始时间
+                task_start_time = time.time()
                 
-                # 使用tqdm添加进度条
-                for idx, product in enumerate(tqdm(products, desc="处理商品"), 1):
-                    task_log = TaskLoggerAdapter(logger, {'task_id': f'BATCH:{idx}/{total_products}'})
-                    task_log.info(f"处理商品 ASIN: {product.asin}")
-                    
-                    # 处理每个商品
-                    success = self.process_product(product)
-                    processed_count += 1
-                    
-                    if success:
-                        success_count += 1
-                        task_log.info(f"商品处理成功")
-                        # 成功后等待随机时间
-                        delay = random.uniform(self.min_delay, self.max_delay)
-                        task_log.debug(f"等待 {delay:.1f} 秒...")
-                        time.sleep(delay)
-                    else:
-                        task_log.warning(f"商品处理失败")
-                        # 失败后等待较长时间
-                        delay = random.uniform(5, 10)
-                        task_log.debug(f"失败后等待 {delay:.1f} 秒...")
-                        time.sleep(delay)
+                # 处理商品
+                success = self.process_asin(asin)
+                processed_count += 1
+                
+                # 计算处理时间
+                processing_time = time.time() - task_start_time
+                
+                # 如果使用调度器，记录任务结果
+                if self.use_scheduler:
+                    self.scheduler.record_task_result(asin, success, processing_time)
+                
+                if success:
+                    success_count += 1
+                    task_log.info(f"商品处理成功")
+                    # 成功后等待随机时间
+                    delay = random.uniform(self.min_delay, self.max_delay)
+                    task_log.debug(f"等待 {delay:.1f} 秒...")
+                    time.sleep(delay)
+                else:
+                    task_log.warning(f"商品处理失败")
+                    # 失败后等待较长时间
+                    delay = random.uniform(5, 10)
+                    task_log.debug(f"失败后等待 {delay:.1f} 秒...")
+                    time.sleep(delay)
                     
         except Exception as e:
             main_log.error(f"抓取过程发生错误: {str(e)}")
@@ -774,88 +818,51 @@ class DiscountScraper:
             main_log.info(f"  • 失败数量: {processed_count - success_count} 个")
             main_log.info(f"  • 成功率: {(success_count/processed_count*100):.1f}%" if processed_count > 0 else "0%")
             main_log.info(f"  • 平均速度: {processed_count/duration:.2f} 个/秒" if duration > 0 else "N/A")
+            
+            # 如果使用调度器，输出调度器统计信息
+            if self.use_scheduler:
+                scheduler_stats = self.scheduler.get_statistics()
+                main_log.info("\n调度器统计:")
+                main_log.info(f"  • 总任务数: {scheduler_stats['total_tasks']}")
+                main_log.info(f"  • 完成任务: {scheduler_stats['completed_tasks']}")
+                main_log.info(f"  • 失败任务: {scheduler_stats['failed_tasks']}")
+                main_log.info(f"  • 成功率: {scheduler_stats['success_rate']:.1f}%")
+                main_log.info(f"  • 平均处理时间: {scheduler_stats['avg_processing_time']:.2f} 秒")
+                main_log.info(f"  • 剩余任务数: {scheduler_stats['queue_size']}")
 
-async def main():
-    """异步主函数"""
-    args = parse_arguments()
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description='亚马逊商品优惠信息爬虫')
+    parser.add_argument('--batch-size', type=int, default=50, help='批处理大小')
+    parser.add_argument('--no-headless', action='store_true', help='不使用无头模式')
+    parser.add_argument('--force-update', action='store_true', help='强制更新所有商品，忽略时间间隔检查')
+    args = parser.parse_args()
+
+    # 初始化数据库会话
+    db = next(get_db())
     
-    # 设置日志级别
-    if args.log_level:
-        log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-        logger.setLevel(log_level)
+    # 初始化调度器
+    scheduler = DiscountUpdateScheduler(
+        db=db, 
+        batch_size=args.batch_size,
+        force_update=args.force_update
+    )
     
-    main_log = TaskLoggerAdapter(logger, {'task_id': 'MAIN'})
-    main_log.info("=====================================================")
-    main_log.info("           启动优惠信息抓取任务")
-    main_log.info("=====================================================")
-    
-    # 处理ASIN参数
-    specific_asins = []
-    
-    if args.asin:
-        main_log.info(f"  • 指定单个ASIN: {args.asin}")
-        specific_asins.append(args.asin)
-        
-    if args.asin_list:
-        asin_list = [asin.strip() for asin in args.asin_list.split(',') if asin.strip()]
-        main_log.info(f"  • 指定ASIN列表: {len(asin_list)}个")
-        specific_asins.extend(asin_list)
-        
-    if args.asin_file:
-        try:
-            with open(args.asin_file, 'r') as f:
-                file_asins = [line.strip() for line in f if line.strip()]
-                main_log.info(f"  • 从文件加载ASIN: {len(file_asins)}个 (文件: {args.asin_file})")
-                specific_asins.extend(file_asins)
-        except Exception as e:
-            main_log.error(f"读取ASIN文件失败: {str(e)}")
-            sys.exit(1)
-    
-    # 去重
-    if specific_asins:
-        specific_asins = list(dict.fromkeys(specific_asins))
-        main_log.info(f"  • 总计处理ASIN: {len(specific_asins)}个 (去重后)")
-    
-    # 当有指定ASIN时，调整批量大小为实际处理的ASIN数量
-    actual_batch_size = len(specific_asins) if specific_asins else args.batch_size
-    
-    main_log.info(f"配置信息:")
-    main_log.info(f"  • 批量大小: {actual_batch_size} 个商品")
-    main_log.info(f"  • 无头模式: {'否' if args.no_headless else '是'}")
-    main_log.info(f"  • 延迟范围: {args.min_delay}-{args.max_delay} 秒")
-    main_log.info(f"  • 日志级别: {logger.level}")
+    # 初始化爬虫
+    scraper = DiscountScraper(
+        db=db,
+        scheduler=scheduler,
+        headless=not args.no_headless
+    )
     
     try:
-        # 获取数据库会话
-        main_log.info("连接数据库...")
-        db = next(get_db())
-        
-        # 创建抓取器实例
-        main_log.info("创建优惠抓取器实例...")
-        scraper = DiscountScraper(
-            db=db,
-            batch_size=actual_batch_size,
-            headless=not args.no_headless,
-            min_delay=args.min_delay,
-            max_delay=args.max_delay,
-            specific_asins=specific_asins if specific_asins else None
-        )
-        
-        # 运行抓取任务
-        main_log.info("开始运行抓取任务...")
+        # 运行爬虫
         scraper.run()
-        
-    except Exception as e:
-        main_log.error(f"任务执行失败: {str(e)}")
-        # 记录详细的异常堆栈信息
-        import traceback
-        main_log.debug(f"异常堆栈: {traceback.format_exc()}")
-        sys.exit(1)
-        
+    except KeyboardInterrupt:
+        logger.info("收到中断信号，正在停止爬虫...")
     finally:
-        main_log.info("关闭数据库连接...")
+        # 关闭数据库连接
         db.close()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main()) 
+    main() 

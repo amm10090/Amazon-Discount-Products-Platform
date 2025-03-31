@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 import csv
 from typing import Dict, List, Optional, TypedDict
-from datetime import datetime
+from datetime import datetime, UTC
 import asyncio
 import aiofiles
 import os
@@ -53,6 +53,10 @@ class CrawlStats:
     last_index: int = -1         # 最后处理的商品索引
     
     def __post_init__(self):
+        # 确保start_time包含时区信息
+        if self.start_time.tzinfo is None:
+            self.start_time = self.start_time.replace(tzinfo=UTC)
+            
         self.coupon_stats = {
             'percentage': {'count': 0, 'avg_value': 0.0},
             'fixed': {'count': 0, 'avg_value': 0.0}
@@ -520,14 +524,14 @@ async def save_coupon_results(
         if format == 'json':
             data = {
                 'metadata': {
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(UTC).isoformat(),
                     'source': 'amazon_coupon_deals',
                     'stats': {
                         'total_processed': stats.total_seen,
                         'unique_items': stats.unique_count,
                         'duplicate_items': stats.duplicate_count,
                         'duplicate_rate': f"{stats.duplicate_rate:.1f}%",
-                        'duration_seconds': (datetime.now() - stats.start_time).total_seconds(),
+                        'duration_seconds': (datetime.now(UTC) - stats.start_time).total_seconds(),
                         'coupon_stats': stats.coupon_stats
                     }
                 },
@@ -676,7 +680,7 @@ async def crawl_coupon_deals(
             
             # 输出最终统计信息
             log_section("爬取任务完成")
-            duration = (datetime.now() - stats.start_time).total_seconds()
+            duration = (datetime.now(UTC) - stats.start_time).total_seconds()
             
             log_success(f"任务统计:")
             log_success(f"  • 总耗时: {duration:.1f} 秒")

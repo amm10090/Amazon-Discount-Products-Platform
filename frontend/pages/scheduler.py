@@ -683,10 +683,28 @@ def main():
                             if pd.isna(row['end_time']):
                                 if row['status'] == get_text('status_running'):
                                     # 如果任务正在运行，计算从开始到现在的时间
-                                    duration = (datetime.now(UTC) - row['start_time']).total_seconds()
+                                    start_time = row['start_time']
+                                    # 处理时区问题
+                                    now = datetime.now(UTC)
+                                    if start_time.tzinfo is None:
+                                        # 如果start_time没有时区信息，添加UTC时区
+                                        start_time = start_time.replace(tzinfo=UTC)
+                                    
+                                    duration = (now - start_time).total_seconds()
                                     return f"{int(duration)} {get_text('seconds')} ({get_text('running')})"
                                 return get_text('not_finished')
-                            duration = (row['end_time'] - row['start_time']).total_seconds()
+                            
+                            # 处理end_time和start_time的时区问题
+                            end_time = row['end_time']
+                            start_time = row['start_time']
+                            
+                            # 确保两者都有时区信息
+                            if end_time.tzinfo is None:
+                                end_time = end_time.replace(tzinfo=UTC)
+                            if start_time.tzinfo is None:
+                                start_time = start_time.replace(tzinfo=UTC)
+                                
+                            duration = (end_time - start_time).total_seconds()
                             return f"{int(duration)} {get_text('seconds')}"
                         
                         history_df['duration'] = history_df.apply(calculate_duration, axis=1)
