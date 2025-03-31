@@ -369,21 +369,92 @@ class DiscountUpdateScheduler:
         batch = []
         temp_tasks = []  # 临时存储不需要立即处理的任务
         
+        # 记录诊断信息
+        total_tasks_checked = 0
+        tasks_ready = 0
+        tasks_not_ready = 0
+        
+        self.logger.info(f"获取下一批任务，当前队列大小: {self.task_queue.qsize()}, 目标批次大小: {self.batch_size}")
+        self.logger.info(f"强制更新模式: {'启用' if self.force_update else '禁用'}")
+        
         while len(batch) < self.batch_size and not self.task_queue.empty():
             task = self.task_queue.get()
+            total_tasks_checked += 1
             
             # 如果是强制更新或者到达更新时间，则添加到批次中
-            if self.force_update or task.next_update_time <= current_time:
+            is_ready = self.force_update or (task.next_update_time is None) or (task.next_update_time <= current_time)
+            
+            if is_ready:
                 batch.append(task.asin)
                 self.stats['total_tasks'] += 1
+                tasks_ready += 1
+                
+                # 记录调试信息
+                if self.force_update:
+                    self.logger.debug(f"强制模式添加任务: ASIN={task.asin}, 优先级={task.priority:.2f}")
+                else:
+                    time_info = "无计划时间" if task.next_update_time is None else f"已到期 ({(current_time - task.next_update_time).total_seconds():.0f}秒前)"
+                    self.logger.debug(f"正常添加任务: ASIN={task.asin}, 优先级={task.priority:.2f}, 状态={time_info}")
             else:
                 # 如果还没到更新时间，保存到临时列表
                 temp_tasks.append(task)
+                tasks_not_ready += 1
+                
+                # 记录调试信息（仅记录部分，避免日志过多）
+                if tasks_not_ready <= 5 or tasks_not_ready % 50 == 0:
+                    time_diff = (task.next_update_time - current_time).total_seconds()
+                    self.logger.debug(f"任务未就绪: ASIN={task.asin}, 优先级={task.priority:.2f}, 剩余时间={time_diff:.0f}秒")
+        
+        # 记录诊断统计信息
+        self.logger.info(f"任务检查统计: 总检查={total_tasks_checked}, 就绪={tasks_ready}, 未就绪={tasks_not_ready}")
+        
+        # 确保至少返回一个任务（如果队列不为空）
+        if len(batch) == 0 and tasks_not_ready > 0:
+            # 如果没有就绪的任务但有未就绪的任务，选择一个最接近就绪的任务
+            nearest_task = min(temp_tasks, key=lambda t: t.next_update_time if t.next_update_time else current_time)
+            batch.append(nearest_task.asin)
+            temp_tasks.remove(nearest_task)
+            self.stats['total_tasks'] += 1
+            
+            # 记录信息
+            time_diff = (nearest_task.next_update_time - current_time).total_seconds() if nearest_task.next_update_time else 0
+            self.logger.info(f"没有就绪任务，选择最接近的任务: ASIN={nearest_task.asin}, 剩余时间={time_diff:.0f}秒")
                 
         # 将未处理的任务放回队列
         for task in temp_tasks:
             self.task_queue.put(task)
-                
+        
+        # 如果批次为空但队列不为空，尝试另一种方法
+        if len(batch) == 0 and self.task_queue.qsize() > 0:
+            self.logger.warning("常规方法未找到可处理任务，尝试备用方法...")
+            
+            # 获取一些任务进行分析
+            sample_tasks = []
+            sample_size = min(10, self.task_queue.qsize())
+            
+            for _ in range(sample_size):
+                if not self.task_queue.empty():
+                    sample_tasks.append(self.task_queue.get())
+            
+            # 分析任务
+            for task in sample_tasks:
+                self.logger.info(f"样本任务: ASIN={task.asin}, 优先级={task.priority:.2f}, "
+                               f"下次更新时间={task.next_update_time}, "
+                               f"是否就绪={task.next_update_time is None or task.next_update_time <= current_time}")
+            
+            # 如果有样本任务，选择其中最高优先级的任务
+            if sample_tasks:
+                best_task = max(sample_tasks, key=lambda t: t.priority)
+                batch.append(best_task.asin)
+                self.stats['total_tasks'] += 1
+                sample_tasks.remove(best_task)
+                self.logger.info(f"选择最高优先级任务: ASIN={best_task.asin}, 优先级={best_task.priority:.2f}")
+            
+            # 将剩余样本任务放回队列
+            for task in sample_tasks:
+                self.task_queue.put(task)
+        
+        self.logger.info(f"最终返回 {len(batch)} 个任务")
         return batch
         
     def record_task_result(self, asin: str, success: bool, processing_time: float):

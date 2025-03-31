@@ -169,6 +169,7 @@ class DiscountScraper:
         """
         actual_current_price = None
         original_price_from_page = None
+        percentage = None  # 在这里初始化percentage变量，避免访问错误
         try:
             # 首先尝试从页面获取当前实际价格 - 使用更精确的选择器
             try:
@@ -217,7 +218,6 @@ class DiscountScraper:
                 ]
                 
                 # 寻找百分比折扣标记
-                percentage = None
                 for selector in discount_selectors:
                     discount_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     for discount_element in discount_elements:
