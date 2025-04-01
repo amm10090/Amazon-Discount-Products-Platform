@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm import Session
 from tqdm import tqdm
 from sqlalchemy import func, text
+import queue
 
 # 添加项目根目录到Python路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -100,6 +101,16 @@ class ParallelDiscountScraper:
             'success_count': 0,
             'failure_count': 0,
             'retry_count': 0,
+            'updated_fields': {
+                'current_price': 0,
+                'original_price': 0,
+                'savings_amount': 0,
+                'savings_percentage': 0,
+                'coupon_type': 0,
+                'coupon_value': 0,
+                'deal_type': 0,
+                'deal_badge': 0
+            }
         }
         
         # 已处理的商品集合，用于去重
@@ -123,6 +134,68 @@ class ParallelDiscountScraper:
             self.driver_pool = None
             self.logger.info("WebDriver池已关闭")
             
+    def _process_product(self, driver, product):
+        """处理单个商品"""
+        task_id = f"PROCESS:{product.asin}"
+        task_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': task_id})
+        
+        try:
+            # 为该商品创建一个临时DiscountScraper实例
+            temp_scraper = DiscountScraper(self.db, batch_size=1, headless=self.headless)
+            temp_scraper.driver = driver  # 使用池中的WebDriver
+            
+            # 访问商品页面
+            url = f"https://www.amazon.com/dp/{product.asin}?th=1"
+            task_log.info(f"开始处理商品: {url}")
+            driver.get(url)
+            
+            # 随机等待1-3秒，模拟人类行为
+            wait_time = random.uniform(1, 3)
+            time.sleep(wait_time)
+            
+            # 提取折扣信息
+            task_log.debug("提取折扣信息...")
+            savings, savings_percentage, actual_current_price = temp_scraper._extract_discount_info(product)
+            
+            # 提取优惠券信息
+            task_log.debug("提取优惠券信息...")
+            coupon_type, coupon_value = temp_scraper._extract_coupon_info()
+            
+            # 提取促销标签信息
+            task_log.debug("提取促销标签信息...")
+            deal_badge = temp_scraper._extract_deal_badge_info()
+            
+            # 安全处理可能为None的数值
+            savings_str = f"${savings:.2f}" if savings is not None else "无"
+            percentage_str = f"{savings_percentage}%" if savings_percentage is not None else "无"
+            coupon_value_str = str(coupon_value) if coupon_value is not None else "无"
+            actual_price_str = f"${actual_current_price:.2f}" if actual_current_price is not None else "无"
+            
+            # 记录提取到的信息
+            task_log.info(
+                f"优惠信息提取结果: 折扣={percentage_str}, 节省={savings_str}, "
+                f"实际当前价格={actual_price_str}, 优惠券={coupon_type}({coupon_value_str}), 促销={deal_badge}"
+            )
+            
+            # 更新数据库...
+            task_log.debug("更新数据库...")
+            temp_scraper._update_product_discount(
+                product, savings, savings_percentage,
+                coupon_type, coupon_value, deal_badge, 
+                actual_current_price
+            )
+            
+            self.db.commit()
+            task_log.info(f"商品优惠信息更新成功")
+            return True
+            
+        except Exception as e:
+            self.db.rollback()
+            task_log.error(f"处理失败: {str(e)}")
+            # 记录详细的异常堆栈信息
+            task_log.debug(f"异常堆栈: {traceback.format_exc()}")
+            return False
+
     def process_product(self, product: Product, driver) -> bool:
         """
         处理单个商品的优惠信息
@@ -169,10 +242,10 @@ class ParallelDiscountScraper:
             coupon_value_str = str(coupon_value) if coupon_value is not None else "无"
             actual_price_str = f"${actual_current_price:.2f}" if actual_current_price is not None else "无"
             
-            # 记录提取到的信息
+            # 根据级别记录提取结果
             task_log.info(
-                f"优惠信息提取结果: 折扣={percentage_str}, 节省={savings_str}, "
-                f"实际当前价格={actual_price_str}, 优惠券={coupon_type}({coupon_value_str}), 促销={deal_badge}"
+                f"商品{product.asin}优惠: 折扣={percentage_str}, 节省={savings_str}, "
+                f"价格={actual_price_str}, 优惠券={coupon_type}({coupon_value_str})"
             )
             
             # 更新数据库 - 使用本地session
@@ -184,10 +257,11 @@ class ParallelDiscountScraper:
                     temp_scraper.db = local_session
                     temp_scraper._update_product_discount(
                         local_product, savings, savings_percentage,
-                        coupon_type, coupon_value, deal_badge, actual_current_price
+                        coupon_type, coupon_value, deal_badge, 
+                        actual_current_price
                     )
                     local_session.commit()
-                    task_log.info(f"商品优惠信息更新成功")
+                    task_log.info(f"商品{product.asin}优惠信息更新成功")
                     return True
                 else:
                     task_log.warning(f"在本地会话中未找到商品: {product.asin}")
@@ -248,7 +322,7 @@ class ParallelDiscountScraper:
                     local_session.flush()  # 刷新以获取ID，但不提交
                     
                 # 处理商品优惠信息
-                success = self.process_product(product, driver)
+                success = self._process_product(driver, product)
                 if success:
                     local_session.commit()
                 else:
@@ -285,6 +359,9 @@ class ParallelDiscountScraper:
         failed_asins = []
         retry_count = 0
         
+        # 创建进度条
+        progress_bar = tqdm(total=len(asins_to_process), desc="处理商品", unit="个")
+        
         # 使用ThreadPoolExecutor进行并行处理
         with ThreadPoolExecutor(max_workers=self.concurrent_workers) as executor:
             # 第一次处理
@@ -303,6 +380,10 @@ class ParallelDiscountScraper:
                         else:
                             self.stats['failure_count'] += 1
                             failed_asins.append(asin)
+                    
+                    # 更新进度条
+                    progress_bar.update(1)
+                    progress_bar.set_postfix(成功=self.stats['success_count'], 失败=self.stats['failure_count'])
                             
                 except Exception as e:
                     self.logger.error(f"获取任务结果时出错: {str(e)}")
@@ -311,6 +392,10 @@ class ParallelDiscountScraper:
                     with self._lock:
                         self.stats['processed_count'] += 1
                         self.stats['failure_count'] += 1
+                    
+                    # 更新进度条
+                    progress_bar.update(1)
+                    progress_bar.set_postfix(成功=self.stats['success_count'], 失败=self.stats['failure_count'])
                         
         # 失败重试逻辑
         while failed_asins and retry_count < self.retry_count:
@@ -320,6 +405,10 @@ class ParallelDiscountScraper:
             
             self.logger.info(f"第{retry_count}次重试，处理{len(retry_asins)}个失败商品")
             time.sleep(self.retry_delay)  # 重试前等待
+            
+            # 重置进度条
+            progress_bar.close()
+            progress_bar = tqdm(total=len(retry_asins), desc=f"重试 #{retry_count}", unit="个")
             
             # 重试失败的商品
             with ThreadPoolExecutor(max_workers=self.concurrent_workers) as executor:
@@ -343,11 +432,20 @@ class ParallelDiscountScraper:
                                 self.stats['failure_count'] -= 1
                             else:
                                 failed_asins.append(asin)
+                        
+                        # 更新进度条
+                        progress_bar.update(1)
+                        progress_bar.set_postfix(成功=self.stats['success_count'], 失败=self.stats['failure_count'])
                                 
                     except Exception as e:
                         self.logger.error(f"重试获取任务结果时出错: {str(e)}")
                         failed_asins.append(asin)
-            
+                        
+                        # 更新进度条
+                        progress_bar.update(1)
+        
+        # 关闭进度条
+        progress_bar.close()
         return results
                 
     def run(self):
@@ -370,10 +468,12 @@ class ParallelDiscountScraper:
                 asins_to_process = self.specific_asins
             elif self.before_date:
                 main_log.info(f"将处理在 {self.before_date} 之前创建的商品")
-                # 将字符串日期转换为datetime对象
                 try:
                     filter_date = datetime.strptime(self.before_date, "%Y-%m-%d").replace(tzinfo=UTC)
                     main_log.info(f"过滤日期: {filter_date}")
+                    
+                    # 设置基准更新时间
+                    base_update_time = datetime(2025, 3, 31, tzinfo=UTC)
                     
                     # 获取符合条件的商品总数
                     total_count = self.db.query(func.count(Product.id)).filter(
@@ -381,16 +481,85 @@ class ParallelDiscountScraper:
                     ).scalar()
                     main_log.info(f"找到 {total_count} 个在 {self.before_date} 之前创建的商品")
                     
-                    # 获取指定数量的商品
-                    products = self.db.query(Product).filter(
-                        Product.created_at < filter_date
+                    # 改进的商品选择逻辑，避免总是选择同一批商品
+                    # 定义不同类型商品的最短更新间隔（小时）
+                    min_update_intervals = {
+                        'not_updated': 0,  # 从未更新过的商品无间隔限制
+                        'outdated': 24,    # 已更新过的商品至少间隔24小时
+                        'random': 12,      # 随机选择的商品至少间隔12小时
+                    }
+                    
+                    # 计算时间间隔截止点
+                    current_time = datetime.now(UTC)
+                    outdated_cutoff = current_time - timedelta(hours=min_update_intervals['outdated'])
+                    random_cutoff = current_time - timedelta(hours=min_update_intervals['random'])
+                    
+                    main_log.info(f"应用更新间隔限制: 已更新商品={min_update_intervals['outdated']}小时, 随机商品={min_update_intervals['random']}小时")
+                    
+                    # 1. 获取一部分未更新过的商品（优先级最高）
+                    products_not_updated = self.db.query(Product).filter(
+                        Product.created_at < filter_date,
+                        Product.discount_updated_at == base_update_time
                     ).order_by(
                         Product.created_at.asc()
-                    ).limit(self.batch_size).all()
+                    ).limit(self.batch_size // 3).all()
+                    
+                    # 2. 获取一部分更新时间最早的商品（遵循最短间隔限制）
+                    products_outdated = self.db.query(Product).filter(
+                        Product.created_at < filter_date,
+                        Product.discount_updated_at != base_update_time,
+                        Product.discount_updated_at < outdated_cutoff,  # 确保满足最短更新间隔
+                        Product.discount_updated_at.isnot(None)
+                    ).order_by(
+                        Product.discount_updated_at.asc()  # 按更新时间升序
+                    ).limit(self.batch_size // 3).all()
+                    
+                    # 3. 随机选择一部分商品，确保多样性（遵循更短的最短间隔限制）
+                    random_products = self.db.query(Product).filter(
+                        Product.created_at < filter_date,
+                        Product.asin.isnot(None),
+                        Product.discount_updated_at < random_cutoff  # 确保满足最短更新间隔
+                    ).order_by(
+                        func.random()  # 随机排序
+                    ).limit(self.batch_size // 3).all()
+                    
+                    # 合并所有商品，去重
+                    all_products = []
+                    processed_asins = set()
+                    
+                    # 按优先级合并三组商品
+                    for product_group in [products_not_updated, products_outdated, random_products]:
+                        for product in product_group:
+                            if product.asin and product.asin not in processed_asins:
+                                all_products.append(product)
+                                processed_asins.add(product.asin)
+                    
+                    # 如果合并后的商品不足批次大小，再随机补充一些（不受间隔限制）
+                    if len(all_products) < self.batch_size:
+                        remaining_count = self.batch_size - len(all_products)
+                        main_log.info(f"商品数量不足，额外补充{remaining_count}个商品（无间隔限制）")
+                        additional_products = self.db.query(Product).filter(
+                            Product.created_at < filter_date,
+                            Product.asin.isnot(None),
+                            ~Product.asin.in_(processed_asins)  # 排除已处理的ASIN
+                        ).order_by(
+                            func.random()
+                        ).limit(remaining_count).all()
+                        
+                        for product in additional_products:
+                            if product.asin and product.asin not in processed_asins:
+                                all_products.append(product)
+                                processed_asins.add(product.asin)
                     
                     # 提取ASIN
-                    asins_to_process = [p.asin for p in products if p.asin]
+                    asins_to_process = [p.asin for p in all_products if p.asin]
                     main_log.info(f"本次将处理 {len(asins_to_process)} 个商品")
+                    
+                    # 记录详细的商品选择信息
+                    main_log.info(f"商品来源分布: 未更新过={len(products_not_updated)}, "
+                                 f"更新时间最早={len(products_outdated)}, "
+                                 f"随机选择={len(random_products)}, "
+                                 f"额外补充={len(asins_to_process) - len(products_not_updated) - len(products_outdated) - len(random_products)}")
                     
                     # 如果没有找到符合条件的商品，输出详细信息以帮助诊断
                     if not asins_to_process:
@@ -481,6 +650,9 @@ class ParallelDiscountScraper:
                 # 获取按创建时间排序的商品
                 main_log.info("从数据库获取待处理商品列表...")
                 
+                # 设置基准更新时间
+                base_update_time = datetime(2025, 3, 31, tzinfo=UTC)
+                
                 # 先检查数据库中的商品总数
                 total_products = self.db.query(func.count(Product.id)).scalar()
                 main_log.info(f"数据库中共有 {total_products} 个商品记录")
@@ -494,26 +666,41 @@ class ParallelDiscountScraper:
                     ).scalar()
                     main_log.info(f"数据库中有 {products_count} 个有效ASIN的商品记录")
                 
-                products = self.db.query(Product).order_by(
-                    Product.created_at
+                # 分两步获取商品:
+                # 1. 首先获取未更新过的商品（discount_updated_at 等于基准时间）
+                products_not_updated = self.db.query(Product).filter(
+                    Product.asin.isnot(None),
+                    Product.discount_updated_at == base_update_time
+                ).order_by(
+                    Product.created_at.asc()
                 ).limit(self.batch_size).all()
                 
-                if not products:
-                    main_log.warning("未找到任何商品记录，可能的原因:")
-                    main_log.warning(" - 数据库中没有商品数据")
-                    main_log.warning(" - 商品表结构可能不正确")
-                    main_log.warning(" - 数据库连接问题")
-                    
-                    # 尝试获取表结构信息
-                    try:
-                        # 尝试检查Product表的列信息
-                        column_info = [c.name for c in Product.__table__.columns]
-                        main_log.info(f"Product表结构: {column_info}")
-                    except Exception as e:
-                        main_log.error(f"获取表结构时出错: {str(e)}")
+                remaining_slots = self.batch_size - len(products_not_updated)
+                products = products_not_updated
                 
+                # 2. 如果还有剩余名额，获取已更新过的商品（discount_updated_at 大于基准时间）
+                if remaining_slots > 0 and products_not_updated:
+                    products_updated = self.db.query(Product).filter(
+                        Product.asin.isnot(None),
+                        Product.discount_updated_at > base_update_time
+                    ).order_by(
+                        Product.created_at.asc()
+                    ).limit(remaining_slots).all()
+                    products.extend(products_updated)
+                elif remaining_slots > 0:  # 如果没有未更新的商品，直接按创建时间获取
+                    products = self.db.query(Product).filter(
+                        Product.asin.isnot(None)
+                    ).order_by(
+                        Product.created_at.asc()
+                    ).limit(self.batch_size).all()
+            
                 asins_to_process = [p.asin for p in products]
                 main_log.info(f"获取到 {len(asins_to_process)} 个待处理商品")
+                
+                # 记录详细的商品选择信息
+                not_updated_count = len(products_not_updated)
+                updated_count = len(asins_to_process) - not_updated_count
+                main_log.info(f"商品构成: 未更新过={not_updated_count}, 已更新过={updated_count}")
                 
                 # 如果没有商品，输出详细的调试信息
                 if not asins_to_process:
@@ -565,6 +752,17 @@ class ParallelDiscountScraper:
             main_log.info(f"  • 成功率: {success_rate:.1f}%")
             main_log.info(f"  • 平均速度: {self.stats['processed_count']/duration:.2f} 个/秒" if duration > 0 else "N/A")
             
+            # 添加字段更新统计信息
+            main_log.info("\n字段更新统计:")
+            main_log.info(f"  • 更新商品当前价格: {self.stats['updated_fields']['current_price']} 个")
+            main_log.info(f"  • 更新商品标价: {self.stats['updated_fields']['original_price']} 个")
+            main_log.info(f"  • 更新节省金额: {self.stats['updated_fields']['savings_amount']} 个")
+            main_log.info(f"  • 更新折扣比例: {self.stats['updated_fields']['savings_percentage']} 个")
+            main_log.info(f"  • 更新优惠券类型: {self.stats['updated_fields']['coupon_type']} 个")
+            main_log.info(f"  • 更新优惠券值: {self.stats['updated_fields']['coupon_value']} 个")
+            main_log.info(f"  • 更新优惠类型: {self.stats['updated_fields']['deal_type']} 个")
+            main_log.info(f"  • 更新促销标签: {self.stats['updated_fields']['deal_badge']} 个")
+            
             # 如果使用调度器，输出调度器统计信息
             if self.use_scheduler:
                 scheduler_stats = self.scheduler.get_statistics()
@@ -575,6 +773,96 @@ class ParallelDiscountScraper:
                 main_log.info(f"  • 成功率: {scheduler_stats['success_rate']:.1f}%")
                 main_log.info(f"  • 平均处理时间: {scheduler_stats['avg_processing_time']:.2f} 秒")
                 main_log.info(f"  • 剩余任务数: {scheduler_stats['queue_size']}")
+
+    def _update_product_discount(self, product: Product, savings: float, savings_percentage: int,
+                          coupon_type: str, coupon_value: float, deal_badge: str,
+                          deal_type: str, actual_current_price: float = None):
+        """更新商品折扣信息，比较字段并统计更新数量"""
+        task_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': f'UPDATE:{product.asin}'})
+        
+        # 如果没有优惠信息记录，创建一个新的
+        if not product.offers:
+            offer = Offer(product_id=product.asin)
+            product.offers.append(offer)
+            task_log.info(f"创建新的优惠信息记录")
+        
+        # 获取当前的offer以便与新值比较
+        offer = product.offers[0]
+        updated_fields = []
+        
+        # 记录原始值用于比较
+        original_price_before = product.original_price
+        
+        # 比较并更新优惠信息字段
+        # 1. 更新savings
+        if offer.savings != savings and (savings is not None or offer.savings is not None):
+            updated_fields.append(f"节省金额: {offer.savings} -> {savings}")
+            offer.savings = savings
+            product.savings_amount = savings
+            self.stats['updated_fields']['savings_amount'] += 1
+        
+        # 2. 更新savings_percentage
+        if offer.savings_percentage != savings_percentage and (savings_percentage is not None or offer.savings_percentage is not None):
+            updated_fields.append(f"折扣比例: {offer.savings_percentage}% -> {savings_percentage}%")
+            offer.savings_percentage = savings_percentage
+            product.savings_percentage = savings_percentage
+            self.stats['updated_fields']['savings_percentage'] += 1
+        
+        # 3. 更新coupon_type
+        if offer.coupon_type != coupon_type and (coupon_type is not None or offer.coupon_type is not None):
+            updated_fields.append(f"优惠券类型: {offer.coupon_type} -> {coupon_type}")
+            offer.coupon_type = coupon_type
+            self.stats['updated_fields']['coupon_type'] += 1
+        
+        # 4. 更新coupon_value
+        if offer.coupon_value != coupon_value and (coupon_value is not None or offer.coupon_value is not None):
+            updated_fields.append(f"优惠券金额: {offer.coupon_value} -> {coupon_value}")
+            offer.coupon_value = coupon_value
+            self.stats['updated_fields']['coupon_value'] += 1
+        
+        # 5. 更新deal_badge
+        if offer.deal_badge != deal_badge and (deal_badge is not None or offer.deal_badge is not None):
+            updated_fields.append(f"促销标签: {offer.deal_badge} -> {deal_badge}")
+            offer.deal_badge = deal_badge
+            self.stats['updated_fields']['deal_badge'] += 1
+        
+        # 6. 更新deal_type
+        if offer.deal_type != deal_type and (deal_type is not None or offer.deal_type is not None):
+            updated_fields.append(f"优惠类型: {offer.deal_type} -> {deal_type}")
+            offer.deal_type = deal_type
+            product.deal_type = deal_type
+            self.stats['updated_fields']['deal_type'] += 1
+        
+        # 7. 更新actual_current_price
+        if actual_current_price and product.current_price != actual_current_price:
+            updated_fields.append(f"当前价格: ${product.current_price} -> ${actual_current_price}")
+            product.current_price = actual_current_price
+            self.stats['updated_fields']['current_price'] += 1
+        
+        # 8. 更新original_price（如果从页面中获取到了新值）
+        if product.original_price != original_price_before and original_price_before is not None:
+            updated_fields.append(f"原价: ${original_price_before} -> ${product.original_price}")
+            self.stats['updated_fields']['original_price'] += 1
+        
+        # 对于只有优惠券没有折扣的情况，将当前价格同时作为原价
+        if (not product.original_price or product.original_price == 0 or 
+            (coupon_type and not savings and not savings_percentage)) and actual_current_price:
+            product.original_price = actual_current_price
+            if original_price_before != actual_current_price:
+                updated_fields.append(f"设置原价等于当前价格: ${actual_current_price}")
+                self.stats['updated_fields']['original_price'] += 1
+                task_log.info(f"只有优惠券没有折扣，使用当前价格 ${actual_current_price} 同时作为原价")
+        
+        # 更新时间戳
+        offer.updated_at = datetime.now(UTC)
+        product.updated_at = datetime.now(UTC)
+        product.discount_updated_at = datetime.now(UTC)
+        
+        # 如果有字段更新，记录详情
+        if updated_fields:
+            task_log.info(f"优惠信息更新: {'; '.join(updated_fields)}")
+        else:
+            task_log.info(f"商品信息无变化")
 
 
 def main():
@@ -589,16 +877,23 @@ def main():
     parser.add_argument('--debug', action='store_true', help='启用调试日志')
     parser.add_argument('--before-date', type=str, help='只处理在指定日期之前创建的商品(格式: YYYY-MM-DD)')
     parser.add_argument('--skip-scheduler', action='store_true', help='跳过调度器，直接按创建时间获取商品')
+    parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], 
+                      default='INFO', help='设置日志级别')
     args = parser.parse_args()
 
     # 配置日志级别
-    log_level = logging.DEBUG if args.debug else logging.INFO
+    log_level = getattr(logging, args.log_level) if not args.debug else logging.DEBUG
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s [%(levelname)s] %(message)s',
         handlers=[logging.StreamHandler()]
     )
-
+    
+    # 设置第三方库的日志级别为WARNING，避免过多输出
+    logging.getLogger("selenium").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    
     # 初始化数据库会话
     db = next(get_db())
     

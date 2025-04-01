@@ -948,6 +948,89 @@ class ProductUpdater:
             schedule_logger.error(f"计划更新任务失败: {str(e)}")
             return 0, 0, 0
 
+    async def update_single_asin(self, db: Session, asin: str) -> bool:
+        """更新单个ASIN商品信息
+        
+        Args:
+            db: 数据库会话
+            asin: 要更新的商品ASIN
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        task_id = f"SINGLE:{asin}"
+        log_info = TaskLoggerAdapter(self.logger.logger, {'task_id': task_id})
+        
+        # 查询数据库中是否存在该ASIN
+        product = db.query(Product).filter(Product.asin == asin).first()
+        
+        if not product:
+            log_info.error(f"数据库中不存在ASIN为{asin}的商品")
+            return False
+            
+        log_info.info(f"开始更新单个商品: ASIN={asin}")
+        
+        try:
+            # 1. 检查CJ平台可用性
+            log_info.debug("检查CJ平台可用性")
+            cj_availability = await self.cj_client.check_products_availability([asin])
+            is_cj_available = cj_availability.get(asin, False)
+            
+            # 2. 如果CJ平台可用，获取推广链接
+            if is_cj_available:
+                log_info.debug("商品在CJ平台可用，获取推广链接")
+                try:
+                    await self._rate_limit_cj_api()
+                    cj_url = await self.cj_client.generate_product_link(asin)
+                    product.cj_url = cj_url
+                    product.api_provider = "cj-api"
+                    log_info.info("成功获取CJ推广链接")
+                except Exception as e:
+                    log_info.error(f"获取CJ推广链接失败: {str(e)}")
+                    product.cj_url = None
+                    product.api_provider = "pa-api"
+            else:
+                log_info.info("商品在CJ平台不可用")
+                product.cj_url = None
+                product.api_provider = "pa-api"
+            
+            # 3. 使用PAAPI获取商品详细信息
+            log_info.debug("从PAAPI获取商品信息")
+            try:
+                await self._rate_limit_pa_api()
+                pa_products = await self.amazon_api.get_products_by_asins([asin])
+                if not pa_products:
+                    log_info.error("无法从PAAPI获取商品信息，商品可能已下架或缺货")
+                    # 删除不可用的商品
+                    return await self.delete_product(product, db, "商品不可用，无法从PAAPI获取信息")
+                
+                pa_info = pa_products[0]
+                # 更新商品信息
+                old_price = product.current_price
+                product.current_price = pa_info.offers[0].price if pa_info.offers else 0
+                product.stock = "in_stock" if pa_info.offers and pa_info.offers[0].availability == "Available" else "out_of_stock"
+                # 更新商品的时间戳
+                product.timestamp = datetime.now(UTC)
+                # 更新商品的updated_at字段
+                product.updated_at = datetime.now(UTC)
+                
+                db.commit()
+                log_info.info(f"商品更新成功: ASIN={asin}, 旧价格={old_price}, 新价格={product.current_price}, 库存={product.stock}")
+                return True
+                
+            except Exception as e:
+                log_info.error(f"PAAPI获取商品信息失败: {str(e)}")
+                # 如果是价格为0，删除商品
+                if product.current_price == 0:
+                    return await self.delete_product(product, db, f"PAAPI获取商品信息失败: {str(e)}")
+                db.rollback()
+                return False
+            
+        except Exception as e:
+            log_info.error(f"更新商品信息失败: {str(e)}")
+            db.rollback()
+            return False
+
 # 用于CLI运行
 if __name__ == "__main__":
     import argparse
@@ -957,6 +1040,7 @@ if __name__ == "__main__":
     parser.add_argument("--scheduled", action="store_true", help="执行计划更新任务")
     parser.add_argument("--batch-size", type=int, default=100, help="每批次更新的商品数量")
     parser.add_argument("--log-level", type=str, default=None, help="日志级别 (DEBUG, INFO, WARNING, ERROR)")
+    parser.add_argument("--asin", type=str, help="更新单个ASIN商品")
     args = parser.parse_args()
     
     # 从命令行参数或环境变量获取日志级别
@@ -971,7 +1055,15 @@ if __name__ == "__main__":
             updater = ProductUpdater()
             await updater.initialize_clients()
             
-            if args.scheduled:
+            if args.asin:
+                # 处理单个ASIN更新
+                with SessionLocal() as db:
+                    success = await updater.update_single_asin(db, args.asin)
+                    if success:
+                        log_success(f"ASIN {args.asin} 更新成功")
+                    else:
+                        log_error(f"ASIN {args.asin} 更新失败")
+            elif args.scheduled:
                 success, failed, deleted = await updater.run_scheduled_update(args.batch_size)
                 log_section("计划更新任务完成")
                 log_info(f"成功更新: {success}/{success + failed}")
@@ -979,7 +1071,9 @@ if __name__ == "__main__":
                     log_info(f"删除价格为0的商品: {deleted}")
             else:
                 print("请使用 --scheduled 参数来执行计划更新任务")
+                print("或使用 --asin 参数来更新单个商品")
                 print("例如: python product_updater.py --scheduled --batch-size 100")
+                print("      python product_updater.py --asin B07XYZABC")
         except Exception as e:
             log_error(f"主程序运行异常: {str(e)}")
             import traceback
