@@ -263,13 +263,32 @@ async def crawl_task(task_id: str, params: CrawlerRequest):
 
 # 系统状态相关API
 @app.get("/api/health")
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     """健康检查端点"""
-    return {
-        "status": "healthy",
-        "service": "amazon-data-api",
-        "timestamp": datetime.now().isoformat()
-    }
+    try:
+        # 获取商品统计信息
+        stats = ProductService.get_products_stats(db)
+        
+        return {
+            "status": "healthy",
+            "service": "amazon-data-api",
+            "timestamp": datetime.now().isoformat(),
+            "database": {
+                "total_products": stats["total_products"],
+                "discount_products": stats["discount_products"],
+                "coupon_products": stats["coupon_products"],
+                "prime_products": stats["prime_products"],
+                "last_update": stats["last_update"].isoformat() if stats["last_update"] else None
+            }
+        }
+    except Exception as e:
+        logger.error(f"健康检查失败: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "service": "amazon-data-api",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
 
 # 爬虫任务相关API
 @app.post("/api/crawl", response_model=CrawlerResponse, include_in_schema=False)
