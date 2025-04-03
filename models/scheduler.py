@@ -280,7 +280,6 @@ class SchedulerManager:
                 history.end_time = datetime.now()
                 history.status = 'completed'
                 history.items_collected = items_collected
-                history.result = f"成功收集 {items_collected} 个商品"
                 session.commit()
                 
                 # 关闭事件循环
