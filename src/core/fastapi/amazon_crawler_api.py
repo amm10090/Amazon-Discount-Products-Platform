@@ -86,6 +86,15 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有请求头
 )
 
+# 导入日志分析API路由
+try:
+    from src.api.log_analysis_api import router as log_analysis_router
+    # 添加日志分析API路由
+    app.include_router(log_analysis_router)
+    logger.info("日志分析API路由已加载")
+except ImportError as e:
+    logger.warning(f"无法导入日志分析API路由: {str(e)}")
+
 # 存储任务状态的字典
 tasks_status: Dict[str, Dict] = {}
 

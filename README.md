@@ -248,55 +248,62 @@ The system implements a flexible task scheduling system, supporting both cron an
 - Use SQLite database storage:
   * Task configuration and status
   * Execution history record
-  * Timezone setting
-- Database table structure:
-  * job_history: Task execution history
-  * jobstore: APScheduler task storage
+  - Database table structure:
+    * job_history: Task execution history
+    * jobstore: APScheduler task storage
 
-8. Notes:
-- Ensure system timezone is correctly configured
-- Avoid task execution time overlap
-- Regularly check execution history
-- Production environment recommended to use process management tool
-- Reasonable setting task interval to avoid high resource usage
-- Pay attention to task execution exception handling
-- Suggest regular backup task configuration and history data
+### Logging and Error Handling System
+The system implements a comprehensive logging and error handling framework:
 
-9. Best practices:
-- Task naming specification: Use descriptive ID
-- Reasonable setting maximum collection quantity
-- Avoid too frequent task execution
-- Regularly check and clean history
-- Use log to monitor task execution
-- Configure error notification mechanism
-- Implement task execution index monitoring
+1. Structured Logging:
+- Centralized log configuration with Loguru
+- Different log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- Contextual logging with request tracking
+- Automatic log rotation and retention
+- JSON log format support
 
-10. Error handling:
-- Task execution exception capture and record
-- Automatic retry mechanism
-- Error notification and alarm
-- Detailed error log record
-- Task status automatic recovery
-- Database connection exception handling
-- Timezone switch exception handling
+2. Error Handling:
+- Custom error types with error codes
+- Error context capturing
+- Global exception handler
+- Detailed error tracking and statistics
+- Automatic error level assignment
 
-11. Performance optimization:
-- Use connection pool to manage database connection
-- Regularly clean history data
-- Optimize query performance
-- Use asynchronous task execution
-- Implement task queue management
-- Control concurrent task quantity
-- Resource usage monitoring
+3. Log Analysis and Visualization:
+- Advanced log querying and filtering:
+  * Time-based filtering
+  * Module-based filtering
+  * Level-based filtering
+  * Context-based filtering
+  * Pattern matching
+- Statistical analysis:
+  * Error rate trends
+  * Module activity statistics
+  * Response time analysis
+  * Anomaly detection
+- Log visualization dashboard:
+  * System health status overview
+  * Interactive charts and graphs
+  * Error distribution visualization
+  * Module activity visualization
+  * Response time trend analysis
+- Log export capabilities:
+  * JSON export
+  * CSV export
+  * Filtered export options
 
-12. Monitoring indicators:
-- Task execution success rate
-- Average execution time
-- Collection data statistics
-- Resource usage
-- Error rate statistics
-- Task queue length
-- System load
+4. System Health Monitoring:
+- Real-time system status overview
+- Automatic anomaly detection
+- Performance statistics
+- Error rate monitoring
+- Visual indicators for system health status
+
+5. Log Analysis API:
+- Query logs: `GET /api/logs/query`
+- Generate statistics: `GET /api/logs/stats`
+- Generate dashboard: `GET /api/logs/dashboard`
+- Export logs: `GET /api/logs/export`
 
 ### Installation
 ```bash
@@ -594,59 +601,67 @@ SCHEDULER_TIMEZONE=Asia/Shanghai  # Default timezone for scheduler
 
 7. 数据持久化：
 - 使用SQLite数据库存储：
-  * 任务配置和状态
-  * 执行历史记录
-  * 时区设置
-- 数据库表结构：
-  * job_history：任务执行历史
-  * jobstore：APScheduler任务存储
+  * Task configuration and status
+  * Execution history record
+  * Timezone setting
+- Database table structure:
+  * job_history: Task execution history
+  * jobstore: APScheduler task storage
 
-8. 注意事项：
-- 确保系统时区正确配置
-- 避免任务执行时间重叠
-- 定期检查执行历史
-- 生产环境建议使用进程管理工具
-- 合理设置任务间隔，避免资源占用过高
-- 注意处理任务执行异常
-- 建议定期备份任务配置和历史数据
+### Logging and Error Handling System
+The system implements a comprehensive logging and error handling framework:
 
-9. 最佳实践：
-- 任务命名规范：使用描述性的ID
-- 合理设置最大采集数量
-- 避免过于频繁的任务执行
-- 定期检查和清理历史记录
-- 使用日志监控任务执行情况
-- 配置错误通知机制
-- 实现任务执行指标监控
+1. Structured Logging:
+- Centralized log configuration with Loguru
+- Different log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- Contextual logging with request tracking
+- Automatic log rotation and retention
+- JSON log format support
 
-10. 错误处理：
-- 任务执行异常捕获和记录
-- 自动重试机制
-- 错误通知和报警
-- 详细的错误日志记录
-- 任务状态自动恢复
-- 数据库连接异常处理
-- 时区切换异常处理
+2. Error Handling:
+- Custom error types with error codes
+- Error context capturing
+- Global exception handler
+- Detailed error tracking and statistics
+- Automatic error level assignment
 
-11. 性能优化：
-- 使用连接池管理数据库连接
-- 定期清理历史数据
-- 优化查询性能
-- 使用异步执行任务
-- 实现任务队列管理
-- 控制并发任务数量
-- 资源使用监控
+3. Log Analysis and Visualization:
+- Advanced log querying and filtering:
+  * Time-based filtering
+  * Module-based filtering
+  * Level-based filtering
+  * Context-based filtering
+  * Pattern matching
+- Statistical analysis:
+  * Error rate trends
+  * Module activity statistics
+  * Response time analysis
+  * Anomaly detection
+- Log visualization dashboard:
+  * System health status overview
+  * Interactive charts and graphs
+  * Error distribution visualization
+  * Module activity visualization
+  * Response time trend analysis
+- Log export capabilities:
+  * JSON export
+  * CSV export
+  * Filtered export options
 
-12. 监控指标：
-- 任务执行成功率
-- 平均执行时间
-- 采集数据量统计
-- 资源使用情况
-- 错误率统计
-- 任务队列长度
-- 系统负载情况
+4. System Health Monitoring:
+- Real-time system status overview
+- Automatic anomaly detection
+- Performance statistics
+- Error rate monitoring
+- Visual indicators for system health status
 
-### 安装部署
+5. Log Analysis API:
+- Query logs: `GET /api/logs/query`
+- Generate statistics: `GET /api/logs/stats`
+- Generate dashboard: `GET /api/logs/dashboard`
+- Export logs: `GET /api/logs/export`
+
+### Installation
 ```bash
 # 安装依赖
 pnpm install
