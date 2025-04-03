@@ -139,9 +139,9 @@ class ProductUpdater:
         
         # API请求限制相关变量
         self.last_pa_api_request_time = None
-        self.pa_api_request_interval = 1.0  # 每秒允许的请求数量的倒数（秒）
+        self.pa_api_request_interval = 2.0  # 增加到2秒以避免429错误
         self.last_cj_api_request_time = None
-        self.cj_api_request_interval = 0.5  # 每秒允许的请求数量的倒数（秒）
+        self.cj_api_request_interval = 0.5
         
     def _initialize_logger(self):
         """初始化日志配置"""
@@ -797,8 +797,8 @@ class ProductUpdater:
         success_count = 0
         failed_count = 0
         deleted_count = 0
-        cj_success_count = 0  # CJ商品更新成功数量
-        pa_success_count = 0  # PA商品更新成功数量
+        cj_success_count = 0
+        pa_success_count = 0
         
         # 获取需要更新的商品
         products = await self.get_products_to_update(db, limit)
@@ -830,50 +830,57 @@ class ProductUpdater:
         with tqdm(total=len(asin_to_product), desc="更新商品信息") as pbar:
             for asin, product in asin_to_product.items():
                 try:
-                    # 更新CJ相关信息
-                    if asin in available_asins and cj_links.get(asin):
-                        product.cj_url = cj_links[asin]
-                        product.api_provider = "cj-api"
-                    else:
-                        product.cj_url = None
-                        product.api_provider = "pa-api"
-                    
-                    # 更新PAAPI信息
-                    pa_product = pa_info.get(asin)
-                    if pa_product and pa_product.get('price'):
-                        product.current_price = pa_product['price']
-                        product.stock = "in_stock" if pa_product['stock'] else "out_of_stock"
-                        # 更新商品的时间戳
-                        product.timestamp = datetime.now(UTC)
-                        # 更新商品的updated_at字段
-                        product.updated_at = datetime.now(UTC)
-                        success_count += 1
-                        
-                        # 根据api_provider统计更新成功的商品数量
-                        if product.api_provider == "cj-api":
-                            cj_success_count += 1
-                        else:
-                            pa_success_count += 1
-                        
-                        # 记录详细的更新信息(DEBUG级别)
-                        log_info.debug(
-                            f"成功更新商品: ASIN={asin}, "
-                            f"API来源={product.api_provider}, "
-                            f"价格={product.current_price}, "
-                            f"库存={product.stock}"
-                        )
-                    else:
-                        # 无法获取价格信息，删除商品
-                        reason = "无法获取价格信息" if pa_product else "获取PAAPI信息失败"
-                        log_info.debug(f"商品 {asin} 更新失败: {reason}，将删除该商品")
-                        if await self.delete_product(product, db, reason):
-                            deleted_count += 1
-                        else:
+                    # 为每个商品创建新的事务
+                    with db.begin_nested():
+                        # 重新从数据库获取商品以确保数据一致性
+                        product = db.query(Product).filter(Product.asin == asin).first()
+                        if not product:
+                            log_info.warning(f"商品 {asin} 在处理过程中被删除，跳过更新")
                             failed_count += 1
+                            continue
+                            
+                        # 更新CJ相关信息
+                        if asin in available_asins and cj_links.get(asin):
+                            product.cj_url = cj_links[asin]
+                            product.api_provider = "cj-api"
+                        else:
+                            product.cj_url = None
+                            product.api_provider = "pa-api"
+                        
+                        # 更新PAAPI信息
+                        pa_product = pa_info.get(asin)
+                        if pa_product and pa_product.get('price'):
+                            product.current_price = pa_product['price']
+                            product.stock = "in_stock" if pa_product['stock'] else "out_of_stock"
+                            product.timestamp = datetime.now(UTC)
+                            product.updated_at = datetime.now(UTC)
+                            success_count += 1
+                            
+                            if product.api_provider == "cj-api":
+                                cj_success_count += 1
+                            else:
+                                pa_success_count += 1
+                                
+                            log_info.debug(
+                                f"成功更新商品: ASIN={asin}, "
+                                f"API来源={product.api_provider}, "
+                                f"价格={product.current_price}, "
+                                f"库存={product.stock}"
+                            )
+                        else:
+                            # 无法获取价格信息，删除商品
+                            reason = "无法获取价格信息" if pa_product else "获取PAAPI信息失败"
+                            log_info.debug(f"商品 {asin} 更新失败: {reason}，将删除该商品")
+                            db.delete(product)
+                            deleted_count += 1
+                            
+                        # 提交每个商品的事务
+                        db.flush()
                         
                 except Exception as e:
                     failed_count += 1
                     log_info.error(f"更新商品 {asin} 失败: 错误类型={type(e).__name__}, 错误信息={str(e)}")
+                    db.rollback()
                 
                 # 更新进度条    
                 pbar.update(1)
@@ -881,7 +888,6 @@ class ProductUpdater:
         # 提交所有更改
         try:
             db.commit()
-            # 输出总结信息
             log_info.info(
                 f"批量更新完成: 成功={success_count} (CJ商品={cj_success_count}, PA商品={pa_success_count}), "
                 f"失败={failed_count}, 删除={deleted_count}"

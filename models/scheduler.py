@@ -173,7 +173,7 @@ class SchedulerManager:
             if crawler_type == "update":
                 updater = ProductUpdater()
                 await updater.initialize_clients()
-                success_count, total = await updater.run_scheduled_update(batch_size=max_items)
+                success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
                 return success_count
                 
             # 初始化API客户端
