@@ -39,19 +39,18 @@ def init_logger():
     """初始化日志配置"""
     crawler_config = config_loader.get_component_config('crawler')
     if crawler_config:
+        log_file = crawler_config.get('file', 'logs/crawler.log')
         set_log_config(
-            log_to_file=True,
-            log_dir=os.path.dirname(crawler_config.get('file', 'logs/crawler.log')),
+            log_level=crawler_config.get('level', 'INFO'),
+            log_file=log_file,
             max_file_size=10 * 1024 * 1024,  # 10MB
             backup_count=5,
-            use_colors=True,
-            buffer_size=1000,
-            flush_interval=5
+            use_colors=True
         )
         
         # 设置环境变量来控制日志级别
         os.environ['DEBUG_LEVEL'] = crawler_config.get('level', 'INFO')
-        
+
 # 调用初始化
 init_logger()
 
