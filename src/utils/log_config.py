@@ -96,7 +96,8 @@ class LogContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.track_performance and self.start_time is not None:
             duration = time.perf_counter() - self.start_time
-            logger.info(f"性能统计 - 执行时间: {duration:.3f}秒")
+            # 确保在记录性能统计信息时绑定name属性
+            logger.bind(name="PerformanceTracker").info(f"性能统计 - 执行时间: {duration:.3f}秒")
             
         # 恢复之前的上下文栈
         if self._token is not None:
@@ -109,7 +110,7 @@ class LogContext:
         if stack:
             logger.configure(extra=stack[-1])
         else:
-            logger.configure(extra={})
+            logger.configure(extra={"name": "DefaultLogger"})
             
     async def __aenter__(self):
         return self.__enter__()
@@ -373,7 +374,7 @@ default_config = LogConfig()
 # 导出logger实例供其他模块使用
 log = logger.bind(context="global")
 
-def get_logger(name: str = None, **kwargs) -> Logger:
+def get_logger(name: str = "DefaultLogger", **kwargs) -> Logger:
     """
     获取带有上下文的logger实例。
     
@@ -384,7 +385,7 @@ def get_logger(name: str = None, **kwargs) -> Logger:
     Returns:
         配置好的logger实例
     """
-    context = {"name": name} if name else {}
+    context = {"name": name}
     context.update(kwargs)
     return logger.bind(**context)
 
