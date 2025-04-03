@@ -198,9 +198,9 @@ class SchedulerManager:
             if crawler_type == "update":
                 # 执行商品更新任务
                 updater = ProductUpdater()
-                success_count, total = await updater.run_scheduled_update(batch_size=max_items)
+                success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
                 result = success_count
-                logger.success(f"商品更新任务完成，成功更新 {success_count}/{total} 个商品")
+                logger.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
             else:
                 # 从环境变量获取配置
                 headless = os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"
