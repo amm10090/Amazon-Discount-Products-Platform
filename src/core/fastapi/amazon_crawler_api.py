@@ -1117,6 +1117,9 @@ async def search_products(
 ):
     """根据关键词搜索产品"""
     try:
+        # 检查关键词是否是ASIN格式
+        is_asin_format = ProductService.is_valid_asin(keyword)
+        
         result = ProductService.search_products(
             db=db,
             keyword=keyword,
@@ -1132,18 +1135,47 @@ async def search_products(
             brands=brands,
             api_provider=api_provider
         )
+        
+        # 处理ASIN搜索没有结果的情况
+        if is_asin_format and (not result["success"] or len(result["data"]["items"]) == 0):
+            # 如果是ASIN格式但没有找到商品，返回特定的消息
+            return {
+                "success": False,
+                "data": {
+                    "items": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "is_asin_search": True
+                },
+                "error": f"未找到ASIN为'{keyword}'的商品。这是有效的ASIN格式，但在数据库中不存在。"
+            }
+            
+        # 如果有ASIN搜索标记，保留它
+        if result.get("data", {}).get("is_asin_search"):
+            return result
+            
         return result
     except Exception as e:
         logger.error(f"搜索产品失败: {str(e)}")
+        
+        # 检查是否为ASIN格式，提供不同的错误消息
+        is_asin_format = ProductService.is_valid_asin(keyword)
+        error_message = str(e)
+        
+        if is_asin_format:
+            error_message = f"搜索ASIN '{keyword}' 失败: {str(e)}"
+        
         return {
             "success": False,
             "data": {
                 "items": [],
                 "total": 0,
                 "page": page,
-                "page_size": page_size
+                "page_size": page_size,
+                "is_asin_search": is_asin_format
             },
-            "error": str(e)
+            "error": error_message
         }
 
 @app.post("/api/cj/check-products")

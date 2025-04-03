@@ -1528,6 +1528,41 @@ class ProductService:
         return {"cleared": True, "message": "品牌统计缓存已清空"}
         
     @staticmethod
+    def is_valid_asin(string: str) -> bool:
+        """
+        检查字符串是否符合亚马逊ASIN格式
+        
+        根据亚马逊ASIN的常见格式，有两种主要模式：
+        1. 10位纯数字ISBN (9位数字 + 最后一位可能是X或数字)
+        2. 以B开头的10位字符串，通常是B + 2位数字 + 7位字母数字混合字符
+           但也可能是B + 9位字母数字混合字符
+        
+        Args:
+            string: 要检查的字符串
+            
+        Returns:
+            bool: 如果符合ASIN格式返回True，否则返回False
+        """
+        if not string or not isinstance(string, str) or len(string) != 10:
+            return False
+            
+        # 纯数字ISBN格式 (9位数字 + 最后一位可能是X或数字)
+        if string.isdigit() or (string[:9].isdigit() and string[9] in "0123456789X"):
+            return True
+            
+        # B开头的非ISBN格式
+        # 最新的格式是B + 9位字母数字混合
+        if string[0] == "B" and all(c.isalnum() for c in string[1:]) and any(c.isdigit() for c in string[1:]):
+            return True
+            
+        # 严格的传统格式：B + 2位数字 + 7位字母数字混合
+        # 如果需要更严格的验证，可以使用下面的代码
+        # if string[0] == "B" and string[1:3].isdigit() and all(c.isalnum() for c in string[3:]):
+        #     return True
+            
+        return False
+        
+    @staticmethod
     def search_products(
         db: Session,
         keyword: str,
@@ -1565,6 +1600,90 @@ class ProductService:
             Dict: 包含商品列表和分页信息的字典
         """
         try:
+            # 检查关键词是否是ASIN格式
+            if ProductService.is_valid_asin(keyword):
+                logger.info(f"检测到ASIN格式关键词: {keyword}，尝试直接查询产品")
+                
+                # 直接按ASIN查询产品
+                product = db.query(Product).filter(Product.asin == keyword).first()
+                
+                if product:
+                    # 产品存在，直接返回结果
+                    try:
+                        # 解析JSON字符串
+                        categories = json.loads(product.categories) if product.categories else []
+                        browse_nodes = json.loads(product.browse_nodes) if product.browse_nodes else []
+                        features = json.loads(product.features) if product.features else []
+                        
+                        # 确保解析后的数据是列表类型
+                        if not isinstance(categories, list):
+                            categories = []
+                        if not isinstance(browse_nodes, list):
+                            browse_nodes = []
+                        if not isinstance(features, list):
+                            features = []
+                        
+                        # 获取商品的优惠信息
+                        offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
+                        
+                        # 转换为ProductOffer对象
+                        product_offers = []
+                        for offer in offers:
+                            product_offers.append(
+                                ProductOffer(
+                                    condition=offer.condition,
+                                    price=offer.price,
+                                    currency=offer.currency,
+                                    savings=offer.savings,
+                                    savings_percentage=offer.savings_percentage,
+                                    is_prime=offer.is_prime,
+                                    is_amazon_fulfilled=offer.is_amazon_fulfilled,
+                                    is_free_shipping_eligible=offer.is_free_shipping_eligible,
+                                    availability=offer.availability,
+                                    merchant_name=offer.merchant_name,
+                                    is_buybox_winner=offer.is_buybox_winner,
+                                    deal_type=offer.deal_type,
+                                    coupon_type=offer.coupon_type,
+                                    coupon_value=offer.coupon_value,
+                                    commission=offer.commission
+                                )
+                            )
+                        
+                        # 创建ProductInfo对象
+                        product_info = ProductInfo(
+                            asin=product.asin,
+                            title=product.title,
+                            url=product.url,
+                            brand=product.brand,
+                            main_image=product.main_image,
+                            offers=product_offers,
+                            timestamp=product.timestamp or datetime.utcnow(),
+                            binding=product.binding,
+                            product_group=product.product_group,
+                            categories=categories,
+                            browse_nodes=browse_nodes,
+                            features=features,
+                            cj_url=product.cj_url,
+                            api_provider=product.api_provider
+                        )
+                        
+                        return {
+                            "success": True,
+                            "data": {
+                                "items": [product_info],
+                                "total": 1,
+                                "page": 1,
+                                "page_size": 1,
+                                "is_asin_search": True  # 标识这是ASIN搜索结果
+                            }
+                        }
+                    except Exception as e:
+                        logger.error(f"处理ASIN产品时出错: {str(e)}")
+                        # 如果处理ASIN产品出错，回退到关键词搜索
+                
+                # 如果找不到产品或处理出错，记录信息并继续执行关键词搜索
+                logger.info(f"未找到ASIN为{keyword}的产品，继续执行关键词搜索")
+            
             # 构建基础查询
             query = db.query(Product).distinct(Product.asin)
             

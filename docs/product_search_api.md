@@ -3,6 +3,7 @@
 ## 简介
 
 产品搜索API提供了一个强大的接口，允许用户通过关键词搜索系统中的产品数据。API支持多种过滤和排序选项，使用户能够精确地找到他们需要的产品信息。
+此外，API现在支持ASIN格式识别，用户可以直接输入ASIN作为关键词进行精确查询。
 
 ## API端点
 
@@ -14,7 +15,7 @@ GET /api/search/products
 
 | 参数名 | 类型 | 必填 | 默认值 | 描述 |
 |--------|------|------|--------|------|
-| keyword | string | 是 | - | 搜索关键词，用于在产品标题、品牌和特性中进行匹配 |
+| keyword | string | 是 | - | 搜索关键词，用于在产品标题、品牌和特性中进行匹配，也支持ASIN格式 |
 | page | integer | 否 | 1 | 页码，从1开始 |
 | page_size | integer | 否 | 10 | 每页返回的产品数量，范围：1-100 |
 | sort_by | string | 否 | "relevance" | 排序字段：<br>- "relevance": 按相关性排序<br>- "price": 按价格排序<br>- "discount": 按折扣率排序<br>- "created": 按创建时间排序 |
@@ -77,8 +78,46 @@ GET /api/search/products
     ],
     "total": 100,
     "page": 1,
-    "page_size": 10
+    "page_size": 10,
+    "is_asin_search": false
   }
+}
+```
+
+当使用ASIN搜索且成功匹配单个产品时:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "asin": "B0123456789",
+        "title": "产品标题",
+        // 其他产品字段
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 1,
+    "is_asin_search": true
+  }
+}
+```
+
+当使用ASIN搜索但未找到产品时:
+
+```json
+{
+  "success": false,
+  "data": {
+    "items": [],
+    "total": 0,
+    "page": 1,
+    "page_size": 10,
+    "is_asin_search": true
+  },
+  "error": "未找到ASIN为'B0123456789'的商品。这是有效的ASIN格式，但在数据库中不存在。"
 }
 ```
 
@@ -91,7 +130,8 @@ GET /api/search/products
     "items": [],
     "total": 0,
     "page": 1,
-    "page_size": 10
+    "page_size": 10,
+    "is_asin_search": false
   },
   "error": "错误信息"
 }
@@ -108,6 +148,7 @@ GET /api/search/products
 | data.total | 总匹配产品数量 |
 | data.page | 当前页码 |
 | data.page_size | 每页产品数量 |
+| data.is_asin_search | 布尔值，表示搜索是否按ASIN格式进行 |
 | error | 错误信息（仅在失败时存在） |
 
 ### 产品对象字段
@@ -151,18 +192,29 @@ GET /api/search/products
 
 ## 搜索算法说明
 
-搜索API使用以下逻辑进行关键词匹配和排序：
+搜索API使用以下逻辑进行匹配和排序：
 
-1. **关键词拆分**：系统会将搜索关键词拆分为多个单词，分别在产品标题、品牌和特性中进行匹配
-2. **匹配方式**：使用包含匹配（LIKE '%关键词%'），而不是精确匹配，以提高搜索灵敏度
-3. **相关性排序**：当sort_by设置为"relevance"时，系统会计算相关性得分：
-   - 标题匹配的权重最高
-   - 品牌名称匹配的权重次之
-   - 多个关键词匹配的得分会累加
+1. **ASIN检测**：系统首先检查搜索关键词是否符合ASIN格式（10位字符，以B开头的字母数字组合或10位纯数字ISBN）。如果是有效的ASIN格式，系统会尝试直接通过ASIN查询产品。
+
+2. **关键词搜索**：如果不是ASIN格式或通过ASIN未找到产品，系统会执行以下步骤：
+   - **关键词拆分**：系统会将搜索关键词拆分为多个单词，分别在产品标题、品牌和特性中进行匹配
+   - **匹配方式**：使用包含匹配（LIKE '%关键词%'），而不是精确匹配，以提高搜索灵敏度
+   - **相关性排序**：当sort_by设置为"relevance"时，系统会计算相关性得分：
+     - 标题匹配的权重最高
+     - 品牌名称匹配的权重次之
+     - 多个关键词匹配的得分会累加
 
 ## 使用示例
 
-### 基本搜索
+### ASIN搜索
+
+```
+GET /api/search/products?keyword=B07PXGQC1Q
+```
+
+直接通过ASIN "B07PXGQC1Q" 查询产品。
+
+### 基本关键词搜索
 
 ```
 GET /api/search/products?keyword=apple
@@ -193,6 +245,7 @@ GET /api/search/products?keyword=laptop&min_price=500&max_price=1000&min_discoun
 3. 当使用品牌过滤时，系统只会返回完全匹配指定品牌的产品
 4. 相关性排序算法会优先考虑标题中的关键词匹配
 5. API的性能与数据库性能直接相关，大数据量查询可能会导致响应延迟
+6. ASIN格式的关键词会触发精确查询，如果数据库中不存在该ASIN，系统会给出明确提示
 
 ## 错误代码和处理
 
@@ -202,6 +255,7 @@ GET /api/search/products?keyword=laptop&min_price=500&max_price=1000&min_discoun
 - 数据库连接失败
 - 查询参数格式错误
 - 服务器内部错误
+- ASIN格式有效但未找到对应产品
 
 ## 限制和性能考虑
 
