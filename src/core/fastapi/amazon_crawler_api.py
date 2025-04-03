@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Amazon Data API",
     description="API for crawling Amazon deals and retrieving product information",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -601,7 +601,7 @@ async def list_products(
             "page_size": page_size
         }
 
-@app.post("/api/products/batch-delete", include_in_schema=False)
+@app.post("/api/products/batch-delete")
 async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depends(get_db)):
     """批量删除商品"""
     try:
