@@ -123,7 +123,8 @@ class UpdateConfiguration:
         try:
             config = config_loader.load_yaml_config(config_path)
             if not config:
-                log_warning(f"无法加载配置文件: {config_path}，使用默认配置")
+                logger = get_logger("ProductUpdater")
+                logger.warning(f"无法加载配置文件: {config_path}，使用默认配置")
                 return cls()
                 
             return cls(
@@ -140,7 +141,8 @@ class UpdateConfiguration:
                 parallel_requests=config.get('parallel_requests', 5)
             )
         except Exception as e:
-            log_error(f"加载配置文件出错: {str(e)}")
+            logger = get_logger("ProductUpdater")
+            logger.error(f"加载配置文件出错: {str(e)}")
             return cls()
             
 class ProductUpdater:
@@ -355,7 +357,7 @@ class ProductUpdater:
         """删除所有价格为0或null的商品"""
         deleted_count = 0
         
-        with TaskLogContext(task_id='DELETE_BATCH'):
+        with LogContext(task_id='DELETE_BATCH'):
             self.logger.info("开始删除价格为0或null的商品")
             
             try:
@@ -372,7 +374,7 @@ class ProductUpdater:
                 
                 # 使用进度条显示删除进度
                 for product in tqdm(products, desc="删除价格为0的商品"):
-                    with TaskLogContext(task_id=f"DELETE:{product.asin}"):
+                    with LogContext(task_id=f"DELETE:{product.asin}"):
                         if await self.delete_product(product, db, "价格为0或null"):
                             deleted_count += 1
                 
@@ -530,11 +532,11 @@ class ProductUpdater:
 
     async def process_batch_cj_availability(self, asins: List[str]) -> Dict[str, bool]:
         """批量检查CJ平台商品可用性"""
-        with TaskLogContext(task_id='CJ-CHECK') as log_ctx:
+        with LogContext(task_id='CJ-CHECK') as log_ctx:
             batch_size = 10
             results = {}
             
-            log_ctx.info(f"开始检查 {len(asins)} 个商品的CJ平台可用性")
+            self.logger.info(f"开始检查 {len(asins)} 个商品的CJ平台可用性")
             
             # 使用tqdm添加进度条
             batch_count = (len(asins) + batch_size - 1) // batch_size  # 计算批次数
@@ -542,7 +544,7 @@ class ProductUpdater:
                 for i in range(0, len(asins), batch_size):
                     batch_asins = asins[i:i + batch_size]
                     try:
-                        log_ctx.debug(f"检查CJ平台可用性: ASINs={batch_asins}")
+                        self.logger.debug(f"检查CJ平台可用性: ASINs={batch_asins}")
                         
                         # 应用请求频率限制
                         await self._rate_limit_cj_api()
@@ -552,10 +554,10 @@ class ProductUpdater:
                         
                         # 记录可用和不可用的商品数量(DEBUG级别)
                         available_count = sum(1 for asin, available in batch_results.items() if available)
-                        log_ctx.debug(f"批次检查结果: 总数={len(batch_results)}, 可用={available_count}, 不可用={len(batch_results) - available_count}")
+                        self.logger.debug(f"批次检查结果: 总数={len(batch_results)}, 可用={available_count}, 不可用={len(batch_results) - available_count}")
                         
                     except Exception as e:
-                        log_ctx.error(
+                        self.logger.error(
                             f"批量检查CJ平台可用性失败: "
                             f"ASINs={batch_asins}, "
                             f"错误类型={type(e).__name__}, "
@@ -570,26 +572,26 @@ class ProductUpdater:
                         
             # 输出最终结果
             available_count = sum(1 for asin, available in results.items() if available)
-            log_ctx.info(f"CJ平台检查完成: 总数={len(results)}, 可用={available_count}, 不可用={len(results) - available_count}")
+            self.logger.info(f"CJ平台检查完成: 总数={len(results)}, 可用={available_count}, 不可用={len(results) - available_count}")
             return results
             
     async def process_batch_cj_links(self, available_asins: List[str]) -> Dict[str, str]:
         """批量获取CJ推广链接"""
-        with TaskLogContext(task_id='CJ-LINKS') as log_ctx:
+        with LogContext(task_id='CJ-LINKS'):
             batch_size = 10
             results = {}
             
             if not available_asins:
-                log_ctx.info("没有可用的CJ商品，跳过获取推广链接")
+                self.logger.info("没有可用的CJ商品，跳过获取推广链接")
                 return results
                 
-            log_ctx.info(f"开始获取 {len(available_asins)} 个商品的CJ推广链接")
+            self.logger.info(f"开始获取 {len(available_asins)} 个商品的CJ推广链接")
             
             # 使用tqdm添加进度条
             with tqdm(total=len(available_asins), desc="获取CJ推广链接") as pbar:
                 for i in range(0, len(available_asins), batch_size):
                     batch_asins = available_asins[i:i + batch_size]
-                    log_ctx.debug(f"获取CJ推广链接: ASINs={batch_asins}")
+                    self.logger.debug(f"获取CJ推广链接: ASINs={batch_asins}")
                     
                     for asin in batch_asins:
                         try:
@@ -598,10 +600,10 @@ class ProductUpdater:
                             
                             link = await self.cj_client.generate_product_link(asin)
                             results[asin] = link
-                            log_ctx.debug(f"成功获取CJ推广链接: ASIN={asin}")
+                            self.logger.debug(f"成功获取CJ推广链接: ASIN={asin}")
                             
                         except Exception as e:
-                            log_ctx.error(
+                            self.logger.error(
                                 f"获取商品 {asin} 的CJ推广链接失败: "
                                 f"错误类型={type(e).__name__}, "
                                 f"错误信息={str(e)}"
@@ -613,16 +615,16 @@ class ProductUpdater:
                         
             # 输出最终结果
             success_count = sum(1 for link in results.values() if link)
-            log_ctx.info(f"CJ推广链接获取完成: 总数={len(results)}, 成功={success_count}, 失败={len(results) - success_count}")
+            self.logger.info(f"CJ推广链接获取完成: 总数={len(results)}, 成功={success_count}, 失败={len(results) - success_count}")
             return results
         
     async def process_batch_pa_api(self, products: List[Product]) -> Dict[str, Dict]:
         """批量获取PA API商品信息"""
-        with TaskLogContext(task_id='PAAPI') as log_ctx:
+        with LogContext(task_id='PAAPI'):
             results = {}
             
             # 只在INFO级别输出开始和结束信息
-            log_ctx.info(f"开始获取 {len(products)} 个商品的PAAPI信息")
+            self.logger.info(f"开始获取 {len(products)} 个商品的PAAPI信息")
             
             # 按10个商品一组进行批处理
             batch_count = (len(products) + 9) // 10  # 计算批次数
@@ -631,7 +633,7 @@ class ProductUpdater:
                     batch = products[i:i+10]
                     asins = [p.asin for p in batch]
                     try:
-                        log_ctx.debug(f"开始获取PAAPI信息: ASINs={asins}")
+                        self.logger.debug(f"开始获取PAAPI信息: ASINs={asins}")
                         
                         # 应用请求频率限制
                         await self._rate_limit_pa_api()
@@ -655,7 +657,7 @@ class ProductUpdater:
                                 'availability_status': product.offers[0].availability if product.offers else 'Unavailable'
                             }
                             
-                            log_ctx.debug(
+                            self.logger.debug(
                                 f"成功获取商品信息: ASIN={product.asin}, "
                                 f"价格={price}, "
                                 f"库存={in_stock}, "
@@ -665,7 +667,7 @@ class ProductUpdater:
                         # 记录未返回结果的ASIN
                         for asin in asins:
                             if asin not in results and not any(p.asin == asin for p in pa_products if p):
-                                log_ctx.error(
+                                self.logger.error(
                                     f"商品 {asin} 无法获取PAAPI信息: "
                                     f"原因=商品不存在或无访问权限"
                                 )
@@ -674,16 +676,16 @@ class ProductUpdater:
                     except Exception as e:
                         # 检查是否是请求过多错误(429)
                         if hasattr(e, 'status') and e.status == 429:
-                            log_ctx.error(
+                            self.logger.error(
                                 f"API请求过多(429 Too Many Requests): "
                                 f"ASINs={asins}, "
                                 f"错误信息={str(e)}"
                             )
                             # 添加更长的等待时间，然后重试
-                            log_ctx.info(f"等待5秒后重试...")
+                            self.logger.info(f"等待5秒后重试...")
                             await asyncio.sleep(5)  # 等待5秒
                             try:
-                                log_ctx.debug(f"重试获取PAAPI信息: ASINs={asins}")
+                                self.logger.debug(f"重试获取PAAPI信息: ASINs={asins}")
                                 
                                 # 重试时再次应用请求频率限制
                                 await self._rate_limit_pa_api()
@@ -705,7 +707,7 @@ class ProductUpdater:
                                         'availability_status': product.offers[0].availability if product.offers else 'Unavailable'
                                     }
                                     
-                                    log_ctx.debug(
+                                    self.logger.debug(
                                         f"重试成功获取商品信息: ASIN={product.asin}, "
                                         f"价格={price}, "
                                         f"库存={in_stock}"
@@ -715,7 +717,7 @@ class ProductUpdater:
                                     if asin not in results and not any(p.asin == asin for p in pa_products if p):
                                         results[asin] = None
                             except Exception as retry_e:
-                                log_ctx.error(
+                                self.logger.error(
                                     f"重试失败: "
                                     f"ASINs={asins}, "
                                     f"错误类型={type(retry_e).__name__}, "
@@ -727,7 +729,7 @@ class ProductUpdater:
                                         results[asin] = None
                         else:
                             # 非429错误的处理
-                            log_ctx.error(
+                            self.logger.error(
                                 f"批量获取PAAPI信息失败: "
                                 f"ASINs={asins}, "
                                 f"错误类型={type(e).__name__}, "
@@ -737,16 +739,16 @@ class ProductUpdater:
                             if hasattr(e, 'response') and hasattr(e.response, 'json'):
                                 try:
                                     error_detail = e.response.json()
-                                    log_ctx.error(f"API错误响应: {error_detail}")
+                                    self.logger.error(f"API错误响应: {error_detail}")
                                     
                                     # 检查是否有ItemNotAccessible错误
                                     if 'Errors' in error_detail:
                                         for error in error_detail['Errors']:
                                             if error.get('Code') == 'ItemNotAccessible':
                                                 asin = error.get('Message', '').split(' ')[2] if len(error.get('Message', '').split(' ')) > 2 else 'unknown'
-                                                log_ctx.error(f"商品 {asin} 通过API无法访问，可能已下架或限制访问")
+                                                self.logger.error(f"商品 {asin} 通过API无法访问，可能已下架或限制访问")
                                 except:
-                                    log_ctx.error("无法解析API错误响应")
+                                    self.logger.error("无法解析API错误响应")
                             
                             for asin in asins:
                                 if asin not in results:
@@ -757,82 +759,154 @@ class ProductUpdater:
                             
             # 输出总结信息
             success_count = sum(1 for result in results.values() if result and result.get('price'))
-            log_ctx.info(f"PAAPI信息获取完成: 总数={len(results)}, 成功={success_count}, 失败={len(results) - success_count}")
+            self.logger.info(f"PAAPI信息获取完成: 总数={len(results)}, 成功={success_count}, 失败={len(results) - success_count}")
             return results
 
     @track_performance
     async def update_batch(self, db: Session, limit: int = 100) -> Tuple[int, int, int]:
         """批量更新商品信息"""
-        with TaskLogContext(task_id='BATCH') as log_ctx:
-            log_ctx.info("开始批量更新商品信息")
+        with LogContext(task_id='BATCH'):
+            self.logger.info("开始批量更新商品信息")
             
             try:
                 # 获取需要更新的商品
                 products = await self.get_products_to_update(db, limit)
                 
                 if not products:
-                    log_ctx.info("没有需要更新的商品")
+                    self.logger.info("没有需要更新的商品")
                     return 0, 0, 0
                     
-                log_ctx.info(f"找到{len(products)}个需要更新的商品")
+                self.logger.info(f"找到{len(products)}个需要更新的商品")
+                
+                # 获取所有ASIN
+                asins = [product.asin for product in products]
+                asin_to_product = {product.asin: product for product in products}
+                
+                # 1. 批量检查CJ平台可用性
+                cj_availability = await self.process_batch_cj_availability(asins)
+                
+                # 获取CJ平台可用的ASIN列表
+                available_asins = [asin for asin, available in cj_availability.items() if available]
+                
+                # 2. 为可用商品批量获取CJ推广链接
+                cj_links = await self.process_batch_cj_links(available_asins)
+                
+                # 3. 批量获取PAAPI商品信息
+                pa_info = await self.process_batch_pa_api(products)
+                
+                # 4. 更新商品信息
+                self.logger.info(f"开始更新 {len(products)} 个商品信息到数据库")
                 
                 success_count = 0
                 fail_count = 0
                 delete_count = 0
                 
                 # 使用进度条显示更新进度
-                for product in tqdm(products, desc="更新商品信息"):
-                    result = await self.process_product_update(product, db)
-                    if result is True:
-                        success_count += 1
-                    elif result is False:
-                        fail_count += 1
-                    else:
-                        delete_count += 1
-                        
-                log_ctx.success(
-                    f"批量更新完成: "
-                    f"成功={success_count}, "
-                    f"失败={fail_count}, "
-                    f"删除={delete_count}"
-                )
+                with tqdm(total=len(asin_to_product), desc="更新商品信息") as pbar:
+                    for asin, product in asin_to_product.items():
+                        try:
+                            # 为每个商品创建新的事务
+                            with db.begin_nested():
+                                # 重新从数据库获取商品以确保数据一致性
+                                product = db.query(Product).filter(Product.asin == asin).first()
+                                if not product:
+                                    self.logger.warning(f"商品 {asin} 在处理过程中被删除，跳过更新")
+                                    fail_count += 1
+                                    continue
+                                
+                                # 更新CJ相关信息
+                                if asin in available_asins and cj_links.get(asin):
+                                    product.cj_url = cj_links[asin]
+                                    product.api_provider = "cj-api"
+                                else:
+                                    product.cj_url = None
+                                    product.api_provider = "pa-api"
+                                
+                                # 更新PAAPI信息
+                                pa_product = pa_info.get(asin)
+                                if pa_product and pa_product.get('price'):
+                                    product.current_price = pa_product['price']
+                                    product.stock = "in_stock" if pa_product['stock'] else "out_of_stock"
+                                    product.timestamp = datetime.now(UTC)
+                                    product.updated_at = datetime.now(UTC)
+                                    
+                                    # 如果价格为0，删除商品
+                                    if product.current_price == 0:
+                                        db.delete(product)
+                                        delete_count += 1
+                                        self.logger.debug(f"商品 {asin} 价格为0，已删除")
+                                    else:
+                                        success_count += 1
+                                        self.logger.debug(
+                                            f"成功更新商品: ASIN={asin}, "
+                                            f"API来源={product.api_provider}, "
+                                            f"价格={product.current_price}, "
+                                            f"库存={product.stock}"
+                                        )
+                                else:
+                                    # 无法获取价格信息，删除商品
+                                    reason = "无法获取价格信息" if pa_product else "获取PAAPI信息失败"
+                                    db.delete(product)
+                                    delete_count += 1
+                                    self.logger.debug(f"商品 {asin} 更新失败: {reason}，已删除")
+                                
+                                # 提交每个商品的事务
+                                db.flush()
+                            
+                        except Exception as e:
+                            fail_count += 1
+                            self.logger.error(f"更新商品 {asin} 失败: 错误类型={type(e).__name__}, 错误信息={str(e)}")
+                            
+                        # 更新进度条
+                        pbar.update(1)
+                
+                # 提交所有更改
+                try:
+                    db.commit()
+                    self.logger.success(
+                        f"批量更新完成: 成功={success_count}, 失败={fail_count}, 删除={delete_count}"
+                    )
+                except Exception as e:
+                    db.rollback()
+                    self.logger.error(f"提交数据库更改失败: {str(e)}")
+                    return 0, len(products), 0
                 
                 return success_count, fail_count, delete_count
                 
             except Exception as e:
-                log_ctx.error(f"批量更新过程中出错: {str(e)}")
+                self.logger.error(f"批量更新过程中出错: {str(e)}")
                 return 0, 0, 0
                 
     @track_performance
     async def run_scheduled_update(self, batch_size: Optional[int] = None) -> Tuple[int, int, int]:
         """执行计划更新任务"""
-        with TaskLogContext(task_id='SCHEDULE') as log_ctx:
-            log_ctx.info("开始执行计划更新任务")
+        with LogContext(task_id='SCHEDULE'):
+            self.logger.info("开始执行计划更新任务")
             
             try:
                 # 初始化API客户端
                 await self.initialize_clients()
                 if not self.amazon_api or not self.cj_client:
-                    log_ctx.error("API客户端初始化失败")
+                    self.logger.error("API客户端初始化失败")
                     return 0, 0, 0
                     
                 # 使用配置的batch_size或传入的参数
                 actual_batch_size = batch_size or self.config.batch_size
-                log_ctx.info(f"使用批量大小: {actual_batch_size}")
+                self.logger.info(f"使用批量大小: {actual_batch_size}")
                 
                 # 创建数据库会话
                 db = SessionLocal()
                 try:
                     # 首先删除价格为0的商品
                     deleted_count = await self.delete_zero_price_products(db)
-                    log_ctx.info(f"已删除{deleted_count}个价格为0的商品")
+                    self.logger.info(f"已删除{deleted_count}个价格为0的商品")
                     
                     # 执行批量更新
                     success_count, fail_count, delete_count = await self.update_batch(
                         db, actual_batch_size
                     )
                     
-                    log_ctx.success(
+                    self.logger.success(
                         f"计划更新任务完成: "
                         f"成功={success_count}, "
                         f"失败={fail_count}, "
@@ -845,42 +919,42 @@ class ProductUpdater:
                     db.close()
                     
             except Exception as e:
-                log_ctx.error(f"执行计划更新任务时出错: {str(e)}")
+                self.logger.error(f"执行计划更新任务时出错: {str(e)}")
                 return 0, 0, 0
 
     @track_performance
     async def update_single_asin(self, db: Session, asin: str) -> bool:
         """更新单个ASIN的商品信息"""
-        with TaskLogContext(task_id=f"SINGLE:{asin}") as log_ctx:
+        with LogContext(task_id=f"SINGLE:{asin}"):
             try:
-                log_ctx.info(f"开始更新商品: {asin}")
+                self.logger.info(f"开始更新商品: {asin}")
                 
                 # 查询数据库中是否存在该ASIN
                 product = db.query(Product).filter(Product.asin == asin).first()
                 
                 if not product:
-                    log_ctx.warning(f"数据库中不存在商品: {asin}")
+                    self.logger.warning(f"数据库中不存在商品: {asin}")
                     return False
                     
                 # 初始化API客户端（如果尚未初始化）
                 if not self.amazon_api or not self.cj_client:
                     await self.initialize_clients()
                     if not self.amazon_api or not self.cj_client:
-                        log_ctx.error("API客户端初始化失败")
+                        self.logger.error("API客户端初始化失败")
                         return False
                         
                 # 处理商品更新
                 result = await self.process_product_update(product, db)
                 
                 if result:
-                    log_ctx.success(f"商品 {asin} 更新成功")
+                    self.logger.success(f"商品 {asin} 更新成功")
                 else:
-                    log_ctx.warning(f"商品 {asin} 更新失败或已删除")
+                    self.logger.warning(f"商品 {asin} 更新失败或已删除")
                     
                 return result
                 
             except Exception as e:
-                log_ctx.error(f"更新商品 {asin} 时出错: {str(e)}")
+                self.logger.error(f"更新商品 {asin} 时出错: {str(e)}")
                 return False
 
     @classmethod
