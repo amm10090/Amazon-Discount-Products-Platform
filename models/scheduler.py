@@ -230,10 +230,35 @@ class SchedulerManager:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         
-        logger = logging.getLogger("SchedulerManager.JobExecutor")
+        # 创建任务专用的日志记录器
+        task_logger = logging.getLogger(f"SchedulerManager.JobExecutor.{job_id}")
+        task_logger.setLevel(logging.INFO)
+        
+        # 确保日志目录存在
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        
+        # 创建任务专用的日志文件处理器
+        task_log_file = log_dir / f"task_{job_id}.log"
+        file_handler = RotatingFileHandler(
+            task_log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        
+        # 设置格式化器
+        formatter = logging.Formatter(
+            '%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        
+        # 添加处理器
+        task_logger.addHandler(file_handler)
         
         try:
-            logger.info(f"开始执行任务 {job_id}，类型：{crawler_type}，目标数量：{max_items}")
+            task_logger.info(f"开始执行任务 {job_id}，类型：{crawler_type}，目标数量：{max_items}")
             
             # 优先使用环境变量中的数据库路径
             if "SCHEDULER_DB_PATH" in os.environ:
@@ -245,7 +270,7 @@ class SchedulerManager:
                 data_dir.mkdir(parents=True, exist_ok=True)
                 db_path = f"sqlite:///{data_dir}/scheduler.db"
             
-            logger.info(f"使用数据库路径: {db_path}")
+            task_logger.info(f"使用数据库路径: {db_path}")
             
             # 创建数据库引擎和会话
             engine = create_engine(db_path)
@@ -263,7 +288,7 @@ class SchedulerManager:
             session.commit()
             
             try:
-                logger.info(f"任务 {job_id} 开始执行爬虫")
+                task_logger.info(f"任务 {job_id} 开始执行爬虫")
                 
                 # 创建新的事件循环来运行异步任务
                 loop = asyncio.new_event_loop()
@@ -274,7 +299,7 @@ class SchedulerManager:
                     SchedulerManager._crawl_products(crawler_type, max_items)
                 )
                 
-                logger.info(f"任务 {job_id} 执行完成，采集到 {items_collected} 个商品")
+                task_logger.info(f"任务 {job_id} 执行完成，采集到 {items_collected} 个商品")
                 
                 # 更新历史记录
                 history.end_time = datetime.now()
@@ -286,7 +311,7 @@ class SchedulerManager:
                 loop.close()
                 
             except Exception as e:
-                logger.error(f"任务 {job_id} 执行失败: {str(e)}")
+                task_logger.error(f"任务 {job_id} 执行失败: {str(e)}")
                 history.end_time = datetime.now()
                 history.status = 'failed'
                 history.error = str(e)
@@ -295,9 +320,15 @@ class SchedulerManager:
             
             finally:
                 session.close()
+                # 移除文件处理器，避免资源泄漏
+                task_logger.removeHandler(file_handler)
+                file_handler.close()
                 
         except Exception as e:
-            logger.error(f"任务 {job_id} 执行过程中发生错误: {str(e)}")
+            task_logger.error(f"任务 {job_id} 执行过程中发生错误: {str(e)}")
+            # 移除文件处理器，避免资源泄漏
+            task_logger.removeHandler(file_handler)
+            file_handler.close()
             raise
 
     def add_job(self, job_config: Dict[str, Any]):
