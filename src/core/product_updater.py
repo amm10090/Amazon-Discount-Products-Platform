@@ -7,6 +7,7 @@
 3. 更新商品的CJ推广链接
 4. 获取商品最新价格、库存和优惠信息
 5. 更新数据库中的商品记录
+6. 检查优惠券信息（针对Coupon来源的商品）
 
 主要组件：
 - ProductUpdater: 商品更新管理类，提供单个和批量商品更新方法
@@ -32,6 +33,7 @@ from sqlalchemy.orm import Session
 from enum import Enum
 import random
 from tqdm import tqdm  # 添加tqdm库支持进度条
+import time
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -39,12 +41,14 @@ sys.path.append(str(project_root))
 
 from src.core.amazon_product_api import AmazonProductAPI
 from src.core.cj_api_client import CJAPIClient
-from models.database import SessionLocal, Product
+from models.database import SessionLocal, Product, Offer
 from models.product import ProductInfo, ProductOffer
 from models.product_service import ProductService
 from src.utils.log_config import get_logger, LogContext, track_performance
 from src.utils.api_retry import with_retry
 from src.utils.config_loader import config_loader
+from src.core.parallel_discount_scraper import ParallelDiscountScraper
+from src.core.discount_scraper import DiscountScraper
 
 class TaskLogContext:
     """任务日志上下文管理器"""
@@ -165,6 +169,11 @@ class ProductUpdater:
         self.pa_api_request_interval = 2.0  # 增加到2秒以避免429错误
         self.last_cj_api_request_time = None
         self.cj_api_request_interval = 0.5
+        
+        # 优惠券检查相关配置
+        self.coupon_check_retry_count = 2
+        self.coupon_check_retry_delay = 5
+        self.coupon_scraper = None
         
     async def initialize_clients(self):
         """初始化API客户端"""
@@ -498,13 +507,82 @@ class ProductUpdater:
                     pa_products = await self.amazon_api.get_products_by_asins([product.asin])
                     if not pa_products:
                         self.logger.error("无法从PAAPI获取商品信息，商品可能已下架或缺货")
-                        # 只有在无法从PAAPI获取信息时才删除商品
                         return await self.delete_product(product, db, "商品不可用，无法从PAAPI获取信息")
                     
                     pa_info = pa_products[0]
+                    
+                    # 检查是否需要获取优惠券信息
+                    if product.source and product.source.lower() in ['coupon', '/coupon']:
+                        self.logger.info(f"检测到Coupon商品，开始检查优惠券信息")
+                        coupon_type, coupon_value = await self.check_coupon_info(product, db)
+                        
+                        # 更新优惠券信息
+                        if not product.offers:
+                            offer = Offer(product_id=product.asin)
+                            product.offers.append(offer)
+                        else:
+                            offer = product.offers[0]
+                        
+                        # 无论是否有优惠券信息都更新字段
+                        offer.coupon_type = coupon_type
+                        offer.coupon_value = coupon_value
+                        offer.updated_at = datetime.now(UTC)
+                        self.logger.info(
+                            f"已更新优惠券信息: "
+                            f"类型={coupon_type or '无'}, "
+                            f"金额={coupon_value or '无'}"
+                        )
+                    
                     # 更新商品信息
-                    product.current_price = pa_info.offers[0].price if pa_info.offers else 0
-                    product.stock = "in_stock" if pa_info.offers and pa_info.offers[0].availability == "Available" else "out_of_stock"
+                    if pa_info.offers:
+                        product.current_price = pa_info.offers[0].price
+                        product.stock = "in_stock" if pa_info.offers[0].availability == "Available" else "out_of_stock"
+                        
+                        # 更新折扣信息
+                        savings = pa_info.offers[0].savings if hasattr(pa_info.offers[0], 'savings') else None
+                        savings_percentage = pa_info.offers[0].savings_percentage if hasattr(pa_info.offers[0], 'savings_percentage') else None
+                        
+                        # 更新products表中的折扣信息
+                        product.savings_amount = savings
+                        product.savings_percentage = savings_percentage
+                        
+                        # 更新或创建offers表中的记录
+                        if not product.offers:
+                            offer = Offer(
+                                product_id=product.asin,
+                                savings=savings,
+                                savings_percentage=savings_percentage,
+                                updated_at=datetime.now(UTC)
+                            )
+                            product.offers.append(offer)
+                        else:
+                            offer = product.offers[0]
+                            offer.savings = savings
+                            offer.savings_percentage = savings_percentage
+                            offer.updated_at = datetime.now(UTC)
+                        
+                        # 如果没有折扣，设置为None
+                        if not savings and not savings_percentage:
+                            product.original_price = product.current_price
+                        else:
+                            # 如果有折扣，计算原价
+                            if savings:
+                                product.original_price = product.current_price + savings
+                            elif savings_percentage:
+                                product.original_price = product.current_price / (1 - savings_percentage/100)
+                    else:
+                        product.current_price = 0
+                        product.stock = "out_of_stock"
+                        product.savings_amount = None
+                        product.savings_percentage = None
+                        product.original_price = None
+                        
+                        # 更新offers表
+                        if product.offers:
+                            offer = product.offers[0]
+                            offer.savings = None
+                            offer.savings_percentage = None
+                            offer.updated_at = datetime.now(UTC)
                     
                     # 如果价格为0，删除商品
                     if product.current_price == 0:
@@ -517,7 +595,14 @@ class ProductUpdater:
                     product.updated_at = datetime.now(UTC)
                     
                     db.commit()
-                    self.logger.debug(f"商品信息更新成功: 价格={product.current_price}, 库存={product.stock}")
+                    self.logger.debug(
+                        f"商品信息更新成功: "
+                        f"价格={product.current_price}, "
+                        f"原价={product.original_price}, "
+                        f"节省={product.savings_amount}, "
+                        f"折扣比例={product.savings_percentage}%, "
+                        f"库存={product.stock}"
+                    )
                     return True
                     
                 except Exception as e:
@@ -529,6 +614,73 @@ class ProductUpdater:
                 self.logger.error(f"更新商品信息失败: {str(e)}")
                 db.rollback()
                 return False
+
+    async def check_coupon_info(self, product: Product, db: Session) -> Tuple[str, float]:
+        """
+        检查商品的优惠券信息
+        
+        Args:
+            product: 商品对象
+            db: 数据库会话
+            
+        Returns:
+            Tuple[str, float]: (优惠券类型, 优惠券金额)
+        """
+        task_id = f"COUPON:{product.asin}"
+        with LogContext(task_id=task_id):
+            try:
+                # 创建一个临时的ParallelDiscountScraper实例
+                if not self.coupon_scraper:
+                    self.coupon_scraper = ParallelDiscountScraper(
+                        db=db,  # 使用传入的db会话
+                        batch_size=1,
+                        concurrent_workers=1,
+                        headless=True
+                    )
+                    self.coupon_scraper._init_driver_pool()
+                
+                driver = self.coupon_scraper.driver_pool.get_driver()
+                if not driver:
+                    self.logger.error(f"无法初始化WebDriver，跳过优惠券检查")
+                    return None, None
+                
+                try:
+                    # 访问商品页面并检查优惠券
+                    url = f"https://www.amazon.com/dp/{product.asin}?th=1"
+                    self.logger.debug(f"访问商品页面: {url}")
+                    driver.get(url)
+                    
+                    # 随机等待1-2秒，避免被检测
+                    wait_time = random.uniform(1, 2)
+                    time.sleep(wait_time)
+                    
+                    # 使用DiscountScraper的方法提取优惠券信息
+                    temp_scraper = DiscountScraper(db)  # 使用传入的db会话
+                    temp_scraper.driver = driver
+                    coupon_type, coupon_value = temp_scraper._extract_coupon_info()
+                    
+                    self.logger.info(
+                        f"优惠券检查结果: "
+                        f"类型={coupon_type or '无'}, "
+                        f"金额={coupon_value or '无'}"
+                    )
+                    
+                    return coupon_type, coupon_value
+                    
+                finally:
+                    # 释放driver
+                    if driver:
+                        self.coupon_scraper.driver_pool.release_driver(driver)
+                    
+            except Exception as e:
+                self.logger.error(f"检查优惠券信息时出错: {str(e)}")
+                return None, None
+                
+    async def close_coupon_scraper(self):
+        """关闭优惠券检查器"""
+        if self.coupon_scraper:
+            self.coupon_scraper._close_driver_pool()
+            self.coupon_scraper = None
 
     async def process_batch_cj_availability(self, asins: List[str]) -> Dict[str, bool]:
         """批量检查CJ平台商品可用性"""
@@ -650,28 +802,36 @@ class ProductUpdater:
                             price = product.offers[0].price if product.offers else 0
                             in_stock = "Available" == product.offers[0].availability if product.offers else False
                             
+                            # 获取折扣信息
+                            savings = product.offers[0].savings if product.offers and hasattr(product.offers[0], 'savings') else None
+                            savings_percentage = product.offers[0].savings_percentage if product.offers and hasattr(product.offers[0], 'savings_percentage') else None
+                            
                             results[product.asin] = {
                                 'price': price,
                                 'stock': in_stock,
                                 'title': product.title if hasattr(product, 'title') else '',
-                                'availability_status': product.offers[0].availability if product.offers else 'Unavailable'
+                                'availability_status': product.offers[0].availability if product.offers else 'Unavailable',
+                                'savings': savings,
+                                'savings_percentage': savings_percentage
                             }
                             
                             self.logger.debug(
                                 f"成功获取商品信息: ASIN={product.asin}, "
                                 f"价格={price}, "
+                                f"节省={savings}, "
+                                f"折扣比例={savings_percentage}%, "
                                 f"库存={in_stock}, "
                                 f"状态={product.offers[0].availability if product.offers else 'Unavailable'}"
                             )
                         
-                        # 记录未返回结果的ASIN
-                        for asin in asins:
-                            if asin not in results and not any(p.asin == asin for p in pa_products if p):
-                                self.logger.error(
-                                    f"商品 {asin} 无法获取PAAPI信息: "
-                                    f"原因=商品不存在或无访问权限"
-                                )
-                                results[asin] = None
+                            # 记录未返回结果的ASIN
+                            for asin in asins:
+                                if asin not in results and not any(p.asin == asin for p in pa_products if p):
+                                    self.logger.error(
+                                        f"商品 {asin} 无法获取PAAPI信息: "
+                                        f"原因=商品不存在或无访问权限"
+                                    )
+                                    results[asin] = None
                             
                     except Exception as e:
                         # 检查是否是请求过多错误(429)
@@ -700,16 +860,24 @@ class ProductUpdater:
                                     price = product.offers[0].price if product.offers else 0
                                     in_stock = "Available" == product.offers[0].availability if product.offers else False
                                     
+                                    # 获取折扣信息
+                                    savings = product.offers[0].savings if product.offers and hasattr(product.offers[0], 'savings') else None
+                                    savings_percentage = product.offers[0].savings_percentage if product.offers and hasattr(product.offers[0], 'savings_percentage') else None
+                                    
                                     results[product.asin] = {
                                         'price': price,
                                         'stock': in_stock,
                                         'title': product.title if hasattr(product, 'title') else '',
-                                        'availability_status': product.offers[0].availability if product.offers else 'Unavailable'
+                                        'availability_status': product.offers[0].availability if product.offers else 'Unavailable',
+                                        'savings': savings,
+                                        'savings_percentage': savings_percentage
                                     }
                                     
                                     self.logger.debug(
                                         f"重试成功获取商品信息: ASIN={product.asin}, "
                                         f"价格={price}, "
+                                        f"节省={savings}, "
+                                        f"折扣比例={savings_percentage}%, "
                                         f"库存={in_stock}"
                                     )
                                 
@@ -778,6 +946,17 @@ class ProductUpdater:
                     
                 self.logger.info(f"找到{len(products)}个需要更新的商品")
                 
+                # 分类商品
+                regular_products = []
+                coupon_products = []
+                for product in products:
+                    if product.source and product.source.lower() in ['coupon', '/coupon']:
+                        coupon_products.append(product)
+                    else:
+                        regular_products.append(product)
+                        
+                self.logger.info(f"商品分类: 常规商品={len(regular_products)}, Coupon商品={len(coupon_products)}")
+                
                 # 获取所有ASIN
                 asins = [product.asin for product in products]
                 asin_to_product = {product.asin: product for product in products}
@@ -803,62 +982,36 @@ class ProductUpdater:
                 
                 # 使用进度条显示更新进度
                 with tqdm(total=len(asin_to_product), desc="更新商品信息") as pbar:
-                    for asin, product in asin_to_product.items():
+                    # 先处理常规商品
+                    for product in regular_products:
                         try:
-                            # 为每个商品创建新的事务
-                            with db.begin_nested():
-                                # 重新从数据库获取商品以确保数据一致性
-                                product = db.query(Product).filter(Product.asin == asin).first()
-                                if not product:
-                                    self.logger.warning(f"商品 {asin} 在处理过程中被删除，跳过更新")
-                                    fail_count += 1
-                                    continue
-                                
-                                # 更新CJ相关信息
-                                if asin in available_asins and cj_links.get(asin):
-                                    product.cj_url = cj_links[asin]
-                                    product.api_provider = "cj-api"
-                                else:
-                                    product.cj_url = None
-                                    product.api_provider = "pa-api"
-                                
-                                # 更新PAAPI信息
-                                pa_product = pa_info.get(asin)
-                                if pa_product and pa_product.get('price'):
-                                    product.current_price = pa_product['price']
-                                    product.stock = "in_stock" if pa_product['stock'] else "out_of_stock"
-                                    product.timestamp = datetime.now(UTC)
-                                    product.updated_at = datetime.now(UTC)
-                                    
-                                    # 如果价格为0，删除商品
-                                    if product.current_price == 0:
-                                        db.delete(product)
-                                        delete_count += 1
-                                        self.logger.debug(f"商品 {asin} 价格为0，已删除")
-                                    else:
-                                        success_count += 1
-                                        self.logger.debug(
-                                            f"成功更新商品: ASIN={asin}, "
-                                            f"API来源={product.api_provider}, "
-                                            f"价格={product.current_price}, "
-                                            f"库存={product.stock}"
-                                        )
-                                else:
-                                    # 无法获取价格信息，删除商品
-                                    reason = "无法获取价格信息" if pa_product else "获取PAAPI信息失败"
-                                    db.delete(product)
-                                    delete_count += 1
-                                    self.logger.debug(f"商品 {asin} 更新失败: {reason}，已删除")
-                                
-                                # 提交每个商品的事务
-                                db.flush()
-                            
+                            result = await self.process_product_update(product, db)
+                            if result:
+                                success_count += 1
+                            else:
+                                fail_count += 1
                         except Exception as e:
                             fail_count += 1
-                            self.logger.error(f"更新商品 {asin} 失败: 错误类型={type(e).__name__}, 错误信息={str(e)}")
-                            
-                        # 更新进度条
+                            self.logger.error(f"更新商品 {product.asin} 失败: {str(e)}")
                         pbar.update(1)
+                    
+                    # 再处理Coupon商品
+                    if coupon_products:
+                        self.logger.info(f"开始处理 {len(coupon_products)} 个Coupon商品")
+                        for product in coupon_products:
+                            try:
+                                result = await self.process_product_update(product, db)
+                                if result:
+                                    success_count += 1
+                                else:
+                                    fail_count += 1
+                            except Exception as e:
+                                fail_count += 1
+                                self.logger.error(f"更新Coupon商品 {product.asin} 失败: {str(e)}")
+                            pbar.update(1)
+                
+                # 关闭优惠券检查器
+                await self.close_coupon_scraper()
                 
                 # 提交所有更改
                 try:
