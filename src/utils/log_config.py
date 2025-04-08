@@ -18,11 +18,15 @@ from functools import wraps
 from loguru import logger
 from loguru._logger import Logger
 
+# 计算项目根目录
+# 假设当前文件在 src/utils/log_config.py
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 # 默认配置
 DEFAULT_CONFIG = {
     "LOG_LEVEL": "INFO",
     "JSON_LOGS": False,
-    "LOG_PATH": "logs",
+    "LOG_PATH": "logs",  # 这将是相对于项目根目录的路径
     "MAX_LOG_SIZE": "100 MB",
     "LOG_RETENTION": "30 days",
     "CONSOLE_LOG_FORMAT": (
@@ -245,8 +249,8 @@ class LogConfig:
         logger.remove()
         LogConfig._handler_ids.clear()
         
-        # 创建日志目录
-        self.log_path = Path(self.config["LOG_PATH"]).resolve()
+        # 创建日志目录 - 使用项目根目录
+        self.log_path = (PROJECT_ROOT / self.config["LOG_PATH"]).resolve()
         os.makedirs(self.log_path, exist_ok=True)
         
         # 配置日志处理器
@@ -282,14 +286,14 @@ class LogConfig:
         )
         LogConfig._handler_ids.append(handler_id)
         
-        # 添加文件处理器
-        log_file = self.log_path / "app_{time}.log"
+        # 添加主日志文件处理器
+        log_file = self.log_path / "app.{time:YYYY-MM-DD}.log"
         if self.config.get("JSON_LOGS", False):
             handler_id = logger.add(
                 str(log_file),
                 serialize=True,  # 启用JSON序列化
                 level=self.config["LOG_LEVEL"],
-                rotation=self.config["MAX_LOG_SIZE"],
+                rotation="00:00",  # 每天午夜轮转
                 retention=self.config["LOG_RETENTION"],
                 compression="zip",
                 encoding="utf-8",
@@ -302,7 +306,7 @@ class LogConfig:
                 str(log_file),
                 format=self.config["FILE_LOG_FORMAT"],
                 level=self.config["LOG_LEVEL"],
-                rotation=self.config["MAX_LOG_SIZE"],
+                rotation="00:00",  # 每天午夜轮转
                 retention=self.config["LOG_RETENTION"],
                 compression="zip",
                 encoding="utf-8",
@@ -313,11 +317,11 @@ class LogConfig:
         LogConfig._handler_ids.append(handler_id)
         
         # 添加错误日志专用处理器
-        error_log = self.log_path / "error_{time}.log"
+        error_log = self.log_path / "error.{time:YYYY-MM-DD}.log"
         handler_id = logger.add(
             str(error_log),
             format=self.config["FILE_LOG_FORMAT"],
-            rotation=self.config["MAX_LOG_SIZE"],
+            rotation="00:00",  # 每天午夜轮转
             retention=self.config["LOG_RETENTION"],
             level="ERROR",
             compression="zip",

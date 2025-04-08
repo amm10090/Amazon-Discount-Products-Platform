@@ -46,21 +46,22 @@ from src.core.discount_scheduler import DiscountUpdateScheduler, TaskLoggerAdapt
 # 初始化组件日志配置
 def init_logger():
     """初始化日志配置"""
-    # 创建日志目录
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    # 使用项目根目录下的logs目录
+    log_dir = Path(project_root) / os.getenv("APP_LOG_DIR", "logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
     
     # 配置优惠抓取专用日志
     scraper_log_file = log_dir / "discount_scraper.log"
     
     # 创建日志记录器
     logger = logging.getLogger("DiscountScraper")
+    logger.setLevel(logging.INFO)
     
     # 移除现有的处理器
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # 创建文件处理器 - 记录所有级别日志
+    # 创建文件处理器
     file_handler = RotatingFileHandler(
         scraper_log_file,
         maxBytes=10 * 1024 * 1024,  # 10MB
@@ -68,29 +69,15 @@ def init_logger():
         encoding='utf-8'
     )
     
-    # 创建控制台处理器 - 只显示INFO及以上级别
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
     # 设置格式化器
-    log_formatter = logging.Formatter(
-        '[%(asctime)s] [%(levelname)s] [%(task_id)s] %(message)s',
+    formatter = logging.Formatter(
+        '[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    file_handler.setFormatter(formatter)
     
-    file_handler.setFormatter(log_formatter)
-    console_handler.setFormatter(log_formatter)
-    
-    # 配置日志记录器
+    # 添加处理器
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    # 从环境变量获取日志级别，默认为INFO
-    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
-    log_level = getattr(logging, log_level_str, logging.INFO)
-    
-    # 设置日志级别
-    logger.setLevel(log_level)
     
     return logger
 

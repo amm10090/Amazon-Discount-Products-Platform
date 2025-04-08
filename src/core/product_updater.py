@@ -51,37 +51,104 @@ from src.core.parallel_discount_scraper import ParallelDiscountScraper
 from src.core.discount_scraper import DiscountScraper
 
 class TaskLogContext:
-    """任务日志上下文管理器"""
+    """
+    任务日志上下文管理器
+    
+    提供任务级别的日志上下文管理，自动添加任务ID和其他上下文信息到日志记录。
+    支持同步和异步操作。
+    
+    示例:
+        with TaskLogContext(task_id="task123", operation="update") as task_log:
+            task_log.info("开始处理任务")
+            # ... 执行任务 ...
+            task_log.success("任务完成")
+    """
+    
     def __init__(self, task_id: str = "SYSTEM", **kwargs):
-        self.context = {"task_id": task_id, "name": "ProductUpdater"}
-        self.context.update(kwargs)
+        """
+        初始化任务日志上下文
+        
+        Args:
+            task_id: 任务ID，默认为"SYSTEM"
+            **kwargs: 其他上下文信息
+        """
+        self.context_data = {"task_id": task_id, "name": "ProductUpdater"}
+        self.context_data.update(kwargs)
+        
+        # 使用环境变量中的日志目录
+        log_dir = Path(os.getenv("APP_LOG_DIR", "logs"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
         self._logger = get_logger(name="ProductUpdater")
+        self._log_context = LogContext(**self.context_data)
+        self._bound_logger = None
         
     def __enter__(self):
+        """进入上下文，设置日志上下文"""
+        self._log_context.__enter__()
+        self._bound_logger = self._logger.bind(**self.context_data)
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        """退出上下文，清理日志上下文"""
+        try:
+            if exc_type is not None:
+                # 如果发生异常，记录错误信息
+                self.error(f"任务执行出错: {str(exc_val)}")
+        finally:
+            self._log_context.__exit__(exc_type, exc_val, exc_tb)
+            self._bound_logger = None
+    
+    async def __aenter__(self):
+        """异步进入上下文"""
+        await self._log_context.__aenter__()
+        self._bound_logger = self._logger.bind(**self.context_data)
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步退出上下文"""
+        try:
+            if exc_type is not None:
+                # 如果发生异常，记录错误信息
+                self.error(f"任务执行出错: {str(exc_val)}")
+        finally:
+            await self._log_context.__aexit__(exc_type, exc_val, exc_tb)
+            self._bound_logger = None
         
     def info(self, message: str):
         """记录INFO级别日志"""
-        self._logger.bind(**self.context).info(message)
+        if self._bound_logger:
+            self._bound_logger.info(message)
+        else:
+            self._logger.bind(**self.context_data).info(message)
         
     def debug(self, message: str):
         """记录DEBUG级别日志"""
-        self._logger.bind(**self.context).debug(message)
+        if self._bound_logger:
+            self._bound_logger.debug(message)
+        else:
+            self._logger.bind(**self.context_data).debug(message)
         
     def warning(self, message: str):
         """记录WARNING级别日志"""
-        self._logger.bind(**self.context).warning(message)
+        if self._bound_logger:
+            self._bound_logger.warning(message)
+        else:
+            self._logger.bind(**self.context_data).warning(message)
         
     def error(self, message: str):
         """记录ERROR级别日志"""
-        self._logger.bind(**self.context).error(message)
+        if self._bound_logger:
+            self._bound_logger.error(message)
+        else:
+            self._logger.bind(**self.context_data).error(message)
         
     def success(self, message: str):
         """记录SUCCESS级别日志"""
-        self._logger.bind(**self.context).success(message)
+        if self._bound_logger:
+            self._bound_logger.success(message)
+        else:
+            self._logger.bind(**self.context_data).success(message)
 
 # 在时间维度上，如何调度不同商品的更新频率
 class UpdatePriority(Enum):
@@ -366,7 +433,7 @@ class ProductUpdater:
         """删除所有价格为0或null的商品"""
         deleted_count = 0
         
-        with LogContext(task_id='DELETE_BATCH'):
+        with TaskLogContext(task_id='DELETE_BATCH'):
             self.logger.info("开始删除价格为0或null的商品")
             
             try:
@@ -383,7 +450,7 @@ class ProductUpdater:
                 
                 # 使用进度条显示删除进度
                 for product in tqdm(products, desc="删除价格为0的商品"):
-                    with LogContext(task_id=f"DELETE:{product.asin}"):
+                    with TaskLogContext(task_id=f"DELETE:{product.asin}"):
                         if await self.delete_product(product, db, "价格为0或null"):
                             deleted_count += 1
                 
@@ -405,7 +472,7 @@ class ProductUpdater:
         Returns:
             bool: 删除是否成功
         """
-        with LogContext(task_id=f"DELETE:{product.asin}"):
+        with TaskLogContext(task_id=f"DELETE:{product.asin}"):
             try:
                 db.delete(product)
                 db.commit()
@@ -418,7 +485,7 @@ class ProductUpdater:
 
     async def get_products_to_update(self, db: Session, limit: int = 100) -> List[Product]:
         """获取需要更新的商品列表"""
-        with LogContext(task_id='QUERY'):
+        with TaskLogContext(task_id='QUERY'):
             # 首先删除所有价格为0的商品
             deleted_count = await self.delete_zero_price_products(db)
             if deleted_count > 0:
@@ -477,7 +544,7 @@ class ProductUpdater:
     @track_performance
     async def process_product_update(self, product: Product, db: Session) -> bool:
         """处理单个商品的更新"""
-        with LogContext(task_id=f"UPDATE:{product.asin}"):
+        with TaskLogContext(task_id=f"UPDATE:{product.asin}"):
             try:
                 # 1. 检查CJ平台可用性
                 self.logger.debug("检查CJ平台可用性")
@@ -627,7 +694,7 @@ class ProductUpdater:
             Tuple[str, float]: (优惠券类型, 优惠券金额)
         """
         task_id = f"COUPON:{product.asin}"
-        with LogContext(task_id=task_id):
+        with TaskLogContext(task_id=task_id):
             try:
                 # 创建一个临时的ParallelDiscountScraper实例
                 if not self.coupon_scraper:
@@ -684,7 +751,7 @@ class ProductUpdater:
 
     async def process_batch_cj_availability(self, asins: List[str]) -> Dict[str, bool]:
         """批量检查CJ平台商品可用性"""
-        with LogContext(task_id='CJ-CHECK') as log_ctx:
+        with TaskLogContext(task_id='CJ-CHECK') as log_ctx:
             batch_size = 10
             results = {}
             
@@ -729,7 +796,7 @@ class ProductUpdater:
             
     async def process_batch_cj_links(self, available_asins: List[str]) -> Dict[str, str]:
         """批量获取CJ推广链接"""
-        with LogContext(task_id='CJ-LINKS'):
+        with TaskLogContext(task_id='CJ-LINKS'):
             batch_size = 10
             results = {}
             
@@ -772,7 +839,7 @@ class ProductUpdater:
         
     async def process_batch_pa_api(self, products: List[Product]) -> Dict[str, Dict]:
         """批量获取PA API商品信息"""
-        with LogContext(task_id='PAAPI'):
+        with TaskLogContext(task_id='PAAPI'):
             results = {}
             
             # 只在INFO级别输出开始和结束信息
@@ -933,7 +1000,7 @@ class ProductUpdater:
     @track_performance
     async def update_batch(self, db: Session, limit: int = 100) -> Tuple[int, int, int]:
         """批量更新商品信息"""
-        with LogContext(task_id='BATCH'):
+        with TaskLogContext(task_id='BATCH'):
             self.logger.info("开始批量更新商品信息")
             
             try:
@@ -1033,7 +1100,7 @@ class ProductUpdater:
     @track_performance
     async def run_scheduled_update(self, batch_size: Optional[int] = None) -> Tuple[int, int, int]:
         """执行计划更新任务"""
-        with LogContext(task_id='SCHEDULE'):
+        with TaskLogContext(task_id='SCHEDULE'):
             self.logger.info("开始执行计划更新任务")
             
             try:
@@ -1078,7 +1145,7 @@ class ProductUpdater:
     @track_performance
     async def update_single_asin(self, db: Session, asin: str) -> bool:
         """更新单个ASIN的商品信息"""
-        with LogContext(task_id=f"SINGLE:{asin}"):
+        with TaskLogContext(task_id=f"SINGLE:{asin}"):
             try:
                 self.logger.info(f"开始更新商品: {asin}")
                 
@@ -1114,6 +1181,9 @@ class ProductUpdater:
     async def main(cls):
         """主函数"""
         import argparse
+        import os
+        from pathlib import Path
+        from loguru import logger
         
         # 创建命令行参数解析器
         parser = argparse.ArgumentParser(description="商品更新管理工具")
@@ -1122,14 +1192,74 @@ class ProductUpdater:
         parser.add_argument("--asin", type=str, help="要更新的单个商品的ASIN")
         parser.add_argument("--log-level", type=str, default="INFO", help="日志级别")
         parser.add_argument("--debug", action="store_true", help="启用调试模式")
+        parser.add_argument("--json-logs", action="store_true", help="使用JSON格式记录日志")
+        parser.add_argument("--log-dir", type=str, default="logs", help="日志文件目录")
         
         args = parser.parse_args()
         
-        # 配置日志
-        logger = get_logger("ProductUpdater")
+        # 创建模块特定的日志目录
+        log_dir = Path(args.log_dir) / "product_updater"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 设置日志级别
+        log_level = "DEBUG" if args.debug else args.log_level
+        
+        # 配置日志格式
+        console_format = (
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+            "<level>{message}</level>"
+        )
+        
+        file_format = (
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+            "process:{process} | thread:{thread} | "
+            "{name}:{function}:{line} | {message}"
+        )
+        
+        # 移除默认处理器
+        logger.remove()
+        
+        # 添加控制台处理器
+        logger.add(
+            sys.stderr,
+            format=console_format,
+            level=log_level,
+            colorize=True
+        )
+        
+        # 添加主日志文件处理器
+        logger.add(
+            str(log_dir / "info.log"),
+            format=file_format,
+            level=log_level,
+            rotation="00:00",  # 每天午夜轮转
+            retention="30 days",
+            compression="zip",
+            encoding="utf-8",
+            serialize=args.json_logs,
+            filter=lambda record: record["level"].name != "ERROR"  # 非错误日志
+        )
+        
+        # 添加错误日志文件处理器
+        logger.add(
+            str(log_dir / "error.log"),
+            format=file_format,
+            level="ERROR",
+            rotation="00:00",  # 每天午夜轮转
+            retention="30 days",
+            compression="zip",
+            encoding="utf-8",
+            filter=lambda record: record["level"].name == "ERROR",
+            serialize=args.json_logs
+        )
+        
+        # 获取带有名称的 logger
+        product_logger = get_logger("ProductUpdater")
         
         if not args.scheduled and not args.asin:
-            logger.warning(
+            product_logger.warning(
                 "请使用以下参数之一运行程序：\n"
                 "1. --scheduled 执行计划更新任务\n"
                 "2. --asin ASIN 更新单个商品\n"
@@ -1140,11 +1270,14 @@ class ProductUpdater:
             return
             
         try:
+            product_logger.info("初始化商品更新管理器...")
             updater = cls()
             
             if args.scheduled:
+                product_logger.info(f"开始执行计划更新任务，批量大小: {args.batch_size or '默认'}")
                 await updater.run_scheduled_update(args.batch_size)
             elif args.asin:
+                product_logger.info(f"开始更新单个商品: {args.asin}")
                 db = SessionLocal()
                 try:
                     await updater.update_single_asin(db, args.asin)
@@ -1152,8 +1285,11 @@ class ProductUpdater:
                     db.close()
                     
         except Exception as e:
-            logger.error(f"程序执行出错: {str(e)}")
+            product_logger.error(f"程序执行出错: {str(e)}")
             sys.exit(1)
+        finally:
+            # 确保所有日志都被写入
+            product_logger.info("程序执行完成")
 
 if __name__ == "__main__":
     import asyncio

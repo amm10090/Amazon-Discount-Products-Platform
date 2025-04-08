@@ -17,7 +17,7 @@ Amazon爬虫和产品API FastAPI服务
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime
+from datetime import datetime, UTC
 import asyncio
 import uvicorn
 import sys
@@ -39,18 +39,21 @@ from models.scheduler_models import JobConfig, JobStatus, SchedulerStatus, JobHi
 import pytz
 import logging
 from contextlib import asynccontextmanager
+from loguru import logger
+from logging.config import dictConfig
+from starlette.status import HTTP_400_BAD_REQUEST
 
 # 添加项目根目录到Python路径
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+project_root = PathLib(__file__).parent.parent.parent.parent
 if project_root not in sys.path:
-    sys.path.append(project_root)
+    sys.path.append(str(project_root))
 
 try:
     from src.core.amazon_bestseller import crawl_deals, save_results
     from src.core.amazon_product_api import AmazonProductAPI
     from src.core.cj_api_client import CJAPIClient
 except ImportError as e:
-    logging.error(f"导入错误: {str(e)}")
+    logger.error(f"导入错误: {str(e)}")
     raise
 
 # 加载环境变量
@@ -58,6 +61,91 @@ load_dotenv()
 
 # 初始化数据库
 init_db()
+
+# 配置日志
+log_dir = PathLib(os.getenv("APP_LOG_DIR", str(project_root / "logs"))).resolve()
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# 禁用所有默认的日志处理器
+logging.getLogger().handlers = []
+logging.getLogger("uvicorn").handlers = []
+logging.getLogger("uvicorn.access").handlers = []
+logging.getLogger("uvicorn.error").handlers = []
+logging.getLogger("fastapi").handlers = []
+
+# 配置日志
+logging_config = {
+    "version": 1,
+    "disable_existing_loggers": True,
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        }
+    },
+    "handlers": {
+        "null": {
+            "class": "logging.NullHandler",
+        }
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["null"], "propagate": False},
+        "uvicorn.access": {"handlers": ["null"], "propagate": False},
+        "uvicorn.error": {"handlers": ["null"], "propagate": False},
+        "fastapi": {"handlers": ["null"], "propagate": False},
+        "": {"handlers": ["null"], "propagate": False}  # 根日志记录器
+    }
+}
+dictConfig(logging_config)
+
+# 配置 loguru 日志
+logger.remove()  # 移除默认的处理器
+
+# 添加主日志处理器
+logger.add(
+    log_dir / "app.{time:YYYY-MM-DD}.log",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
+    rotation="00:00",  # 每天轮转
+    retention="7 days",  # 保留7天
+    compression="zip",  # 压缩旧日志
+    enqueue=True,  # 异步写入
+    catch=True  # 捕获所有异常
+)
+
+# 添加错误日志处理器
+logger.add(
+    log_dir / "error.{time:YYYY-MM-DD}.log",
+    level="ERROR",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
+    rotation="00:00",
+    retention="7 days",
+    compression="zip",
+    enqueue=True,
+    catch=True,  # 捕获所有异常
+    filter=lambda record: record["level"].name == "ERROR"
+)
+
+# 将标准库的日志重定向到loguru
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        # 获取对应的loguru级别
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # 找到调用者的栈帧
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+# 添加拦截处理器到根日志记录器
+logging.getLogger().handlers = [InterceptHandler()]
+logging.getLogger().setLevel(logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -92,8 +180,10 @@ try:
     # 添加日志分析API路由
     app.include_router(log_analysis_router)
 except ImportError as e:
+    logger.warning(f"无法导入日志分析API路由: {str(e)}")
+
 # 存储任务状态的字典
- tasks_status: Dict[str, Dict] = {}
+tasks_status: Dict[str, Dict] = {}
 
 logger = logging.getLogger(__name__)
 

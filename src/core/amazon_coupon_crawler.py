@@ -85,10 +85,11 @@ def init_logger():
     """初始化日志配置"""
     crawler_config = config_loader.get_component_config('crawler')
     if crawler_config:
-        log_file = crawler_config.get('file', 'logs/crawler.log')
+        # 使用项目根目录
+        log_file = Path(project_root) / crawler_config.get('file', 'logs/crawler.log')
         set_log_config(
             log_level=crawler_config.get('level', 'INFO'),
-            log_file=log_file,
+            log_file=str(log_file),  # 转换为字符串
             max_file_size=10 * 1024 * 1024,  # 10MB
             backup_count=5,
             use_colors=True

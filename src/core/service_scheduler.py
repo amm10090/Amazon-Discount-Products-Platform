@@ -62,8 +62,9 @@ class SchedulerManager:
         - 日志级别为INFO
         - 使用UTF-8编码
         """
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
+        # 使用环境变量中的日志目录，如果未设置则使用项目根目录下的logs目录
+        log_dir = Path(os.getenv("APP_LOG_DIR", str(Path(project_root) / "logs"))).resolve()
+        log_dir.mkdir(parents=True, exist_ok=True)
         
         logger.add(
             log_dir / "scheduler.log",

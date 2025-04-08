@@ -19,6 +19,14 @@ class ServiceManager:
     def __init__(self, config_path: Optional[str] = None):
         self.processes: List[subprocess.Popen] = []
         self.config = self.load_config(config_path)
+        
+        # 设置统一的日志目录
+        project_root = Path.cwd()
+        self.log_dir = project_root / "logs"
+        self.log_dir.mkdir(exist_ok=True)
+        # 设置环境变量，让其他模块都使用这个日志目录
+        os.environ["APP_LOG_DIR"] = str(self.log_dir)
+        
         self.setup_logging()
         self.setup_signal_handlers()
         self.scheduler = None
@@ -68,8 +76,8 @@ class ServiceManager:
         
     def setup_logging(self):
         """配置日志系统"""
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
+        # 使用统一的日志目录
+        log_dir = self.log_dir
         
         # 配置根日志记录器
         logging.basicConfig(
@@ -132,6 +140,13 @@ class ServiceManager:
             env["CONFIG_PATH"] = str(project_root / "config" / "production.yaml")
             
         env["PYTHONPATH"] = str(project_root)
+        # 设置日志相关的环境变量
+        env["APP_LOG_DIR"] = str(self.log_dir)
+        env["UVICORN_LOG_LEVEL"] = "error"
+        env["UVICORN_NO_ACCESS_LOG"] = "true"
+        env["UVICORN_NO_PROCESS_LOG"] = "true"
+        env["FASTAPI_LOG_LEVEL"] = "error"
+        
         os.chdir(str(project_root / "src"))
         
         cmd = [
@@ -141,7 +156,10 @@ class ServiceManager:
             "--host", config['host'],
             "--port", str(config['port']),
             "--workers", str(config.get('workers', 4)),
-            "--log-level", "error"  # 设置uvicorn日志级别为error
+            "--log-level", "error",  # 设置uvicorn日志级别为error
+            "--no-access-log",  # 禁用访问日志
+            "--no-server-header",  # 禁用服务器头信息
+            "--no-date-header"  # 禁用日期头信息
         ]
         
         if self.config.get('environment') == 'development' and config.get('reload', False):
