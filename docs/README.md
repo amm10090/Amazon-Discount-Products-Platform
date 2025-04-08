@@ -12,6 +12,11 @@
 - 品牌统计API - 获取品牌相关统计数据
 - 类别统计API - 获取商品类别统计数据
 
+## 数据获取工具
+
+- [CJ API客户端](./cj_api_client.md) - CJ平台API交互客户端
+- [CJ API商品抓取器](./cj_api_crawler.md) - 直接从CJ API获取商品数据
+
 ## 快速开始
 
 所有API都是RESTful风格，返回JSON格式的数据。API端点的基础URL为：

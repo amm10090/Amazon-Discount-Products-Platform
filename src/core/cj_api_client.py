@@ -13,6 +13,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 from models.database import Product
+from src.utils.log_config import get_logger, log_function_call
 
 # 加载环境变量
 load_dotenv()
@@ -25,8 +26,10 @@ class CJAPIClient:
         self.base_url = os.getenv("CJ_API_BASE_URL", "https://cj.partnerboost.com/api")
         self.pid = os.getenv("CJ_PID")
         self.cid = os.getenv("CJ_CID")
+        self.logger = get_logger("CJAPIClient")
         
         if not all([self.pid, self.cid]):
+            self.logger.error("缺少必要的CJ API凭证配置")
             raise ValueError("缺少必要的CJ API凭证配置")
             
         self.headers = {
@@ -34,6 +37,9 @@ class CJAPIClient:
             "Content-Type": "application/json"
         }
         
+        self.logger.debug(f"CJ API客户端初始化完成，基础URL: {self.base_url}")
+        
+    @log_function_call
     async def _make_request(
         self, 
         endpoint: str, 
@@ -58,6 +64,7 @@ class CJAPIClient:
         
         for attempt in range(max_retries):
             try:
+                self.logger.debug(f"发送 {method} 请求到 {endpoint}，尝试 {attempt+1}/{max_retries}")
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.request(
                         method=method,
@@ -68,18 +75,25 @@ class CJAPIClient:
                         response_data = await response.json()
                         
                         if response.status != 200:
-                            raise Exception(f"API请求失败: {response_data.get('message', '未知错误')}")
+                            error_msg = f"API请求失败: {response_data.get('message', '未知错误')}"
+                            self.logger.error(f"{error_msg}，状态码: {response.status}")
+                            raise Exception(error_msg)
                             
+                        self.logger.debug(f"请求成功: {endpoint}")
                         return response_data
                             
             except aiohttp.ClientError as e:
                 if attempt == max_retries - 1:  # 最后一次重试
+                    self.logger.error(f"请求发送失败: {str(e)}，已达最大重试次数")
                     raise Exception(f"请求发送失败: {str(e)}")
                 else:
+                    wait_time = 1 * (attempt + 1)
+                    self.logger.warning(f"请求失败: {str(e)}，{wait_time}秒后重试...")
                     # 等待一段时间后重试
-                    await asyncio.sleep(1 * (attempt + 1))  # 递增等待时间
+                    await asyncio.sleep(wait_time)  # 递增等待时间
                     continue
                 
+    @log_function_call
     async def get_products(
         self,
         asins: Optional[List[str]] = None,
@@ -128,8 +142,10 @@ class CJAPIClient:
             "discount_min": discount_min
         }
         
+        self.logger.info(f"获取商品信息，类别: {category or '全部'}，优惠券筛选: {have_coupon}，总数: {limit}")
         return await self._make_request("/get_products", "POST", data)
         
+    @log_function_call
     async def generate_product_link(
         self, 
         asin: str,
@@ -156,6 +172,8 @@ class CJAPIClient:
             "country_code": "US"  # 默认使用美国站
         }
         
+        self.logger.debug(f"为商品 {asin} 生成推广链接")
+        
         response = await self._make_request(
             "/generate_product_link", 
             "POST", 
@@ -165,24 +183,112 @@ class CJAPIClient:
         )
         
         if not response:
+            self.logger.error(f"API返回空响应，无法为 {asin} 生成推广链接")
             raise Exception("API返回空响应")
             
         if response.get("code") != 0:
-            raise Exception(f"生成链接失败: {response.get('message', '未知错误')}")
+            error_msg = f"生成链接失败: {response.get('message', '未知错误')}"
+            self.logger.error(f"{error_msg}，ASIN: {asin}")
+            raise Exception(error_msg)
             
         # 获取第一个商品的链接
         if not response.get("data") or not response["data"]:
-            raise Exception(f"响应中缺少数据: {response}")
+            error_msg = f"响应中缺少数据: {response}"
+            self.logger.error(f"{error_msg}，ASIN: {asin}")
+            raise Exception(error_msg)
             
         if not isinstance(response["data"], list) or not response["data"]:
-            raise Exception(f"响应数据格式错误: {response}")
+            error_msg = f"响应数据格式错误: {response}"
+            self.logger.error(f"{error_msg}，ASIN: {asin}")
+            raise Exception(error_msg)
             
         product_data = response["data"][0]
         if not product_data.get("link"):
-            raise Exception(f"响应中缺少链接: {response}")
+            error_msg = f"响应中缺少链接: {response}"
+            self.logger.error(f"{error_msg}，ASIN: {asin}")
+            raise Exception(error_msg)
             
+        self.logger.debug(f"成功生成推广链接，ASIN: {asin}")
         return product_data["link"]
         
+    @log_function_call
+    async def batch_generate_product_links(
+        self, 
+        asins: List[str],
+        max_retries: int = 3,
+        timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=30)
+    ) -> Dict[str, str]:
+        """批量生成商品推广链接
+        
+        Args:
+            asins: 商品ASIN列表，最多10个
+            max_retries: 最大重试次数
+            timeout: 请求超时设置
+            
+        Returns:
+            Dict[str, str]: 推广链接字典，key为ASIN，value为推广链接
+            
+        Raises:
+            ValueError: 当ASIN列表为空或超过10个时抛出
+            Exception: 当API请求失败或响应格式不正确时抛出
+        """
+        if not asins:
+            raise ValueError("ASIN列表不能为空")
+        
+        if len(asins) > 10:
+            raise ValueError("一次最多只能生成10个推广链接")
+        
+        data = {
+            "pid": self.pid,
+            "cid": self.cid,
+            "asins": ",".join(asins),
+            "country_code": "US"  # 默认使用美国站
+        }
+        
+        self.logger.debug(f"批量生成推广链接，ASIN数量: {len(asins)}")
+        
+        response = await self._make_request(
+            "/generate_product_link", 
+            "POST", 
+            data,
+            max_retries=max_retries,
+            timeout=timeout
+        )
+        
+        if not response:
+            self.logger.error("API返回空响应，无法生成推广链接")
+            raise Exception("API返回空响应")
+            
+        if response.get("code") != 0:
+            error_msg = f"生成链接失败: {response.get('message', '未知错误')}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+            
+        # 获取所有商品的链接并映射到ASIN
+        if not response.get("data") or not isinstance(response["data"], list):
+            error_msg = f"响应数据格式错误: {response}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+        
+        result = {}
+        for product_data in response["data"]:
+            if not product_data.get("asin") or not product_data.get("link"):
+                self.logger.warning(f"响应中缺少ASIN或链接: {product_data}")
+                continue
+            
+            asin = product_data["asin"]
+            link = product_data["link"]
+            result[asin] = link
+        
+        # 检查是否所有ASIN都有返回结果
+        missing_asins = [asin for asin in asins if asin not in result]
+        if missing_asins:
+            self.logger.warning(f"以下ASIN未能获取到推广链接: {missing_asins}")
+        
+        self.logger.debug(f"成功生成 {len(result)}/{len(asins)} 个推广链接")
+        return result
+        
+    @log_function_call
     async def check_products_availability(self, asins: List[str]) -> Dict[str, bool]:
         """检查多个商品在CJ平台的可用性
         
@@ -197,20 +303,31 @@ class CJAPIClient:
         
         for i in range(0, len(asins), 50):
             batch_asins = asins[i:i+50]
+            self.logger.debug(f"批量检查商品可用性，批次: {i//50+1}，商品数: {len(batch_asins)}")
+            
             response = await self.get_products(asins=batch_asins)
             
-            # 解析响应数据
-            available_asins = {
-                item["asin"]: True 
-                for item in response.get("data", {}).get("list", [])
-            }
-            
-            # 更新结果字典
-            for asin in batch_asins:
-                result[asin] = available_asins.get(asin, False)
+            if response.get("code") != 0:
+                self.logger.error(f"检查商品可用性失败: {response.get('message', '未知错误')}")
+                raise Exception(f"检查商品可用性失败: {response.get('message', '未知错误')}")
                 
+            # 初始化所有ASIN为不可用
+            for asin in batch_asins:
+                result[asin] = False
+                
+            # 设置API返回的ASIN为可用
+            if response.get("data") and response["data"].get("list"):
+                for product in response["data"]["list"]:
+                    if product.get("asin"):
+                        result[product["asin"]] = True
+                        
+            await asyncio.sleep(0.5)  # 避免API限流
+        
+        available_count = sum(1 for available in result.values() if available)
+        self.logger.info(f"商品可用性检查完成，总数: {len(asins)}，可用: {available_count}，不可用: {len(asins) - available_count}")
         return result
         
+    @log_function_call
     async def get_product_details(self, asin: str) -> Optional[Dict]:
         """获取单个商品的详细信息
         
@@ -218,9 +335,22 @@ class CJAPIClient:
             asin: 商品ASIN
             
         Returns:
-            Optional[Dict]: 商品详细信息，如果不存在则返回None
+            Optional[Dict]: 商品详细信息，如果商品不存在则返回None
         """
+        self.logger.debug(f"获取商品详情，ASIN: {asin}")
         response = await self.get_products(asins=[asin])
-        products = response.get("data", {}).get("list", [])
         
-        return products[0] if products else None 
+        if response.get("code") != 0:
+            self.logger.error(f"获取商品详情失败: {response.get('message', '未知错误')}")
+            return None
+            
+        if not response.get("data") or not response["data"].get("list"):
+            self.logger.warning(f"商品不存在或不可用，ASIN: {asin}")
+            return None
+            
+        products = response["data"]["list"]
+        if not products:
+            self.logger.warning(f"商品不存在，ASIN: {asin}")
+            return None
+            
+        return products[0] 
