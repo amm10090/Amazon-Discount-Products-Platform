@@ -870,6 +870,7 @@ class ProductService:
                         browse_nodes=browse_nodes,
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
+                        api_provider=product.api_provider,
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -1110,6 +1111,7 @@ class ProductService:
                         browse_nodes=browse_nodes,
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
+                        api_provider=product.api_provider,
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -1263,6 +1265,7 @@ class ProductService:
                         browse_nodes=browse_nodes,
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
+                        api_provider=product.api_provider,
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -1823,7 +1826,6 @@ class ProductService:
                         url=product.url,
                         brand=product.brand,
                         main_image=product.main_image,
-                        offers=product_offers,
                         timestamp=product.timestamp or datetime.utcnow(),
                         binding=product.binding,
                         product_group=product.product_group,
@@ -1831,7 +1833,8 @@ class ProductService:
                         browse_nodes=browse_nodes,
                         features=features,
                         cj_url=product.cj_url,
-                        api_provider=product.api_provider
+                        api_provider=product.api_provider,
+                        offers=product_offers
                     )
                     
                     result.append(product_info)
