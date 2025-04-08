@@ -679,7 +679,7 @@ async def list_products(
             browse_node_ids=node_list,
             bindings=binding_list,
             product_groups=group_list,
-            source=api_provider,
+            api_provider=api_provider,
             min_commission=min_commission,
             brands=brand_list
         )

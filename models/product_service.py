@@ -767,7 +767,7 @@ class ProductService:
         browse_node_ids: Optional[List[str]] = None,  # 使用browse_node_ids替代main_categories和sub_categories
         bindings: Optional[List[str]] = None,
         product_groups: Optional[List[str]] = None,
-        source: Optional[str] = None,
+        api_provider: Optional[str] = None,  # 将source改为api_provider
         min_commission: Optional[int] = None,
         brands: Optional[List[str]] = None  # 新增brands参数
     ) -> Dict[str, Any]:
@@ -780,13 +780,10 @@ class ProductService:
             if product_type != "all":
                 query = query.filter(Product.source == product_type)
                 
-            # 根据数据来源筛选
-            if source:
-                if source == "cj":
-                    query = query.filter(Product.api_provider == "cj-api")
-                elif source == "pa-api":
-                    query = query.filter(Product.api_provider == "pa-api")
-                    
+            # 根据数据来源筛选 - 直接使用api_provider值
+            if api_provider:
+                query = query.filter(Product.api_provider == api_provider)
+                
             # 应用佣金筛选
             if min_commission is not None:
                 query = query.join(Offer).filter(
