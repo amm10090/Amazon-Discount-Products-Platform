@@ -142,52 +142,70 @@ class ServiceManager:
         env["PYTHONPATH"] = str(project_root)
         # 设置日志相关的环境变量
         env["APP_LOG_DIR"] = str(self.log_dir)
-        env["UVICORN_LOG_LEVEL"] = "error"
-        env["UVICORN_NO_ACCESS_LOG"] = "true"
-        env["UVICORN_NO_PROCESS_LOG"] = "true"
-        env["FASTAPI_LOG_LEVEL"] = "error"
+        # 移除可能与FastAPI应用内部日志配置冲突的环境变量
+        env.pop("UVICORN_LOG_LEVEL", None)
+        env.pop("UVICORN_NO_ACCESS_LOG", None)
+        env.pop("UVICORN_NO_PROCESS_LOG", None)
+        env.pop("FASTAPI_LOG_LEVEL", None)
         
         os.chdir(str(project_root / "src"))
         
+        # 验证模块路径是否存在
+        module_path = project_root / "src" / "core" / "fastapi" / "amazon_crawler_api.py"
+        if not module_path.exists():
+            self.logger.error(f"错误: FastAPI模块文件不存在: {module_path}")
+            return None
+        
+        # 先尝试单进程模式，以便调试
         cmd = [
             sys.executable,
             "-m", "uvicorn",
             "core.fastapi.amazon_crawler_api:app",
             "--host", config['host'],
             "--port", str(config['port']),
-            "--workers", str(config.get('workers', 4)),
-            "--log-level", "error",  # 设置uvicorn日志级别为error
-            "--no-access-log",  # 禁用访问日志
-            "--no-server-header",  # 禁用服务器头信息
-            "--no-date-header"  # 禁用日期头信息
+            # 临时使用一个工作进程，解决多进程日志冲突问题
+            "--workers", "1",
+            # 不再指定日志级别，避免与应用内部日志配置冲突
+            "--reload" if self.config.get('environment') == 'development' else "",  # 根据环境决定是否启用reload
         ]
         
-        if self.config.get('environment') == 'development' and config.get('reload', False):
-            cmd.extend(["--reload", "--reload-dir", str(project_root / "src")])
+        # 清理空字符串
+        cmd = [arg for arg in cmd if arg]
         
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            env=env,
-            bufsize=1
-        )
-        
-        def log_output(pipe, prefix):
-            for line in pipe:
-                if "Uvicorn running on" in line or "Application startup complete" in line:
-                    self.logger.info(f"{line.strip()}")
-        
-        import threading
-        threading.Thread(target=log_output, args=(process.stdout, "FastAPI"), daemon=True).start()
-        threading.Thread(target=log_output, args=(process.stderr, "FastAPI Error"), daemon=True).start()
-        
-        self.processes.append(process)
-        self.logger.info(f"FastAPI服务已启动: http://{config['host']}:{config['port']}")
-        
-        os.chdir(str(project_root))
-        return process
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                env=env,
+                bufsize=1
+            )
+            
+            def log_output(pipe, prefix):
+                for line in pipe:
+                    # 记录所有输出
+                    self.logger.info(f"{prefix}: {line.strip()}")
+            
+            import threading
+            threading.Thread(target=log_output, args=(process.stdout, "FastAPI"), daemon=True).start()
+            threading.Thread(target=log_output, args=(process.stderr, "FastAPI Error"), daemon=True).start()
+            
+            # 等待几秒检查进程是否正常运行
+            time.sleep(2)
+            if process.poll() is not None:
+                self.logger.error(f"FastAPI服务启动失败，退出码: {process.poll()}")
+                return None
+                
+            self.processes.append(process)
+            self.logger.info(f"FastAPI服务已启动: http://{config['host']}:{config['port']}")
+            
+            os.chdir(str(project_root))
+            return process
+            
+        except Exception as e:
+            self.logger.error(f"启动FastAPI服务时发生错误: {str(e)}")
+            return None
         
     def start_frontend(self):
         """启动Streamlit前端"""

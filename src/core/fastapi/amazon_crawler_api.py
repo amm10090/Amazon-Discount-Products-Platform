@@ -66,37 +66,8 @@ init_db()
 log_dir = PathLib(os.getenv("APP_LOG_DIR", str(project_root / "logs"))).resolve()
 log_dir.mkdir(parents=True, exist_ok=True)
 
-# 禁用所有默认的日志处理器
-logging.getLogger().handlers = []
-logging.getLogger("uvicorn").handlers = []
-logging.getLogger("uvicorn.access").handlers = []
-logging.getLogger("uvicorn.error").handlers = []
-logging.getLogger("fastapi").handlers = []
-
-# 配置日志
-logging_config = {
-    "version": 1,
-    "disable_existing_loggers": True,
-    "formatters": {
-        "default": {
-            "format": "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S"
-        }
-    },
-    "handlers": {
-        "null": {
-            "class": "logging.NullHandler",
-        }
-    },
-    "loggers": {
-        "uvicorn": {"handlers": ["null"], "propagate": False},
-        "uvicorn.access": {"handlers": ["null"], "propagate": False},
-        "uvicorn.error": {"handlers": ["null"], "propagate": False},
-        "fastapi": {"handlers": ["null"], "propagate": False},
-        "": {"handlers": ["null"], "propagate": False}  # 根日志记录器
-    }
-}
-dictConfig(logging_config)
+# 获取应用logger，避免重新定义
+app_logger = logger
 
 # 配置 loguru 日志
 logger.remove()  # 移除默认的处理器
@@ -126,26 +97,63 @@ logger.add(
     filter=lambda record: record["level"].name == "ERROR"
 )
 
-# 将标准库的日志重定向到loguru
-class InterceptHandler(logging.Handler):
-    def emit(self, record):
-        # 获取对应的loguru级别
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-
-        # 找到调用者的栈帧
-        frame, depth = logging.currentframe(), 2
-        while frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
-            depth += 1
-
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
-
-# 添加拦截处理器到根日志记录器
-logging.getLogger().handlers = [InterceptHandler()]
-logging.getLogger().setLevel(logging.INFO)
+# 在进程启动时仅配置一次日志重定向
+# 防止工作进程重复配置导致冲突
+if os.environ.get("UVICORN_WORKER_INITIALIZED", "0") != "1":
+    os.environ["UVICORN_WORKER_INITIALIZED"] = "1"
+    
+    # 禁用所有默认的日志处理器
+    logging.getLogger().handlers = []
+    logging.getLogger("uvicorn").handlers = []
+    logging.getLogger("uvicorn.access").handlers = []
+    logging.getLogger("uvicorn.error").handlers = []
+    logging.getLogger("fastapi").handlers = []
+    
+    # 配置日志
+    logging_config = {
+        "version": 1,
+        "disable_existing_loggers": False,  # 改为False以避免禁用已存在的logger
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S"
+            }
+        },
+        "handlers": {
+            "null": {
+                "class": "logging.NullHandler",
+            }
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["null"], "propagate": False},
+            "uvicorn.access": {"handlers": ["null"], "propagate": False},
+            "uvicorn.error": {"handlers": ["null"], "propagate": False},
+            "fastapi": {"handlers": ["null"], "propagate": False},
+            "": {"handlers": ["null"], "propagate": False}  # 根日志记录器
+        }
+    }
+    dictConfig(logging_config)
+    
+    # 将标准库的日志重定向到loguru
+    class InterceptHandler(logging.Handler):
+        def emit(self, record):
+            # 获取对应的loguru级别
+            try:
+                level = logger.level(record.levelname).name
+            except ValueError:
+                level = record.levelno
+    
+            # 找到调用者的栈帧
+            frame, depth = logging.currentframe(), 2
+            while frame.f_code.co_filename == logging.__file__:
+                frame = frame.f_back
+                depth += 1
+    
+            logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+    
+    # 添加拦截处理器到根日志记录器
+    logging.getLogger().handlers = [InterceptHandler()]
+    logging.getLogger().setLevel(logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -156,6 +164,7 @@ async def lifespan(app: FastAPI):
     logger.info("调度器已启动")
     yield
     # 在这里可以添加应用关闭时需要执行的清理代码
+    logger.info("应用关闭，执行清理工作")
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -184,8 +193,6 @@ except ImportError as e:
 
 # 存储任务状态的字典
 tasks_status: Dict[str, Dict] = {}
-
-logger = logging.getLogger(__name__)
 
 class BatchDeleteRequest(BaseModel):
     """批量删除请求模型"""
