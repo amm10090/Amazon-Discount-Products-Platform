@@ -506,6 +506,9 @@ async def list_discount_products(
                     if db_product and db_product.current_price is not None:
                         # 更新第一个offer中的价格为数据库中的current_price
                         product_info.offers[0].price = db_product.current_price
+                        # 确保original_price字段有值
+                        if db_product.original_price is not None and product_info.offers[0].original_price is None:
+                            product_info.offers[0].original_price = db_product.original_price
                     
         return result
     except Exception as e:
@@ -566,6 +569,9 @@ async def list_coupon_products(
                     if db_product and db_product.current_price is not None:
                         # 更新第一个offer中的价格为数据库中的current_price
                         product_info.offers[0].price = db_product.current_price
+                        # 确保original_price字段有值
+                        if db_product.original_price is not None and product_info.offers[0].original_price is None:
+                            product_info.offers[0].original_price = db_product.original_price
         
         return products
     except Exception as e:
@@ -693,6 +699,9 @@ async def list_products(
                     if db_product and db_product.current_price is not None:
                         # 更新第一个offer中的价格为数据库中的current_price
                         product_info.offers[0].price = db_product.current_price
+                        # 确保original_price字段有值
+                        if db_product.original_price is not None and product_info.offers[0].original_price is None:
+                            product_info.offers[0].original_price = db_product.original_price
                         
         return result
     except Exception as e:
@@ -819,6 +828,9 @@ async def get_product(
             if db_product and db_product.current_price is not None:
                 # 更新第一个offer中的价格为数据库中的current_price
                 product.offers[0].price = db_product.current_price
+                # 确保original_price字段有值
+                if db_product.original_price is not None and product.offers[0].original_price is None:
+                    product.offers[0].original_price = db_product.original_price
                 
         return product
     except HTTPException:
@@ -868,9 +880,30 @@ async def query_product(
                     status_code=404,
                     detail=f"未找到ASIN为 {request.asins} 的商品"
                 )
+            
+            # 确保使用products表中的current_price和original_price
+            if products.offers and len(products.offers) > 0:
+                db_product = db.query(Product).filter(Product.asin == request.asins).first()
+                if db_product and db_product.current_price is not None:
+                    products.offers[0].price = db_product.current_price
+                    # 确保original_price字段有值
+                    if db_product.original_price is not None and products.offers[0].original_price is None:
+                        products.offers[0].original_price = db_product.original_price
+                
             return products
             
-        # 如果是批量查询，返回结果列表
+        # 如果是批量查询，处理每个商品的价格
+        if isinstance(products, list):
+            for product in products:
+                if product and product.offers and len(product.offers) > 0:
+                    db_product = db.query(Product).filter(Product.asin == product.asin).first()
+                    if db_product and db_product.current_price is not None:
+                        product.offers[0].price = db_product.current_price
+                        # 确保original_price字段有值
+                        if db_product.original_price is not None and product.offers[0].original_price is None:
+                            product.offers[0].original_price = db_product.original_price
+        
+        # 返回结果列表
         return products
         
     except HTTPException:

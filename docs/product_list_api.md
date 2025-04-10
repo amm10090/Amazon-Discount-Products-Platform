@@ -130,6 +130,25 @@ GET /api/products/list
 | source | 字符串 | 数据来源 |
 | commission_rate | 整数 | 佣金比例(%) |
 
+### 商品报价(ProductOffer)字段说明
+
+| 字段 | 类型 | 说明 |
+|-----|------|-----|
+| price | 浮点数 | 当前价格(优惠价格) |
+| original_price | 浮点数 | 原始价格(未优惠时的价格) |
+| currency | 字符串 | 货币单位 |
+| savings | 浮点数 | 节省金额 |
+| savings_percentage | 整数 | 折扣百分比 |
+| condition | 字符串 | 商品状态 |
+| availability | 字符串 | 库存状态 |
+| is_prime | 布尔值 | 是否为Prime商品 |
+| is_buybox_winner | 布尔值 | 是否为购买框优胜者 |
+| merchant_name | 字符串 | 卖家名称 |
+| deal_type | 字符串 | 优惠类型 |
+| coupon_type | 字符串 | 优惠券类型 |
+| coupon_value | 浮点数 | 优惠券价值 |
+| commission | 字符串 | 佣金信息 |
+
 ### 错误响应
 
 当API调用失败时，将返回以下格式的响应：

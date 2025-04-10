@@ -183,6 +183,7 @@ class ProductService:
                     ProductOffer(
                         condition=o.condition or "New",  # 提供默认值
                         price=o.price or 0.0,  # 提供默认值
+                        original_price=product.original_price,  # 添加原始价格
                         currency=o.currency or "USD",  # 提供默认值
                         savings=o.savings,
                         savings_percentage=o.savings_percentage,
@@ -289,6 +290,7 @@ class ProductService:
                             ProductOffer(
                                 condition=o.condition or "New",
                                 price=o.price or 0.0,
+                                original_price=product.original_price,
                                 currency=o.currency or "USD",
                                 savings=o.savings,
                                 savings_percentage=o.savings_percentage,
@@ -390,6 +392,7 @@ class ProductService:
                     ProductOffer(
                         condition=o.condition or "New",
                         price=o.price or 0.0,
+                        original_price=product.original_price,
                         currency=o.currency or "USD",
                         savings=o.savings,
                         savings_percentage=o.savings_percentage,
@@ -875,6 +878,7 @@ class ProductService:
                             ProductOffer(
                                 condition=offer.condition or "New",
                                 price=offer.price or 0.0,
+                                original_price=product.original_price,
                                 currency=offer.currency or "USD",
                                 savings=offer.savings,
                                 savings_percentage=offer.savings_percentage,
@@ -1116,6 +1120,7 @@ class ProductService:
                             ProductOffer(
                                 condition=offer.condition or "New",
                                 price=offer.price or 0.0,
+                                original_price=product.original_price,
                                 currency=offer.currency or "USD",
                                 savings=offer.savings,
                                 savings_percentage=offer.savings_percentage,
@@ -1270,6 +1275,7 @@ class ProductService:
                             ProductOffer(
                                 condition=offer.condition or "New",
                                 price=offer.price or 0.0,
+                                original_price=product.original_price,
                                 currency=offer.currency or "USD",
                                 savings=offer.savings,
                                 savings_percentage=offer.savings_percentage,
@@ -1633,6 +1639,7 @@ class ProductService:
                                 ProductOffer(
                                     condition=offer.condition,
                                     price=offer.price,
+                                    original_price=product.original_price,
                                     currency=offer.currency,
                                     savings=offer.savings,
                                     savings_percentage=offer.savings_percentage,
@@ -1803,6 +1810,7 @@ class ProductService:
                             ProductOffer(
                                 condition=offer.condition,
                                 price=offer.price,
+                                original_price=product.original_price,
                                 currency=offer.currency,
                                 savings=offer.savings,
                                 savings_percentage=offer.savings_percentage,

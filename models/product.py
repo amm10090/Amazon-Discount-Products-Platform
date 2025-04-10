@@ -7,6 +7,7 @@ class ProductOffer(BaseModel):
     """商品优惠信息模型"""
     condition: str
     price: float
+    original_price: Optional[float] = None  # 添加原始价格字段
     currency: str
     savings: Optional[float] = None
     savings_percentage: Optional[int] = None
@@ -36,6 +37,8 @@ class ProductOffer(BaseModel):
             del d['coupon_value']
         if 'commission' in d and d['commission'] is None:
             del d['commission']
+        if 'original_price' in d and d['original_price'] is None:
+            del d['original_price']
         return d
 
 class ProductInfo(BaseModel):
