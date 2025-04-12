@@ -215,7 +215,8 @@ class SchedulerManager:
                         db=db,
                         max_items=max_items,
                         use_random_cursor=False,
-                        skip_existing=False
+                        skip_existing=False,
+                        use_persistent_cursor=True  # 使用持久化游标功能
                     )
                     logger.success(f"CJ商品爬取完成，成功：{success}，失败：{fail}，优惠券：{coupon}，折扣：{discount}，变体：{variants}")
                     result = success

@@ -13,7 +13,7 @@ import json
 import asyncio
 import re
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timedelta
 from pathlib import Path
 import argparse
 import random
@@ -44,6 +44,168 @@ class CJProductsCrawler:
         log_dir.mkdir(exist_ok=True)
         
         self.logger.debug("CJ商品爬虫初始化完成")
+        
+        # 添加游标持久化相关的属性
+        self.cursor_file_path = Path(__file__).parent.parent.parent / "data" / "cursors" / "cj_cursors.json"
+        self.cursor_file_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cursor_history = {}
+        self.last_full_scan = None
+        self.cursor_expiry_days = 7  # 单个游标过期时间（天）
+        self.full_scan_expiry_days = 30  # 全局扫描过期时间（天）
+        
+        # 加载历史游标
+        self._load_cursor_history()
+    
+    def _load_cursor_history(self) -> None:
+        """从文件加载游标历史记录"""
+        try:
+            if self.cursor_file_path.exists():
+                with open(self.cursor_file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    
+                    # 加载上次全局扫描时间
+                    if 'last_full_scan' in data and data['last_full_scan']:
+                        self.last_full_scan = datetime.fromisoformat(data['last_full_scan'])
+                    
+                    # 加载游标历史
+                    if 'cursors' in data and isinstance(data['cursors'], list):
+                        for cursor_data in data['cursors']:
+                            if 'cursor' in cursor_data and cursor_data['cursor']:
+                                cursor = cursor_data['cursor']
+                                self.cursor_history[cursor] = {
+                                    'asins': cursor_data.get('asins', []),
+                                    'last_used': datetime.fromisoformat(cursor_data.get('last_used', datetime.now().isoformat())),
+                                    'success_count': cursor_data.get('success_count', 0)
+                                }
+                
+                self.logger.info(f"已加载 {len(self.cursor_history)} 条游标历史记录")
+                if self.last_full_scan:
+                    self.logger.info(f"上次全局扫描时间: {self.last_full_scan.isoformat()}")
+        except Exception as e:
+            self.logger.error(f"加载游标历史记录失败: {str(e)}")
+            # 如果加载失败，使用空的游标历史
+            self.cursor_history = {}
+            self.last_full_scan = None
+    
+    def _save_cursor_history(self) -> None:
+        """保存游标历史记录到文件"""
+        try:
+            # 准备要保存的数据
+            data = {
+                'last_full_scan': self.last_full_scan.isoformat() if self.last_full_scan else None,
+                'cursors': []
+            }
+            
+            # 转换游标历史为可序列化格式
+            for cursor, info in self.cursor_history.items():
+                data['cursors'].append({
+                    'cursor': cursor,
+                    'asins': info.get('asins', []),
+                    'last_used': info.get('last_used', datetime.now()).isoformat(),
+                    'success_count': info.get('success_count', 0)
+                })
+            
+            # 写入文件
+            with open(self.cursor_file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+            self.logger.info(f"已保存 {len(self.cursor_history)} 条游标历史记录")
+        except Exception as e:
+            self.logger.error(f"保存游标历史记录失败: {str(e)}")
+    
+    def _is_cursor_expired(self, cursor: str) -> bool:
+        """检查游标是否已过期
+        
+        Args:
+            cursor: 要检查的游标
+            
+        Returns:
+            bool: 如果游标已过期，返回True，否则返回False
+        """
+        if cursor not in self.cursor_history:
+            return False
+            
+        last_used = self.cursor_history[cursor].get('last_used')
+        if not last_used:
+            return True
+            
+        # 计算游标是否超过过期时间
+        expiry_date = datetime.now() - timedelta(days=self.cursor_expiry_days)
+        return last_used < expiry_date
+    
+    def _is_full_scan_expired(self) -> bool:
+        """检查是否需要执行全局扫描
+        
+        Returns:
+            bool: 如果需要执行全局扫描，返回True，否则返回False
+        """
+        if not self.last_full_scan:
+            return True
+            
+        # 计算上次全局扫描是否超过过期时间
+        expiry_date = datetime.now() - timedelta(days=self.full_scan_expiry_days)
+        return self.last_full_scan < expiry_date
+    
+    def _select_cursor(self) -> str:
+        """根据历史记录和过期状态选择合适的游标
+        
+        Returns:
+            str: 选择的游标，如果需要重新扫描，返回空字符串
+        """
+        # 检查是否需要全局扫描
+        if self._is_full_scan_expired():
+            self.logger.info(f"上次全局扫描已过期，需要执行全局扫描")
+            # 更新全局扫描时间
+            self.last_full_scan = datetime.now()
+            self._save_cursor_history()
+            return ""
+        
+        # 过滤出未过期的游标
+        valid_cursors = {
+            cursor: info for cursor, info in self.cursor_history.items() 
+            if not self._is_cursor_expired(cursor)
+        }
+        
+        if not valid_cursors:
+            self.logger.info("没有有效的游标，使用空游标从头开始")
+            return ""
+        
+        # 按照成功获取商品数量排序，选择最有可能获取新商品的游标
+        sorted_cursors = sorted(
+            valid_cursors.items(),
+            key=lambda x: x[1].get('success_count', 0),
+            reverse=True
+        )
+        
+        # 选择历史上成功率最高的游标
+        selected_cursor = sorted_cursors[0][0]
+        self.logger.info(f"选择游标: {selected_cursor[:30]}... (历史成功获取商品数: {sorted_cursors[0][1].get('success_count', 0)})")
+        return selected_cursor
+    
+    def _update_cursor_history(self, cursor: str, asins: List[str], success_count: int) -> None:
+        """更新游标历史信息
+        
+        Args:
+            cursor: 游标
+            asins: 该游标获取到的商品ASIN列表
+            success_count: 成功获取商品数量
+        """
+        now = datetime.now()
+        
+        if cursor not in self.cursor_history:
+            self.cursor_history[cursor] = {
+                'asins': [],
+                'last_used': now,
+                'success_count': 0
+            }
+        
+        # 更新游标信息
+        self.cursor_history[cursor]['asins'].extend(asins)
+        self.cursor_history[cursor]['last_used'] = now
+        self.cursor_history[cursor]['success_count'] += success_count
+        
+        # 保存更新后的历史
+        self._save_cursor_history()
     
     @log_function_call
     async def _generate_and_set_promo_link(self, product_info: ProductInfo) -> None:
@@ -112,7 +274,7 @@ class CJProductsCrawler:
                             # 尝试构造一个默认的推广链接 (Amazon + ASIN)
                             default_link = f"https://www.amazon.com/dp/{asin}?tag=default"
                             asin_to_product_info[asin].cj_url = default_link
-                            self.logger.info(f"为商品 {asin} 设置了默认推广链接")
+                            self.logger.debug(f"为商品 {asin} 设置了默认推广链接")
                     
                 except Exception as e:
                     self.logger.error(f"批量生成推广链接失败: {str(e)}")
@@ -121,7 +283,7 @@ class CJProductsCrawler:
                         if asin in asin_to_product_info:
                             default_link = f"https://www.amazon.com/dp/{asin}?tag=default"
                             asin_to_product_info[asin].cj_url = default_link
-                            self.logger.info(f"由于API异常，为商品 {asin} 设置了默认推广链接")
+                            self.logger.debug(f"由于API异常，为商品 {asin} 设置了默认推广链接")
                 
                 # 避免API限流
                 if i + 10 < len(asins):
@@ -134,7 +296,7 @@ class CJProductsCrawler:
                 if not p.cj_url:  # 真正检查cj_url是否为None或空
                     default_link = f"https://www.amazon.com/dp/{p.asin}?tag=default"
                     p.cj_url = default_link
-                    self.logger.info(f"由于整体流程异常，为商品 {p.asin} 设置了默认推广链接")
+                    self.logger.debug(f"由于整体流程异常，为商品 {p.asin} 设置了默认推广链接")
     
     def _convert_cj_product_to_model(self, product_data: Dict) -> ProductInfo:
         """
@@ -263,7 +425,7 @@ class CJProductsCrawler:
             
             # 检查是否有优惠券信息，如果有则保存到coupon_history表
             if offer_data.coupon_type and offer_data.coupon_value:
-                self.logger.info(f"发现商品 {product.asin} 的优惠券: 类型={offer_data.coupon_type}, 值={offer_data.coupon_value}")
+                self.logger.debug(f"发现商品 {product.asin} 的优惠券: 类型={offer_data.coupon_type}, 值={offer_data.coupon_value}")
                 
                 # 检查是否已存在相同的优惠券记录
                 existing_coupon = db.query(CouponHistory).filter(
@@ -282,7 +444,7 @@ class CJProductsCrawler:
                         updated_at=datetime.now(UTC)
                     )
                     db.add(coupon_history)
-                    self.logger.info(f"为商品 {product.asin} 添加了新的优惠券历史记录")
+                    self.logger.debug(f"为商品 {product.asin} 添加了新的优惠券历史记录")
                 else:
                     # 更新现有优惠券记录的更新时间
                     existing_coupon.updated_at = datetime.now(UTC)
@@ -378,6 +540,111 @@ class CJProductsCrawler:
             
         return new_asins
     
+    @log_function_call
+    def _filter_similar_variants(self, products: List[Dict]) -> List[Dict]:
+        """
+        过滤掉变体中优惠相同的商品（例如仅颜色不同但价格和优惠相同的变体）
+        
+        两阶段过滤策略：
+        1. 先按折扣价格(discount_price)过滤，每个价格点只保留一个变体
+        2. 再按完整优惠组合(原价+折扣价+折扣率+优惠券)过滤
+        
+        Args:
+            products: 商品数据列表
+            
+        Returns:
+            List[Dict]: 过滤后的商品数据列表
+        """
+        if not products:
+            return []
+            
+        # 如果没有变体信息的商品，直接返回原列表
+        if not any(p.get('variant_asin') for p in products):
+            return products
+            
+        self.logger.info(f"开始过滤变体中优惠相同的商品，原始商品数: {len(products)}")
+        
+        # 按parent_asin对商品进行分组
+        variants_by_parent = {}
+        for product in products:
+            parent_asin = product.get('parent_asin')
+            if parent_asin:
+                if parent_asin not in variants_by_parent:
+                    variants_by_parent[parent_asin] = []
+                variants_by_parent[parent_asin].append(product)
+            
+        # 不在变体组中的商品
+        standalone_products = [p for p in products if p.get('parent_asin') not in variants_by_parent]
+        
+        filtered_products = standalone_products.copy()  # 先加入非变体商品
+        total_price_filtered = 0
+        total_offer_filtered = 0
+        
+        # 处理每组变体
+        for parent_asin, variant_group in variants_by_parent.items():
+            self.logger.debug(f"处理变体组 {parent_asin}，包含 {len(variant_group)} 个变体")
+            
+            # 第一阶段：按折扣价格过滤
+            price_filtered_variants = []
+            unique_prices = set()  # 保存已处理的折扣价格
+            price_filtered_out = 0  # 记录因价格重复而过滤掉的商品数量
+            
+            for variant in variant_group:
+                discount_price = variant.get('discount_price', '0')
+                
+                # 如果这个价格还没有处理过，保留这个变体
+                if discount_price not in unique_prices:
+                    unique_prices.add(discount_price)
+                    price_filtered_variants.append(variant)
+                    self.logger.debug(f"保留变体 {variant.get('asin')}，价格: {discount_price}")
+                else:
+                    price_filtered_out += 1
+                    self.logger.debug(f"过滤掉变体 {variant.get('asin')}，价格相同: {discount_price}")
+            
+            total_price_filtered += price_filtered_out
+            if price_filtered_out > 0:
+                self.logger.info(f"变体组 {parent_asin}: 按价格过滤掉 {price_filtered_out} 个变体，剩余 {len(price_filtered_variants)} 个")
+            
+            # 第二阶段：对价格过滤后的变体，按优惠指纹过滤
+            unique_offers = set()
+            kept_variants = []
+            offer_filtered_out = 0
+            
+            for variant in price_filtered_variants:
+                # 构建优惠信息指纹：价格+折扣+优惠券
+                original_price = variant.get('original_price', '0')
+                discount_price = variant.get('discount_price', '0')
+                discount_percentage = variant.get('discount', '0%')
+                coupon = variant.get('coupon', '')
+                
+                # 创建优惠信息指纹
+                offer_fingerprint = f"{original_price}|{discount_price}|{discount_percentage}|{coupon}"
+                
+                # 如果是新的优惠组合，保留此变体
+                if offer_fingerprint not in unique_offers:
+                    unique_offers.add(offer_fingerprint)
+                    kept_variants.append(variant)
+                    self.logger.debug(f"保留变体 {variant.get('asin')}，优惠组合: {offer_fingerprint}")
+                else:
+                    offer_filtered_out += 1
+                    self.logger.debug(f"过滤掉变体 {variant.get('asin')}，优惠组合已存在: {offer_fingerprint}")
+            
+            total_offer_filtered += offer_filtered_out
+            if offer_filtered_out > 0:
+                self.logger.info(f"变体组 {parent_asin}: 按优惠组合过滤掉 {offer_filtered_out} 个变体，最终剩余 {len(kept_variants)} 个")
+            
+            # 将保留的变体添加到结果中
+            filtered_products.extend(kept_variants)
+            
+            # 记录此变体组的过滤情况
+            if len(kept_variants) < len(variant_group):
+                total_filtered = len(variant_group) - len(kept_variants)
+                self.logger.info(f"变体组 {parent_asin} 过滤总结: 原有 {len(variant_group)} 个变体，过滤掉 {total_filtered} 个，最终保留 {len(kept_variants)} 个")
+        
+        total_filtered = total_price_filtered + total_offer_filtered
+        self.logger.info(f"变体过滤完成，原始商品数: {len(products)}，按价格过滤: {total_price_filtered}，按优惠过滤: {total_offer_filtered}，最终保留: {len(filtered_products)}")
+        return filtered_products
+    
     def _get_random_cursor(self, cursor_history: Dict[str, List[str]], skip_recent: int = 3) -> str:
         """
         从历史游标中随机选择一个，避免最近使用过的游标
@@ -424,7 +691,8 @@ class CJProductsCrawler:
         have_coupon: int = 2,
         discount_min: int = 0,
         save_variants: bool = False,
-        skip_existing: bool = True
+        skip_existing: bool = True,
+        filter_similar_variants: bool = True
     ) -> Tuple[int, int, int, int, int, str, List[str]]:
         """
         从CJ API获取并保存商品数据
@@ -443,6 +711,7 @@ class CJProductsCrawler:
             discount_min: 最低折扣率
             save_variants: 是否保存变体关系
             skip_existing: 是否跳过已存在的商品
+            filter_similar_variants: 是否过滤优惠相同的变体
             
         Returns:
             Tuple: (成功数, 失败数, 变体数, 优惠券商品数, 折扣商品数, 下一页游标, 所有获取的ASIN列表)
@@ -497,9 +766,14 @@ class CJProductsCrawler:
             # 提取所有商品的ASIN
             all_asins = [p.get("asin") for p in products if p.get("asin")]
             
+            # 过滤掉变体中优惠相同的商品
+            if filter_similar_variants:
+                products = self._filter_similar_variants(products)
+                self.logger.info(f"变体优惠过滤后剩余 {len(products)} 个商品")
+            
             # 如果需要跳过已存在的商品，过滤ASIN列表
             if skip_existing:
-                filtered_asins = self._filter_existing_products(db, all_asins)
+                filtered_asins = self._filter_existing_products(db, [p.get("asin") for p in products if p.get("asin")])
                 if not filtered_asins:
                     self.logger.info("所有商品已存在于数据库中，跳过处理")
                     return 0, 0, 0, 0, 0, next_cursor, all_asins
@@ -533,12 +807,12 @@ class CJProductsCrawler:
             
             # 批量异步生成推广链接
             try:
-                self.logger.info(f"开始为 {len(product_infos)} 个商品生成推广链接")
+                self.logger.debug(f"开始为 {len(product_infos)} 个商品生成推广链接")
                 await self._batch_generate_promo_links([p[0] for p in product_infos])
                 
                 # 检查推广链接生成情况
                 success_links = sum(1 for p in product_infos if p[0].cj_url is not None)
-                self.logger.info(f"推广链接生成情况: 成功 {success_links}/{len(product_infos)}")
+                self.logger.debug(f"推广链接生成情况: 成功 {success_links}/{len(product_infos)}")
                 
                 # 记录缺失推广链接的商品
                 missing_links = [p[0].asin for p in product_infos if p[0].cj_url is None]
@@ -555,7 +829,7 @@ class CJProductsCrawler:
                     if not product_info.cj_url:
                         default_link = f"https://www.amazon.com/dp/{product_info.asin}?tag=default"
                         product_info.cj_url = default_link
-                        self.logger.info(f"为商品 {product_info.asin} 设置默认推广链接: {default_link}")
+                        self.logger.debug(f"为商品 {product_info.asin} 设置默认推广链接: {default_link}")
                     
                     # 根据优惠券状态确定商品来源
                     source = "coupon" if (product_info.offers and product_info.offers[0].coupon_type and product_info.offers[0].coupon_value) else "discount"
@@ -605,7 +879,7 @@ class CJProductsCrawler:
                 Product.cj_url.isnot(None)
             ).count()
             
-            self.logger.info(f"数据库中成功保存推广链接的商品数: {saved_with_links}/{success_count}")
+            self.logger.debug(f"数据库中成功保存推广链接的商品数: {saved_with_links}/{success_count}")
             
             # 记录优惠券信息的处理情况
             if coupon_count > 0:
@@ -647,8 +921,10 @@ class CJProductsCrawler:
         self,
         db: Session,
         max_items: int = 1000,
-        use_random_cursor: bool = True,
+        use_random_cursor: bool = False,  # 默认不使用随机游标
         skip_existing: bool = True,
+        use_persistent_cursor: bool = True,  # 默认使用持久化游标
+        filter_similar_variants: bool = True,  # 是否过滤优惠相同的变体
         **kwargs
     ) -> Tuple[int, int, int, int, int]:
         """
@@ -659,13 +935,15 @@ class CJProductsCrawler:
             max_items: 最大获取商品数量
             use_random_cursor: 是否使用随机游标策略
             skip_existing: 是否跳过已存在的商品
+            use_persistent_cursor: 是否使用持久化游标
+            filter_similar_variants: 是否过滤优惠相同的变体
             **kwargs: 传递给fetch_and_save_products的参数
             
         Returns:
             Tuple: (成功数, 失败数, 变体数, 优惠券商品数, 折扣商品数)
         """
         with LogContext(max_items=max_items):
-            self.logger.info(f"开始批量获取商品，最大数量: {max_items}，使用随机游标: {use_random_cursor}，跳过已存在: {skip_existing}，参数: {kwargs}")
+            self.logger.info(f"开始批量获取商品，最大数量: {max_items}，使用随机游标: {use_random_cursor}，使用持久化游标: {use_persistent_cursor}，跳过已存在: {skip_existing}，过滤相似变体: {filter_similar_variants}，参数: {kwargs}")
             
             limit = min(kwargs.pop("limit", 50), 50)  # 单次获取数量，最大50
             
@@ -675,18 +953,26 @@ class CJProductsCrawler:
             total_variants = 0
             total_coupon = 0
             total_discount = 0
-            cursor = ""
             
-            # 保存游标历史记录，key为游标，value为该游标获取到的ASIN列表
-            cursor_history = {}
+            # 根据设置决定游标策略
+            if use_persistent_cursor:
+                # 使用持久化游标策略
+                cursor = self._select_cursor()
+                self.logger.info(f"使用持久化游标策略，初始游标: {cursor[:30] if cursor else '空'}")
+            else:
+                # 使用旧的随机游标策略或空游标
+                cursor = ""
+            
+            # 临时存储本次执行的游标历史，用于随机游标策略
+            temp_cursor_history = {}
             empty_count = 0  # 连续获取不到新商品的次数
             
             # 分页获取所有商品
             while total_success + total_fail < max_items:
-                # 如果启用随机游标，且已经有一些历史记录，从历史中选择一个游标
-                if use_random_cursor and cursor_history and empty_count > 0:
-                    cursor = self._get_random_cursor(cursor_history)
-                    self.logger.debug(f"使用随机游标: {cursor[:10] if cursor else '无'}...")
+                # 使用随机游标策略（仅当启用且非持久化模式时）
+                if use_random_cursor and not use_persistent_cursor and temp_cursor_history and empty_count > 0:
+                    cursor = self._get_random_cursor(temp_cursor_history)
+                    self.logger.debug(f"使用临时随机游标: {cursor[:10] if cursor else '无'}...")
                 
                 # 计算单次获取数量
                 remaining = max_items - (total_success + total_fail)
@@ -698,13 +984,14 @@ class CJProductsCrawler:
                     cursor=cursor,
                     limit=batch_limit,
                     skip_existing=skip_existing,
+                    filter_similar_variants=filter_similar_variants,
                     **kwargs
                 )
                 
                 # 记录当前游标获取到的ASIN
-                if cursor not in cursor_history:
-                    cursor_history[cursor] = []
-                cursor_history[cursor].extend(asins)
+                if cursor not in temp_cursor_history:
+                    temp_cursor_history[cursor] = []
+                temp_cursor_history[cursor].extend(asins)
                 
                 # 更新计数器
                 total_success += success
@@ -713,6 +1000,10 @@ class CJProductsCrawler:
                 total_coupon += coupon
                 total_discount += discount
                 
+                # 如果使用持久化游标，更新游标历史
+                if use_persistent_cursor:
+                    self._update_cursor_history(cursor, asins, success)
+                
                 self.logger.info(f"当前进度: 已获取 {total_success + total_fail}/{max_items} 个商品")
                 
                 # 检查是否获取到新商品
@@ -720,8 +1011,12 @@ class CJProductsCrawler:
                     empty_count += 1
                     self.logger.warning(f"连续 {empty_count} 次未获取到新商品")
                     
-                    # 修改后的逻辑 - 即使没有新商品，也继续使用API返回的next_cursor
-                    # 只有在没有next_cursor时才考虑使用随机游标或重置
+                    # 检查游标是否相同，如果相同则可能存在循环问题
+                    if cursor == next_cursor:
+                        self.logger.warning("当前游标与下一页游标相同，退出循环以避免无限循环!")
+                        break
+                        
+                    # 只有在没有next_cursor时才考虑结束爬取
                     if not next_cursor:
                         self.logger.info("没有下一页游标，爬取完成")
                         break
@@ -761,6 +1056,7 @@ async def main():
     parser.add_argument('--debug', action='store_true', help='启用调试模式')
     parser.add_argument('--random-cursor', action='store_true', help='使用随机游标策略')
     parser.add_argument('--no-skip-existing', action='store_true', help='不跳过已存在的商品')
+    parser.add_argument('--no-filter-variants', action='store_true', help='不过滤优惠相同的变体商品')
     
     args = parser.parse_args()
     
@@ -774,11 +1070,13 @@ async def main():
         have_coupon=args.have_coupon,
         debug=args.debug,
         random_cursor=args.random_cursor,
-        skip_existing=not args.no_skip_existing
+        skip_existing=not args.no_skip_existing,
+        filter_variants=not args.no_filter_variants
     ):
         logger.info(f"启动CJ商品爬虫: 类别={args.category or '全部'}, 子类别={args.subcategory or '全部'}, "
                    f"最大数量={args.limit}, 优惠券筛选={args.have_coupon}, 最低折扣={args.min_discount}, "
-                   f"随机游标={args.random_cursor}, 跳过已存在={not args.no_skip_existing}")
+                   f"随机游标={args.random_cursor}, 跳过已存在={not args.no_skip_existing}, "
+                   f"过滤相似变体={not args.no_filter_variants}")
         
         # 创建爬虫实例
         crawler = CJProductsCrawler()
@@ -798,7 +1096,9 @@ async def main():
                 discount_min=args.min_discount,
                 save_variants=args.save_variants,
                 use_random_cursor=args.random_cursor,
-                skip_existing=not args.no_skip_existing
+                skip_existing=not args.no_skip_existing,
+                use_persistent_cursor=True,
+                filter_similar_variants=not args.no_filter_variants
             )
             
             # 输出结果
@@ -855,7 +1155,7 @@ async def main():
                                             updated_at=datetime.now(UTC)
                                         )
                                         db.add(coupon_history)
-                                        logger.info(f"为商品 {asin} 补充添加了优惠券历史记录")
+                                        logger.debug(f"为商品 {asin} 补充添加了优惠券历史记录")
                                 except Exception as e:
                                     logger.error(f"补充添加优惠券历史记录失败: {str(e)}")
                             

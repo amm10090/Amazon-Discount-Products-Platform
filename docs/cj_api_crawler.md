@@ -13,6 +13,8 @@ CJ API商品抓取器(`cj_products_crawler.py`)提供以下功能：
 5. 支持分页获取大量商品数据
 6. 支持随机游标策略，提高商品发现率和数据多样性
 7. 支持跳过数据库中已有的商品，避免重复采集或强制更新现有数据
+8. **游标持久化存储**：将游标历史保存到文件系统，便于任务停止后恢复
+9. **游标过期机制**：支持单个游标和全局扫描的过期策略，确保定期更新商品数据
 
 ## 命令行使用
 
@@ -73,25 +75,36 @@ async def fetch_products():
     db = SessionLocal()
     
     try:
-        # 获取有优惠券的商品
+        # 获取有优惠券的商品，使用持久化游标功能
         success, fail, variants, coupon, discount = await crawler.fetch_all_products(
             db=db,
             max_items=100,
             have_coupon=1,  # 只获取有优惠券的商品
             category="Electronics",
             save_variants=True,
-            use_random_cursor=True,  # 使用随机游标策略
-            skip_existing=True  # 跳过已存在的商品
+            use_random_cursor=False,  # 不使用随机游标策略
+            skip_existing=True,  # 跳过已存在的商品
+            use_persistent_cursor=True  # 启用游标持久化功能
         )
         
         print(f"成功: {success}, 优惠券: {coupon}, 折扣: {discount}")
         
-        # 获取游标历史
-        cursor_history = crawler.get_cursor_history()
-        print(f"游标历史数量: {len(cursor_history)}")
+        # 日常增量更新示例
+        await crawler.fetch_all_products(
+            db=db,
+            max_items=200,
+            skip_existing=True,
+            use_persistent_cursor=True  # 使用持久化游标，继续上次爬取位置
+        )
         
-        # 清除游标历史（如需要）
-        # crawler.clear_cursor_history()
+        # 全量更新示例（忽略保存的游标历史）
+        await crawler.fetch_all_products(
+            db=db,
+            max_items=500,
+            skip_existing=False,
+            use_persistent_cursor=False  # 禁用持久化游标，从头开始爬取
+        )
+        
     finally:
         db.close()
 
@@ -122,7 +135,7 @@ CJProductsCrawler会自动将CJ API返回的数据格式转换为系统内部的
 
 ### 游标策略
 
-爬虫支持两种游标策略：
+爬虫支持三种游标策略：
 
 1. **顺序游标（默认策略）**：
    - 按顺序使用API返回的游标获取下一页商品
@@ -133,23 +146,64 @@ CJProductsCrawler会自动将CJ API返回的数据格式转换为系统内部的
    - 通过`--random-cursor`命令行参数或`use_random_cursor=True`参数启用
    - 当连续多次无新商品时，从历史游标中随机选择一个游标
    - 有效提高商品发现率，特别是在大量数据已存在的情况下
-   - 会自动记录历史游标供后续使用
-   - 通过程序接口可获取或清除游标历史
+   - 会自动记录历史游标供后续使用（仅会话内有效）
    - 建议定期执行增量更新时使用此策略
+
+3. **持久化游标策略（推荐）**：
+   - 通过`use_persistent_cursor=True`参数启用（默认启用）
+   - 将游标历史保存到文件系统，在任务重启后仍然可用
+   - 支持游标过期机制，自动淘汰长期未使用的游标
+   - 支持定期全局扫描，确保不会错过新商品
+   - 建议在调度任务和长期运行的系统中使用
+
+### 游标持久化机制
+
+游标持久化功能通过以下机制实现高效的商品采集：
+
+1. **游标存储**：
+   - 将游标历史保存在JSON文件中（`data/cursors/cj_cursors.json`）
+   - 每个游标记录包含：游标字符串、上次使用时间、成功获取的商品数和ASIN列表
+   - 每次使用和成功获取商品后自动更新游标记录
+
+2. **过期机制**：
+   - **单个游标过期**：默认7天未使用的游标会被标记为过期
+   - **全局扫描过期**：默认每30天执行一次全局扫描（从头开始爬取）
+   - 过期时间可在代码中配置（`cursor_expiry_days`和`full_scan_expiry_days`）
+
+3. **游标选择策略**：
+   - 检查是否需要执行全局扫描（根据上次全局扫描时间）
+   - 过滤出未过期的有效游标
+   - 按照历史成功率排序，选择最有可能获取到新商品的游标
+   - 如果没有有效游标，则从头开始爬取
+
+4. **优势**：
+   - 任务之间可共享游标历史，提高爬取效率
+   - 定时任务和调度系统可以从上次停止的位置继续
+   - 自动平衡新商品发现和历史爬取位置
+   - 定期全局扫描确保不会长期错过新商品
 
 ### 游标历史管理
 
-随机游标策略会记录并使用历史游标：
+在使用持久化游标功能时，可以通过以下方式管理游标历史：
 
 ```python
 # 获取当前游标历史
-cursor_history = crawler.get_cursor_history()
+cursor_history = crawler.cursor_history
+print(f"有效游标数量: {len(cursor_history)}")
 
-# 清除游标历史
-crawler.clear_cursor_history()
+# 检查游标是否已过期
+is_expired = crawler._is_cursor_expired("your_cursor_string")
 
-# 添加自定义游标到历史
-crawler.add_cursor_to_history("YOUR_CUSTOM_CURSOR")
+# 检查是否需要执行全局扫描
+need_full_scan = crawler._is_full_scan_expired()
+
+# 手动设置过期时间
+crawler.cursor_expiry_days = 14  # 将单个游标过期时间设为14天
+crawler.full_scan_expiry_days = 60  # 将全局扫描间隔设为60天
+
+# 清除所有游标历史（强制从头开始）
+crawler.cursor_history = {}
+crawler._save_cursor_history()
 ```
 
 ### 重复商品处理
@@ -184,64 +238,76 @@ CJ API商品抓取器依赖以下组件：
 - 商品处理状态
 - 错误信息
 - 优惠券和折扣商品统计
-- 随机游标使用记录
+- 游标使用记录和选择逻辑
+- 游标过期和全局扫描状态
 - 重复商品过滤统计
 
 ## 性能注意事项
 
+- **游标持久化功能**：定期执行全局扫描会降低短期效率，但确保长期不会错过新商品
+- **游标选择策略**：优先使用历史上成功率高的游标，提高采集效率
 - **随机游标策略**：启用随机游标可能会导致部分重复请求，但能提高长期数据采集的多样性
 - **跳过现有商品**：启用此功能可显著减少数据库写入操作，提高采集效率
 - **变体关系处理**：保存变体关系会增加数据库操作，但提供更完整的商品关联信息
-- **游标历史**：随机游标策略会在内存中保存游标历史，大量采集时注意内存使用
+- **游标历史存储**：随着时间推移，游标历史文件可能会增大，系统会自动清理过期游标
 
 ## 使用场景
 
-1. **批量获取商品数据**：直接从CJ API获取大量商品数据，无需先抓取ASIN
+1. **定时任务采集**：调度系统中的自动任务，持久化游标确保每次任务从上次位置继续
+   ```bash
+   python -m src.core.cj_products_crawler --limit 500 # 默认使用持久化游标
+   ```
+
+2. **批量获取商品数据**：直接从CJ API获取大量商品数据，无需先抓取ASIN
    ```bash
    python -m src.core.cj_products_crawler --limit 1000
    ```
 
-2. **优惠券商品获取**：专门获取有优惠券的商品
+3. **优惠券商品获取**：专门获取有优惠券的商品
    ```bash
    python -m src.core.cj_products_crawler --have-coupon 1 --limit 200
    ```
 
-3. **分类商品获取**：获取特定类别的商品
+4. **分类商品获取**：获取特定类别的商品
    ```bash
    python -m src.core.cj_products_crawler --category "Electronics" --limit 300
    ```
 
-4. **初次全量采集**：采集大量新商品，不使用随机游标
-   ```bash
-   python -m src.core.cj_products_crawler --limit 500
+5. **初次全量采集**：禁用持久化游标，从头开始采集大量新商品
+   ```python
+   await crawler.fetch_all_products(db=db, max_items=500, use_persistent_cursor=False)
    ```
 
-5. **增量更新**：使用随机游标策略提高新商品发现率
+6. **增量更新**：使用持久化游标策略确保从上次停止位置继续
    ```bash
-   python -m src.core.cj_products_crawler --limit 300 --random-cursor
+   python -m src.core.cj_products_crawler --limit 300
    ```
 
-6. **商品信息更新**：更新现有商品的价格和优惠信息
+7. **商品信息更新**：更新现有商品的价格和优惠信息
    ```bash
    python -m src.core.cj_products_crawler --limit 200 --no-skip-existing
    ```
 
-7. **完整采集方案**：同时使用多种功能的组合
+8. **完整采集方案**：同时使用多种功能的组合
    ```bash
-   python -m src.core.cj_products_crawler --category "Electronics" --have-coupon 1 --limit 300 --random-cursor --save-variants
+   python -m src.core.cj_products_crawler --category "Electronics" --have-coupon 1 --limit 300 --save-variants
    ```
 
 ## 最佳实践
 
-1. **初次采集**：不使用随机游标，采集尽可能多的商品
-2. **定期增量更新**：启用随机游标和跳过现有商品，提高效率和数据多样性
-3. **全量更新**：定期使用不跳过现有商品的选项，更新所有商品的最新信息
-4. **分类管理**：按类别分批次采集，便于管理和监控
-5. **变体关系**：对重要类别启用变体关系保存，提供更完整的商品信息
+1. **初次采集**：首次使用时，禁用持久化游标功能，采集尽可能多的商品建立基础数据
+2. **定期增量更新**：在调度任务中使用持久化游标功能，确保每次任务从上次位置继续
+3. **周期性全扫描**：保持默认的全局扫描过期设置（30天），确保定期从头开始扫描一次
+4. **定期更新**：对于重要商品，定期使用不跳过现有商品的选项，更新最新价格和优惠信息
+5. **分类管理**：按类别分批次采集，便于管理和监控
+6. **变体关系**：对重要类别启用变体关系保存，提供更完整的商品信息
+7. **游标维护**：如需修改默认过期时间，可在代码中设置`cursor_expiry_days`和`full_scan_expiry_days`
 
 ## 注意事项
 
 - CJ API有请求频率限制，爬虫会添加适当的延迟避免请求过快
 - 爬虫会自动处理分页，获取指定数量的商品
+- 游标过期机制确保定期重新扫描商品，避免错过更新
 - 默认情况下不保存变体关系，如需保存请使用`--save-variants`选项
-- 默认会跳过已存在的商品，如需更新现有商品信息，请使用`--no-skip-existing`选项 
+- 默认会跳过已存在的商品，如需更新现有商品信息，请使用`--no-skip-existing`选项
+- 游标持久化数据存储在`data/cursors/cj_cursors.json`文件中，确保该目录有写入权限 
