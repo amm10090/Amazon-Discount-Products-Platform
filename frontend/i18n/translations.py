@@ -205,6 +205,7 @@ TRANSLATIONS = {
         "crawler_coupon": "优惠券商品",
         "crawler_all": "全部商品",
         "crawler_update": "商品更新",
+        "crawler_cj": "CJ商品",
         
         # 调度器相关
         "start_time": "开始时间",
@@ -327,6 +328,7 @@ TRANSLATIONS = {
         "task_type_help": "选择具体的任务类型",
         "crawler_tasks": "爬虫任务",
         "update_tasks": "更新任务",
+        "cj_crawler_tasks": "CJ爬虫任务",
         "all_categories": "所有分类",
         
         # 任务过滤
@@ -579,6 +581,7 @@ TRANSLATIONS = {
         "crawler_coupon": "Coupon Products",
         "crawler_all": "All Products",
         "crawler_update": "Product Update",
+        "crawler_cj": "CJ Products",
         
         # Scheduler Related
         "start_time": "Start Time",
@@ -701,6 +704,7 @@ TRANSLATIONS = {
         "task_type_help": "Select the specific type of task",
         "crawler_tasks": "Crawler Tasks",
         "update_tasks": "Update Tasks",
+        "cj_crawler_tasks": "CJ Crawler Tasks",
         "all_categories": "All Categories",
         
         # Task Filtering

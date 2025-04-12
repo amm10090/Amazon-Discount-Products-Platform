@@ -143,14 +143,16 @@ class CJAPIClient:
         }
         
         self.logger.info(f"获取商品信息，类别: {category or '全部'}，优惠券筛选: {have_coupon}，总数: {limit}")
+        # 记录完整的游标信息用于调试
+        self.logger.debug(f"请求使用的游标参数: [{cursor[:50]}{'...' if len(cursor) > 50 else ''}]")
         return await self._make_request("/get_products", "POST", data)
         
     @log_function_call
     async def generate_product_link(
         self, 
         asin: str,
-        max_retries: int = 3,
-        timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=30)
+        max_retries: int = 5,
+        timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=45)
     ) -> str:
         """生成商品推广链接
         
@@ -160,63 +162,96 @@ class CJAPIClient:
             timeout: 请求超时设置
             
         Returns:
-            str: 推广链接
-            
-        Raises:
-            Exception: 当API请求失败或响应格式不正确时抛出
+            str: 推广链接，如果失败则返回基于ASIN构建的默认链接
         """
         data = {
             "pid": self.pid,
             "cid": self.cid,
-            "asins": asin,  # 直接使用asin字符串，而不是列表
+            "asins": asin,
             "country_code": "US"  # 默认使用美国站
         }
         
-        self.logger.debug(f"为商品 {asin} 生成推广链接")
+        self.logger.info(f"为商品 {asin} 生成推广链接")
         
-        response = await self._make_request(
-            "/generate_product_link", 
-            "POST", 
-            data,
-            max_retries=max_retries,
-            timeout=timeout
-        )
+        # 默认推广链接，如果API调用失败将返回此链接
+        default_link = f"https://www.amazon.com/dp/{asin}?tag=default"
         
-        if not response:
-            self.logger.error(f"API返回空响应，无法为 {asin} 生成推广链接")
-            raise Exception("API返回空响应")
-            
-        if response.get("code") != 0:
-            error_msg = f"生成链接失败: {response.get('message', '未知错误')}"
-            self.logger.error(f"{error_msg}，ASIN: {asin}")
-            raise Exception(error_msg)
-            
-        # 获取第一个商品的链接
-        if not response.get("data") or not response["data"]:
-            error_msg = f"响应中缺少数据: {response}"
-            self.logger.error(f"{error_msg}，ASIN: {asin}")
-            raise Exception(error_msg)
-            
-        if not isinstance(response["data"], list) or not response["data"]:
-            error_msg = f"响应数据格式错误: {response}"
-            self.logger.error(f"{error_msg}，ASIN: {asin}")
-            raise Exception(error_msg)
-            
-        product_data = response["data"][0]
-        if not product_data.get("link"):
-            error_msg = f"响应中缺少链接: {response}"
-            self.logger.error(f"{error_msg}，ASIN: {asin}")
-            raise Exception(error_msg)
-            
-        self.logger.debug(f"成功生成推广链接，ASIN: {asin}")
-        return product_data["link"]
+        # 创建重试计数器
+        retries = 0
+        last_error = None
+        
+        while retries < max_retries:
+            try:
+                response = await self._make_request(
+                    "/generate_product_link", 
+                    "POST", 
+                    data,
+                    max_retries=1,  # 这里使用1是因为我们自己实现了重试
+                    timeout=timeout
+                )
+                
+                if not response:
+                    self.logger.error(f"第{retries+1}次尝试: API返回空响应")
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))  # 指数退避
+                    continue
+                    
+                if response.get("code") != 0:
+                    error_msg = f"第{retries+1}次尝试: 生成链接失败: {response.get('message', '未知错误')}"
+                    self.logger.error(f"{error_msg}，ASIN: {asin}")
+                    last_error = Exception(error_msg)
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))
+                    continue
+                    
+                # 获取第一个商品的链接
+                if not response.get("data") or not response["data"]:
+                    error_msg = f"第{retries+1}次尝试: 响应中缺少数据"
+                    self.logger.error(f"{error_msg}，ASIN: {asin}")
+                    last_error = Exception(error_msg)
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))
+                    continue
+                    
+                if not isinstance(response["data"], list) or not response["data"]:
+                    error_msg = f"第{retries+1}次尝试: 响应数据格式错误"
+                    self.logger.error(f"{error_msg}，ASIN: {asin}")
+                    last_error = Exception(error_msg)
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))
+                    continue
+                    
+                product_data = response["data"][0]
+                if not product_data.get("link"):
+                    error_msg = f"第{retries+1}次尝试: 响应中缺少链接"
+                    self.logger.error(f"{error_msg}，ASIN: {asin}")
+                    last_error = Exception(error_msg)
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))
+                    continue
+                    
+                link = product_data["link"]
+                self.logger.info(f"成功生成推广链接，ASIN: {asin}, 链接: {link[:30]}...")
+                return link
+                
+            except Exception as e:
+                retries += 1
+                last_error = e
+                await_time = 1 * (retries + 1)
+                self.logger.error(f"第{retries}次尝试失败: {str(e)}，{await_time}秒后重试...")
+                await asyncio.sleep(await_time)
+        
+        # 如果所有重试都失败了
+        error_msg = f"生成推广链接失败，已重试{max_retries}次: {str(last_error)}"
+        self.logger.error(f"{error_msg}，ASIN: {asin}，返回默认链接")
+        return default_link
         
     @log_function_call
     async def batch_generate_product_links(
         self, 
         asins: List[str],
-        max_retries: int = 3,
-        timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=30)
+        max_retries: int = 5,  # 增加默认重试次数
+        timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=45)  # 增加超时时间
     ) -> Dict[str, str]:
         """批量生成商品推广链接
         
@@ -245,48 +280,81 @@ class CJAPIClient:
             "country_code": "US"  # 默认使用美国站
         }
         
-        self.logger.debug(f"批量生成推广链接，ASIN数量: {len(asins)}")
+        self.logger.info(f"批量生成推广链接，ASIN数量: {len(asins)}, ASINs: {asins}")
         
-        response = await self._make_request(
-            "/generate_product_link", 
-            "POST", 
-            data,
-            max_retries=max_retries,
-            timeout=timeout
-        )
+        # 创建重试计数器
+        retries = 0
+        last_error = None
         
-        if not response:
-            self.logger.error("API返回空响应，无法生成推广链接")
-            raise Exception("API返回空响应")
-            
-        if response.get("code") != 0:
-            error_msg = f"生成链接失败: {response.get('message', '未知错误')}"
-            self.logger.error(error_msg)
-            raise Exception(error_msg)
-            
-        # 获取所有商品的链接并映射到ASIN
-        if not response.get("data") or not isinstance(response["data"], list):
-            error_msg = f"响应数据格式错误: {response}"
-            self.logger.error(error_msg)
-            raise Exception(error_msg)
+        while retries < max_retries:
+            try:
+                response = await self._make_request(
+                    "/generate_product_link", 
+                    "POST", 
+                    data,
+                    max_retries=1,  # 这里使用1是因为我们自己已经实现了重试逻辑
+                    timeout=timeout
+                )
+                
+                if not response:
+                    self.logger.error(f"第{retries+1}次尝试: API返回空响应")
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))  # 指数退避
+                    continue
+                    
+                if response.get("code") != 0:
+                    error_msg = f"第{retries+1}次尝试: 生成链接失败: {response.get('message', '未知错误')}"
+                    self.logger.error(error_msg)
+                    last_error = Exception(error_msg)
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))
+                    continue
+                
+                # 获取所有商品的链接并映射到ASIN
+                if not response.get("data") or not isinstance(response["data"], list):
+                    error_msg = f"第{retries+1}次尝试: 响应数据格式错误: {response}"
+                    self.logger.error(error_msg)
+                    last_error = Exception(error_msg)
+                    retries += 1
+                    await asyncio.sleep(1 * (retries + 1))
+                    continue
+                
+                result = {}
+                for product_data in response["data"]:
+                    if not product_data.get("asin") or not product_data.get("link"):
+                        self.logger.warning(f"响应中缺少ASIN或链接: {product_data}")
+                        continue
+                    
+                    asin = product_data["asin"]
+                    link = product_data["link"]
+                    result[asin] = link
+                
+                # 检查是否所有ASIN都有返回结果
+                missing_asins = [asin for asin in asins if asin not in result]
+                if missing_asins:
+                    self.logger.warning(f"以下ASIN未能获取到推广链接: {missing_asins}")
+                    
+                    # 如果一个结果都没有获取到，可能是有问题，尝试重试
+                    if not result and retries < max_retries - 1:
+                        self.logger.warning(f"第{retries+1}次尝试没有获取到任何推广链接，将重试")
+                        retries += 1
+                        await asyncio.sleep(1 * (retries + 1))
+                        continue
+                
+                self.logger.info(f"成功生成 {len(result)}/{len(asins)} 个推广链接")
+                return result
+                
+            except Exception as e:
+                retries += 1
+                last_error = e
+                await_time = 1 * (retries + 1)
+                self.logger.error(f"第{retries}次尝试失败: {str(e)}，{await_time}秒后重试...")
+                await asyncio.sleep(await_time)
         
-        result = {}
-        for product_data in response["data"]:
-            if not product_data.get("asin") or not product_data.get("link"):
-                self.logger.warning(f"响应中缺少ASIN或链接: {product_data}")
-                continue
-            
-            asin = product_data["asin"]
-            link = product_data["link"]
-            result[asin] = link
-        
-        # 检查是否所有ASIN都有返回结果
-        missing_asins = [asin for asin in asins if asin not in result]
-        if missing_asins:
-            self.logger.warning(f"以下ASIN未能获取到推广链接: {missing_asins}")
-        
-        self.logger.debug(f"成功生成 {len(result)}/{len(asins)} 个推广链接")
-        return result
+        # 如果所有重试都失败了
+        error_msg = f"批量生成推广链接失败，已重试{max_retries}次: {str(last_error)}"
+        self.logger.error(error_msg)
+        return {}
         
     @log_function_call
     async def check_products_availability(self, asins: List[str]) -> Dict[str, bool]:

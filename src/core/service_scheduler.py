@@ -29,6 +29,7 @@ from src.core.amazon_product_api import AmazonProductAPI
 from src.core.product_updater import ProductUpdater, UpdateConfiguration
 from models.database import SessionLocal
 from models.scheduler import JobHistoryModel
+from src.core.cj_products_crawler import CJProductsCrawler
 
 class SchedulerManager:
     """定时任务管理器
@@ -186,7 +187,7 @@ class SchedulerManager:
         
         Args:
             job_id: 任务ID
-            crawler_type: 爬虫类型（bestseller/coupon/update）
+            crawler_type: 爬虫类型（bestseller/coupon/update/cj）
             max_items: 最大采集商品数量
             
         Raises:
@@ -202,6 +203,24 @@ class SchedulerManager:
                 success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
                 result = success_count
                 logger.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
+            elif crawler_type == "cj":
+                # 执行CJ爬虫任务
+                # 获取数据库会话
+                db = SessionLocal()
+                try:
+                    # 创建CJ爬虫实例
+                    crawler = CJProductsCrawler()
+                    # 执行CJ爬虫
+                    success, fail, variants, coupon, discount = await crawler.fetch_all_products(
+                        db=db,
+                        max_items=max_items,
+                        use_random_cursor=False,
+                        skip_existing=False
+                    )
+                    logger.success(f"CJ商品爬取完成，成功：{success}，失败：{fail}，优惠券：{coupon}，折扣：{discount}，变体：{variants}")
+                    result = success
+                finally:
+                    db.close()
             else:
                 # 从环境变量获取配置
                 headless = os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"

@@ -400,6 +400,11 @@ def main():
             "title": get_text("update_tasks"),
             "types": ["update"],
             "icon": "🔄"
+        },
+        "cj_crawler": {
+            "title": get_text("cj_crawler_tasks"),
+            "types": ["cj"],
+            "icon": "🛒"
         }
     }
     

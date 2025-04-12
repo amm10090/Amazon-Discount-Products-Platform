@@ -34,6 +34,9 @@ class ProductService:
             brand=product_info.brand,
             main_image=product_info.main_image,
             
+            # CJ特有信息
+            cj_url=product_info.cj_url if hasattr(product_info, 'cj_url') else None,
+            
             # 价格信息
             current_price=best_offer.price if best_offer else None,
             original_price=best_offer.price + best_offer.savings if best_offer and best_offer.savings else None,
@@ -63,6 +66,7 @@ class ProductService:
             
             # 元数据
             source=source,
+            api_provider=product_info.api_provider if hasattr(product_info, 'api_provider') else "pa-api",
             raw_data=json.dumps(product_info.dict())
         )
         
@@ -90,61 +94,48 @@ class ProductService:
             if not product:
                 return None
                 
-            # 准备更新数据
-            update_data = product_info.dict()
-            
-            # 确保raw_data是JSON字符串
-            if 'raw_data' in update_data and update_data['raw_data'] is not None:
-                if isinstance(update_data['raw_data'], dict):
-                    update_data['raw_data'] = json.dumps(update_data['raw_data'])
-                elif isinstance(update_data['raw_data'], str):
-                    # 验证是否为有效的JSON字符串
-                    try:
-                        json.loads(update_data['raw_data'])
-                    except json.JSONDecodeError:
-                        update_data['raw_data'] = json.dumps(update_data['raw_data'])
-            
             # 更新商品基本信息
-            product.title = update_data.get('title', product.title)
-            product.url = update_data.get('url', product.url)
-            product.brand = update_data.get('brand', product.brand)
-            product.main_image = update_data.get('main_image', product.main_image)
+            product.title = product_info.title
+            product.url = product_info.url
+            product.brand = product_info.brand
+            product.main_image = product_info.main_image
             
             # 更新CJ相关信息
-            if update_data.get('cj_url'):
-                product.cj_url = update_data['cj_url']
+            if hasattr(product_info, 'cj_url') and product_info.cj_url is not None:
+                product.cj_url = product_info.cj_url
+                # 添加日志，跟踪cj_url的更新
+                logging.getLogger("ProductService").info(f"更新商品 {product.asin} 的推广链接: {product_info.cj_url[:30] if product_info.cj_url else 'None'}...")
             
             # 更新价格信息
-            if update_data.get('offers'):
-                main_offer = update_data['offers'][0]
-                product.current_price = main_offer.get('price')
-                product.original_price = main_offer.get('price') + (main_offer.get('savings', 0) or 0)
-                product.currency = main_offer.get('currency', 'USD')
+            if product_info.offers:
+                main_offer = product_info.offers[0]
+                product.current_price = main_offer.price
+                product.original_price = main_offer.price + (main_offer.savings or 0)
+                product.currency = main_offer.currency
                 
                 # 更新Prime信息
-                product.is_prime = main_offer.get('is_prime', False)
+                product.is_prime = main_offer.is_prime
                 
                 # 更新商品状态
-                product.condition = main_offer.get('condition', product.condition)
-                product.availability = main_offer.get('availability', product.availability)
-                product.merchant_name = main_offer.get('merchant_name', product.merchant_name)
-                product.is_buybox_winner = main_offer.get('is_buybox_winner', False)
+                product.condition = main_offer.condition
+                product.availability = main_offer.availability
+                product.merchant_name = main_offer.merchant_name
+                product.is_buybox_winner = main_offer.is_buybox_winner
                 
                 # 更新优惠类型
-                product.deal_type = main_offer.get('deal_type')
+                product.deal_type = main_offer.deal_type
             
             # 更新分类信息
-            if update_data.get('categories'):
-                product.categories = json.dumps(update_data['categories'])
-            if update_data.get('browse_nodes'):
-                product.browse_nodes = json.dumps(update_data['browse_nodes'])
-            if update_data.get('features'):
-                product.features = json.dumps(update_data['features'])
+            if product_info.categories:
+                product.categories = json.dumps(product_info.categories)
+            if product_info.browse_nodes:
+                product.browse_nodes = json.dumps(product_info.browse_nodes)
+            if product_info.features:
+                product.features = json.dumps(product_info.features)
             
             # 更新API提供者和原始数据
-            product.api_provider = update_data.get('api_provider', product.api_provider)
-            if 'raw_data' in update_data:
-                product.raw_data = update_data['raw_data']
+            product.api_provider = product_info.api_provider
+            product.raw_data = json.dumps(product_info.dict())
             
             # 只更新时间戳，不更新source
             product.updated_at = datetime.now()

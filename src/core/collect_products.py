@@ -49,6 +49,7 @@ class CrawlerType(Enum):
     BESTSELLER = "bestseller"
     COUPON = "coupon"
     ALL = "all"
+    CJ = "cj"
     
     @classmethod
     def from_str(cls, value: str) -> "CrawlerType":

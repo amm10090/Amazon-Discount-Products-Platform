@@ -25,7 +25,7 @@ sys.path.append(str(project_root))
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from models.database import Product, ProductVariant, Offer
+from models.database import Product, ProductVariant, Offer, CouponHistory
 from models.product import ProductInfo, ProductOffer
 from models.product_service import ProductService
 from src.core.cj_api_client import CJAPIClient
@@ -102,20 +102,26 @@ class CJProductsCrawler:
                     for asin, link in result.items():
                         if asin in asin_to_product_info:
                             asin_to_product_info[asin].cj_url = link
-                            self.logger.debug(f"成功设置商品 {asin} 的推广链接")
+                            self.logger.debug(f"成功设置商品 {asin} 的推广链接: {link[:30]}...")
                     
                     # 设置未返回链接的商品为None
                     for asin in batch_asins:
                         if asin not in result and asin in asin_to_product_info:
                             asin_to_product_info[asin].cj_url = None
-                            self.logger.warning(f"商品 {asin} 未获取到推广链接")
+                            self.logger.warning(f"商品 {asin} 未获取到推广链接，将尝试使用默认构造方式")
+                            # 尝试构造一个默认的推广链接 (Amazon + ASIN)
+                            default_link = f"https://www.amazon.com/dp/{asin}?tag=default"
+                            asin_to_product_info[asin].cj_url = default_link
+                            self.logger.info(f"为商品 {asin} 设置了默认推广链接")
                     
                 except Exception as e:
                     self.logger.error(f"批量生成推广链接失败: {str(e)}")
-                    # 将这批商品的链接设置为None
+                    # 将这批商品的链接设置为默认构造的链接
                     for asin in batch_asins:
                         if asin in asin_to_product_info:
-                            asin_to_product_info[asin].cj_url = None
+                            default_link = f"https://www.amazon.com/dp/{asin}?tag=default"
+                            asin_to_product_info[asin].cj_url = default_link
+                            self.logger.info(f"由于API异常，为商品 {asin} 设置了默认推广链接")
                 
                 # 避免API限流
                 if i + 10 < len(asins):
@@ -123,10 +129,12 @@ class CJProductsCrawler:
                     
         except Exception as e:
             self.logger.error(f"批量生成推广链接过程中发生错误: {str(e)}")
-            # 确保所有商品都有cj_url值，即使是None
+            # 确保所有商品都有cj_url值，使用默认构造的链接
             for p in product_infos:
-                if p.cj_url is None:
-                    p.cj_url = None
+                if not p.cj_url:  # 真正检查cj_url是否为None或空
+                    default_link = f"https://www.amazon.com/dp/{p.asin}?tag=default"
+                    p.cj_url = default_link
+                    self.logger.info(f"由于整体流程异常，为商品 {p.asin} 设置了默认推广链接")
     
     def _convert_cj_product_to_model(self, product_data: Dict) -> ProductInfo:
         """
@@ -215,7 +223,11 @@ class CJProductsCrawler:
             categories=categories,
             api_provider="cj-api",  # 明确标记API提供者
             raw_data=product_data,  # 保存原始数据
-            cj_url=None  # 初始化为None，稍后会生成
+            cj_url=None,  # 初始化为None，稍后会生成
+            coupon_info={  # 添加优惠券信息
+                'type': coupon_type,
+                'value': coupon_value
+            } if coupon_type and coupon_value else None
         )
         
         return product_info
@@ -248,8 +260,40 @@ class CJProductsCrawler:
                 updated_at=datetime.now(UTC)
             )
             db.add(offer)
+            
+            # 检查是否有优惠券信息，如果有则保存到coupon_history表
+            if offer_data.coupon_type and offer_data.coupon_value:
+                self.logger.info(f"发现商品 {product.asin} 的优惠券: 类型={offer_data.coupon_type}, 值={offer_data.coupon_value}")
+                
+                # 检查是否已存在相同的优惠券记录
+                existing_coupon = db.query(CouponHistory).filter(
+                    CouponHistory.product_id == product.asin,
+                    CouponHistory.coupon_type == offer_data.coupon_type,
+                    CouponHistory.coupon_value == offer_data.coupon_value
+                ).first()
+                
+                if not existing_coupon:
+                    # 创建新的优惠券历史记录
+                    coupon_history = CouponHistory(
+                        product_id=product.asin,
+                        coupon_type=offer_data.coupon_type,
+                        coupon_value=offer_data.coupon_value,
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC)
+                    )
+                    db.add(coupon_history)
+                    self.logger.info(f"为商品 {product.asin} 添加了新的优惠券历史记录")
+                else:
+                    # 更新现有优惠券记录的更新时间
+                    existing_coupon.updated_at = datetime.now(UTC)
+                    self.logger.debug(f"商品 {product.asin} 的优惠券记录已存在，更新时间戳")
         
+        # 提交更改
         db.commit()
+        
+        # 记录优惠券历史记录的数量，用于验证
+        coupon_history_count = db.query(CouponHistory).filter(CouponHistory.product_id == product.asin).count()
+        self.logger.debug(f"商品 {product.asin} 的优惠券历史记录数量: {coupon_history_count}")
     
     def _process_variants(self, db: Session, product_data: Dict, product: Product) -> int:
         """
@@ -406,6 +450,12 @@ class CJProductsCrawler:
         with LogContext(category=category, have_coupon=have_coupon):
             self.logger.info(f"开始获取CJ平台商品: 类别={category or '全部'}, 子类别={subcategory or '全部'}, 优惠券筛选={have_coupon}, 游标={cursor[:10] if cursor else '无'}...")
             
+            # 详细记录当前游标信息
+            if cursor:
+                self.logger.info(f"当前使用的游标参数: [{cursor[:50]}{'...' if len(cursor) > 50 else ''}]")
+            else:
+                self.logger.info("当前未使用游标，从第一页开始获取")
+            
             # 从CJ API获取商品数据
             try:
                 response = await self.api_client.get_products(
@@ -431,6 +481,12 @@ class CJProductsCrawler:
             # 获取商品列表和下一页游标
             products = response.get("data", {}).get("list", [])
             next_cursor = response.get("data", {}).get("cursor", "")
+            
+            # 记录获取到的下一页游标信息
+            if next_cursor:
+                self.logger.info(f"API返回的下一页游标: [{next_cursor[:50]}{'...' if len(next_cursor) > 50 else ''}]")
+            else:
+                self.logger.info("API返回的下一页游标为空，表示已到达最后一页")
             
             if not products:
                 self.logger.warning("API返回的商品列表为空")
@@ -477,7 +533,17 @@ class CJProductsCrawler:
             
             # 批量异步生成推广链接
             try:
+                self.logger.info(f"开始为 {len(product_infos)} 个商品生成推广链接")
                 await self._batch_generate_promo_links([p[0] for p in product_infos])
+                
+                # 检查推广链接生成情况
+                success_links = sum(1 for p in product_infos if p[0].cj_url is not None)
+                self.logger.info(f"推广链接生成情况: 成功 {success_links}/{len(product_infos)}")
+                
+                # 记录缺失推广链接的商品
+                missing_links = [p[0].asin for p in product_infos if p[0].cj_url is None]
+                if missing_links:
+                    self.logger.warning(f"以下商品未能生成推广链接: {missing_links}")
             except Exception as e:
                 self.logger.error(f"批量生成推广链接失败: {str(e)}")
                 # 继续处理，不中断流程
@@ -485,18 +551,38 @@ class CJProductsCrawler:
             # 处理每个商品：保存到数据库、处理优惠信息和变体关系
             for product_info, product_data in product_infos:
                 try:
-                    # 根据优惠券状态确定商品来源
-                    source = "coupon" if product_data.get("coupon") else "discount"
+                    # 确保有推广链接，即使是默认构造的
+                    if not product_info.cj_url:
+                        default_link = f"https://www.amazon.com/dp/{product_info.asin}?tag=default"
+                        product_info.cj_url = default_link
+                        self.logger.info(f"为商品 {product_info.asin} 设置默认推广链接: {default_link}")
                     
-                    # 保存或更新商品信息
+                    # 根据优惠券状态确定商品来源
+                    source = "coupon" if (product_info.offers and product_info.offers[0].coupon_type and product_info.offers[0].coupon_value) else "discount"
+                    
+                    # 确保api_provider字段一定设置为cj-api
+                    product_info.api_provider = "cj-api"
+                    
+                    # 保存或更新商品信息，显式传递source
                     product = ProductService.create_or_update_product(db, product_info, source)
                     
+                    # 检查推广链接是否正确保存到数据库
+                    if not product.cj_url:
+                        self.logger.warning(f"商品 {product.asin} 的推广链接未正确保存到数据库，尝试直接更新")
+                        product.cj_url = product_info.cj_url
+                        db.commit()
+                        
                     # 处理优惠信息
                     self._process_offers(db, product, product_info)
                     
                     # 处理变体关系
                     if save_variants:
                         variant_count += self._process_variants(db, product_data, product)
+                    
+                    # 确保api_provider字段设置为cj-api (直接设置数据库对象字段)
+                    if product.api_provider != "cj-api":
+                        product.api_provider = "cj-api"
+                        db.commit()
                     
                     # 更新计数器
                     success_count += 1
@@ -512,6 +598,46 @@ class CJProductsCrawler:
                     fail_count += 1
                     asin = product_data.get("asin", "未知")
                     self.logger.error(f"处理商品 {asin} 失败: {str(e)}")
+            
+            # 记录推广链接状态
+            saved_with_links = db.query(Product).filter(
+                Product.asin.in_([p[0].asin for p in product_infos]),
+                Product.cj_url.isnot(None)
+            ).count()
+            
+            self.logger.info(f"数据库中成功保存推广链接的商品数: {saved_with_links}/{success_count}")
+            
+            # 记录优惠券信息的处理情况
+            if coupon_count > 0:
+                # 获取所有带优惠券的商品ASIN
+                coupon_asins = [p[0].asin for p in product_infos if p[0].offers and p[0].offers[0].coupon_type and p[0].offers[0].coupon_value]
+                
+                # 查询这些商品在优惠券历史表中的记录数
+                coupon_history_count = db.query(CouponHistory).filter(
+                    CouponHistory.product_id.in_(coupon_asins)
+                ).count()
+                
+                # 查询这些商品在Offer表中的优惠券记录数
+                offer_coupon_count = db.query(Offer).filter(
+                    Offer.product_id.in_(coupon_asins),
+                    Offer.coupon_type.isnot(None),
+                    Offer.coupon_value.isnot(None)
+                ).count()
+                
+                self.logger.info(f"优惠券信息统计: 带优惠券商品={coupon_count}, Offer表中记录={offer_coupon_count}, CouponHistory表中记录={coupon_history_count}")
+                
+                # 检查是否有优惠券信息没有被正确保存
+                if coupon_history_count < coupon_count:
+                    self.logger.warning(f"发现 {coupon_count - coupon_history_count} 个商品的优惠券信息未保存到CouponHistory表")
+                    
+                    # 列出未保存优惠券历史的商品
+                    saved_coupon_history_asins = [ch[0] for ch in db.query(CouponHistory.product_id).filter(
+                        CouponHistory.product_id.in_(coupon_asins)
+                    ).all()]
+                    
+                    missing_asins = [asin for asin in coupon_asins if asin not in saved_coupon_history_asins]
+                    if missing_asins:
+                        self.logger.warning(f"未保存优惠券历史的商品: {missing_asins[:10]}{' 等' if len(missing_asins) > 10 else ''}")
             
             self.logger.success(f"批次完成，成功: {success_count}，失败: {fail_count}，优惠券: {coupon_count}，折扣: {discount_count}，变体: {variant_count}")
             return success_count, fail_count, variant_count, coupon_count, discount_count, next_cursor, all_asins
@@ -594,24 +720,22 @@ class CJProductsCrawler:
                     empty_count += 1
                     self.logger.warning(f"连续 {empty_count} 次未获取到新商品")
                     
-                    # 如果连续多次未获取到新商品，考虑使用随机游标或重置游标
-                    if empty_count >= 3:
-                        if use_random_cursor and len(cursor_history) > 5:
-                            cursor = self._get_random_cursor(cursor_history, skip_recent=5)
-                            self.logger.info(f"多次未获取到新商品，使用随机游标: {cursor[:10] if cursor else '无'}...")
-                        else:
-                            cursor = ""  # 重置游标，从头开始
-                            self.logger.info("多次未获取到新商品，重置游标从头开始")
-                        
-                        empty_count = 0  # 重置计数器
-                        continue
+                    # 修改后的逻辑 - 即使没有新商品，也继续使用API返回的next_cursor
+                    # 只有在没有next_cursor时才考虑使用随机游标或重置
+                    if not next_cursor:
+                        self.logger.info("没有下一页游标，爬取完成")
+                        break
+                    else:
+                        # 有next_cursor，继续使用它向下翻页
+                        self.logger.info(f"虽然没有新商品，但继续使用API返回的next_cursor: {next_cursor[:10] if next_cursor else '无'}...")
                 else:
                     empty_count = 0  # 获取到新商品，重置计数器
                 
-                # 如果没有下一页或者没有获取到任何商品，且已经尝试过随机游标，则退出循环
-                if not next_cursor or (success == 0 and fail == 0 and empty_count >= 5):
-                    break
-                    
+                # 详细记录分页参数
+                self.logger.info(f"进入下一页分页 - 当前游标: [{cursor[:30]}{'...' if len(cursor) > 30 else ''}], 下一页游标: [{next_cursor[:30]}{'...' if len(next_cursor) > 30 else ''}]")
+                if cursor == next_cursor:
+                    self.logger.warning("警告: 当前游标与下一页游标相同，可能会导致重复数据!")
+                
                 # 更新游标
                 cursor = next_cursor
                 
@@ -681,6 +805,73 @@ async def main():
             result_msg = f"爬取完成，成功: {success}, 失败: {fail}, 优惠券: {coupon}, 折扣: {discount}, 变体关系: {variants}"
             logger.success(result_msg)
             print(result_msg)
+            
+            # 验证优惠券信息是否正确保存
+            if coupon > 0:
+                # 查询优惠券历史记录数
+                coupon_history_count = db.query(CouponHistory).count()
+                
+                # 如果使用了--have-coupon=1，则验证是否所有商品都有优惠券历史记录
+                if args.have_coupon == 1:
+                    # 获取最近添加的商品
+                    recent_products = db.query(Product).order_by(desc(Product.created_at)).limit(success).all()
+                    recent_asins = [p.asin for p in recent_products]
+                    
+                    # 查询这些商品在优惠券历史表中的记录数
+                    recent_coupon_history_count = db.query(CouponHistory).filter(
+                        CouponHistory.product_id.in_(recent_asins)
+                    ).count()
+                    
+                    logger.info(f"优惠券历史记录验证: 总记录数={coupon_history_count}, 最近添加商品的记录数={recent_coupon_history_count}/{success}")
+                    
+                    # 如果优惠券历史记录数少于优惠券商品数，输出警告
+                    if recent_coupon_history_count < coupon:
+                        # 查找哪些商品没有优惠券历史记录
+                        saved_coupon_history_asins = [ch[0] for ch in db.query(CouponHistory.product_id).filter(
+                            CouponHistory.product_id.in_(recent_asins)
+                        ).all()]
+                        
+                        missing_asins = [asin for asin in recent_asins if asin not in saved_coupon_history_asins]
+                        if missing_asins:
+                            logger.warning(f"以下商品未保存优惠券历史记录: {missing_asins[:10]}{' 等' if len(missing_asins) > 10 else ''}")
+                            
+                            # 尝试补充添加优惠券历史记录
+                            for asin in missing_asins:
+                                try:
+                                    # 获取商品的优惠信息
+                                    offer = db.query(Offer).filter(
+                                        Offer.product_id == asin,
+                                        Offer.coupon_type.isnot(None),
+                                        Offer.coupon_value.isnot(None)
+                                    ).first()
+                                    
+                                    if offer:
+                                        # 添加优惠券历史记录
+                                        coupon_history = CouponHistory(
+                                            product_id=asin,
+                                            coupon_type=offer.coupon_type,
+                                            coupon_value=offer.coupon_value,
+                                            created_at=datetime.now(UTC),
+                                            updated_at=datetime.now(UTC)
+                                        )
+                                        db.add(coupon_history)
+                                        logger.info(f"为商品 {asin} 补充添加了优惠券历史记录")
+                                except Exception as e:
+                                    logger.error(f"补充添加优惠券历史记录失败: {str(e)}")
+                            
+                            # 提交更改
+                            db.commit()
+                            
+                            # 再次验证
+                            fixed_coupon_history_count = db.query(CouponHistory).filter(
+                                CouponHistory.product_id.in_(recent_asins)
+                            ).count()
+                            
+                            logger.info(f"补充后的优惠券历史记录数: {fixed_coupon_history_count}/{coupon}")
+                    else:
+                        logger.info("所有优惠券商品都已正确保存优惠券历史记录")
+                else:
+                    logger.info(f"数据库中共有 {coupon_history_count} 条优惠券历史记录")
             
             # 如果指定了输出文件，则保存ASIN列表
             if args.output:

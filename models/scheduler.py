@@ -14,6 +14,8 @@ from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
 from src.core.product_updater import TaskLogContext
+# 导入CJ产品爬虫
+from src.core.cj_products_crawler import CJProductsCrawler
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
@@ -144,7 +146,7 @@ class SchedulerManager:
         """执行爬虫任务
         
         Args:
-            crawler_type: 爬虫类型 (bestseller/coupon/all/update)
+            crawler_type: 爬虫类型 (bestseller/coupon/all/update/cj)
             max_items: 最大采集数量
             
         Returns:
@@ -153,6 +155,7 @@ class SchedulerManager:
         from src.core.collect_products import Config, crawl_bestseller_products, crawl_coupon_products
         from src.core.amazon_product_api import AmazonProductAPI
         from src.core.product_updater import ProductUpdater, UpdateConfiguration, TaskLogContext
+        from src.core.cj_products_crawler import CJProductsCrawler
         
         # 检查必要的环境变量
         required_env_vars = ["AMAZON_ACCESS_KEY", "AMAZON_SECRET_KEY", "AMAZON_PARTNER_TAG"]
@@ -179,55 +182,75 @@ class SchedulerManager:
                     success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
                     task_log.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
                     return success_count
-                    
-                # 初始化API客户端
-                api = AmazonProductAPI(
-                    access_key=os.getenv("AMAZON_ACCESS_KEY"),
-                    secret_key=os.getenv("AMAZON_SECRET_KEY"),
-                    partner_tag=os.getenv("AMAZON_PARTNER_TAG")
-                )
-                
-                # 根据类型执行不同的爬虫
-                if crawler_type == "bestseller":
-                    result = await crawl_bestseller_products(
-                        api,
-                        config.max_items,
-                        config.batch_size,
-                        config.timeout,
-                        config.headless
-                    )
-                    task_log.success(f"畅销商品爬取完成，采集到 {result} 个商品")
-                    return result
-                elif crawler_type == "coupon":
-                    result = await crawl_coupon_products(
-                        api,
-                        config.max_items,
-                        config.batch_size,
-                        config.timeout,
-                        config.headless
-                    )
-                    task_log.success(f"优惠券商品爬取完成，采集到 {result} 个商品")
-                    return result
-                elif crawler_type == "all":
-                    bestseller_items = await crawl_bestseller_products(
-                        api,
-                        config.max_items,
-                        config.batch_size,
-                        config.timeout,
-                        config.headless
-                    )
-                    coupon_items = await crawl_coupon_products(
-                        api,
-                        config.max_items,
-                        config.batch_size,
-                        config.timeout,
-                        config.headless
-                    )
-                    total_items = bestseller_items + coupon_items
-                    task_log.success(f"全部商品爬取完成，采集到 {total_items} 个商品")
-                    return total_items
+                # 如果是CJ爬虫任务
+                elif crawler_type == "cj":
+                    # 获取数据库会话
+                    from models.database import SessionLocal
+                    db = SessionLocal()
+                    try:
+                        # 创建CJ爬虫实例
+                        crawler = CJProductsCrawler()
+                        # 执行CJ爬虫
+                        success, fail, variants, coupon, discount = await crawler.fetch_all_products(
+                            db=db,
+                            max_items=max_items,
+                            use_random_cursor=True,
+                            skip_existing=True
+                        )
+                        task_log.success(f"CJ商品爬取完成，成功：{success}，失败：{fail}，优惠券：{coupon}，折扣：{discount}，变体：{variants}")
+                        return success
+                    finally:
+                        db.close()
+                # 其他爬虫类型
                 else:
-                    raise ValueError(f"不支持的爬虫类型: {crawler_type}")
+                    # 初始化API客户端
+                    api = AmazonProductAPI(
+                        access_key=os.getenv("AMAZON_ACCESS_KEY"),
+                        secret_key=os.getenv("AMAZON_SECRET_KEY"),
+                        partner_tag=os.getenv("AMAZON_PARTNER_TAG")
+                    )
+                    
+                    # 根据类型执行不同的爬虫
+                    if crawler_type == "bestseller":
+                        result = await crawl_bestseller_products(
+                            api,
+                            config.max_items,
+                            config.batch_size,
+                            config.timeout,
+                            config.headless
+                        )
+                        task_log.success(f"畅销商品爬取完成，采集到 {result} 个商品")
+                        return result
+                    elif crawler_type == "coupon":
+                        result = await crawl_coupon_products(
+                            api,
+                            config.max_items,
+                            config.batch_size,
+                            config.timeout,
+                            config.headless
+                        )
+                        task_log.success(f"优惠券商品爬取完成，采集到 {result} 个商品")
+                        return result
+                    elif crawler_type == "all":
+                        bestseller_items = await crawl_bestseller_products(
+                            api,
+                            config.max_items,
+                            config.batch_size,
+                            config.timeout,
+                            config.headless
+                        )
+                        coupon_items = await crawl_coupon_products(
+                            api,
+                            config.max_items,
+                            config.batch_size,
+                            config.timeout,
+                            config.headless
+                        )
+                        total_items = bestseller_items + coupon_items
+                        task_log.success(f"全部商品爬取完成，采集到 {total_items} 个商品")
+                        return total_items
+                    else:
+                        raise ValueError(f"不支持的爬虫类型: {crawler_type}")
                     
             except Exception as e:
                 task_log.error(f"爬虫执行失败: {str(e)}")
