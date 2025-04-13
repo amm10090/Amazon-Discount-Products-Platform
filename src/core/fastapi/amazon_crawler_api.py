@@ -778,13 +778,17 @@ async def remove_products_without_discount(request: DeleteProductsWithoutDiscoun
                 status_code=200
             )
         else:
+            total_found = result.get("total_found", 0)
+            deleted = result.get("deleted", 0)
+            
             return JSONResponse(
                 content={
                     "status": "success",
                     "message": "删除没有优惠的商品完成",
-                    "total_found": result.get("total_found", 0),
-                    "deleted": result.get("deleted", 0),
-                    "failed": result.get("failed", 0)
+                    "total_found": total_found,
+                    "deleted": deleted,
+                    "failed": result.get("failed", 0),
+                    "not_deleted": total_found - deleted  # 添加未删除的商品数量
                 },
                 status_code=200
             )
