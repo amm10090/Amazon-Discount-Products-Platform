@@ -44,3 +44,4 @@ scheduler.db
 .cursorrules
 .cursor/
 data/
+logs

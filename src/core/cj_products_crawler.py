@@ -645,6 +645,54 @@ class CJProductsCrawler:
         self.logger.info(f"变体过滤完成，原始商品数: {len(products)}，按价格过滤: {total_price_filtered}，按优惠过滤: {total_offer_filtered}，最终保留: {len(filtered_products)}")
         return filtered_products
     
+    @log_function_call
+    def _filter_products_without_discount_or_coupon(self, products: List[Dict]) -> List[Dict]:
+        """
+        过滤掉没有优惠或折扣的商品
+        
+        过滤条件:
+        - 商品必须有折扣(discount不为0%)或者优惠券(coupon不为空)
+        
+        Args:
+            products: 商品数据列表
+            
+        Returns:
+            List[Dict]: 过滤后的商品数据列表
+        """
+        if not products:
+            return []
+        
+        self.logger.info(f"开始过滤没有优惠或折扣的商品，原始商品数: {len(products)}")
+        
+        # 过滤没有优惠的商品
+        filtered_products = []
+        filtered_count = 0
+        
+        for product in products:
+            asin = product.get('asin', '未知')
+            discount = product.get('discount', '0%')
+            coupon = product.get('coupon')
+            
+            # 检查是否有折扣
+            has_discount = discount and discount != '0%'
+            # 检查是否有优惠券
+            has_coupon = coupon is not None and coupon != ''
+            
+            if has_discount or has_coupon:
+                filtered_products.append(product)
+                if has_discount and has_coupon:
+                    self.logger.debug(f"保留商品 {asin}，同时具有折扣({discount})和优惠券({coupon})")
+                elif has_discount:
+                    self.logger.debug(f"保留商品 {asin}，具有折扣({discount})")
+                else:
+                    self.logger.debug(f"保留商品 {asin}，具有优惠券({coupon})")
+            else:
+                filtered_count += 1
+                self.logger.debug(f"过滤掉商品 {asin}，没有优惠或折扣")
+        
+        self.logger.info(f"优惠过滤完成，原始商品数: {len(products)}，过滤掉无优惠商品: {filtered_count}，最终保留: {len(filtered_products)}")
+        return filtered_products
+    
     def _get_random_cursor(self, cursor_history: Dict[str, List[str]], skip_recent: int = 3) -> str:
         """
         从历史游标中随机选择一个，避免最近使用过的游标
@@ -715,6 +763,11 @@ class CJProductsCrawler:
             
         Returns:
             Tuple: (成功数, 失败数, 变体数, 优惠券商品数, 折扣商品数, 下一页游标, 所有获取的ASIN列表)
+            
+        Note:
+            此函数会自动过滤没有优惠或折扣的商品，只保留至少满足以下一个条件的商品:
+            1. 有折扣(discount字段不为0%)
+            2. 有优惠券(coupon字段不为空)
         """
         with LogContext(category=category, have_coupon=have_coupon):
             self.logger.info(f"开始获取CJ平台商品: 类别={category or '全部'}, 子类别={subcategory or '全部'}, 优惠券筛选={have_coupon}, 游标={cursor[:10] if cursor else '无'}...")
@@ -765,6 +818,12 @@ class CJProductsCrawler:
             
             # 提取所有商品的ASIN
             all_asins = [p.get("asin") for p in products if p.get("asin")]
+            
+            # 过滤掉没有优惠或折扣的商品
+            products = self._filter_products_without_discount_or_coupon(products)
+            if not products:
+                self.logger.warning("所有商品都没有优惠或折扣，跳过处理")
+                return 0, 0, 0, 0, 0, next_cursor, all_asins
             
             # 过滤掉变体中优惠相同的商品
             if filter_similar_variants:
