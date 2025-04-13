@@ -987,6 +987,167 @@ class ProductService:
         }
 
     @staticmethod
+    def remove_products_without_discount(
+        db: Session, 
+        dry_run: bool = True,
+        min_days_old: int = 0,
+        max_days_old: Optional[int] = None,
+        api_provider: Optional[str] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        删除没有任何优惠的商品（既没有折扣也没有优惠券）
+        
+        Args:
+            db: 数据库会话
+            dry_run: 是否仅模拟执行而不实际删除，默认为True
+            min_days_old: 商品创建时间至少几天前，默认为0（不限制）
+            max_days_old: 商品创建时间最多几天前，默认为None（不限制）
+            api_provider: 筛选特定API提供商的商品，如"pa-api"或"cj-api"
+            min_price: 最低价格筛选
+            max_price: 最高价格筛选
+            limit: 最大处理数量，默认为None（不限制）
+        
+        Returns:
+            Dict[str, Any]: 删除操作的结果统计
+        """
+        try:
+            logger.info(f"开始{'模拟' if dry_run else ''}删除没有优惠的商品")
+            
+            # 构建时间条件
+            time_conditions = []
+            if min_days_old > 0:
+                min_date = datetime.now() - timedelta(days=min_days_old)
+                time_conditions.append(Product.created_at <= min_date)
+            if max_days_old is not None and max_days_old > 0:
+                max_date = datetime.now() - timedelta(days=max_days_old)
+                time_conditions.append(Product.created_at >= max_date)
+            
+            # 构建价格条件
+            price_conditions = []
+            if min_price is not None:
+                price_conditions.append(Product.current_price >= min_price)
+            if max_price is not None:
+                price_conditions.append(Product.current_price <= max_price)
+            
+            # 构建API提供商条件
+            api_provider_condition = []
+            if api_provider:
+                api_provider_condition.append(Product.api_provider == api_provider)
+            
+            # 先找出有优惠券历史的商品ASIN
+            products_with_coupons = db.query(CouponHistory.product_id).distinct().all()
+            products_with_coupons_asins = [p[0] for p in products_with_coupons]
+            
+            # 查找没有任何优惠的商品：
+            # 1. 没有优惠券历史记录
+            # 2. 没有折扣（savings_percentage为0或null）
+            # 3. 在Offer表中没有coupon_type和coupon_value
+            query = db.query(Product).filter(
+                # 没有优惠券历史
+                ~Product.asin.in_(products_with_coupons_asins),
+                # 没有折扣或折扣为0
+                or_(
+                    Product.savings_percentage.is_(None),
+                    Product.savings_percentage == 0
+                )
+            )
+            
+            # 应用时间条件
+            if time_conditions:
+                query = query.filter(and_(*time_conditions))
+                
+            # 应用价格条件
+            if price_conditions:
+                query = query.filter(and_(*price_conditions))
+                
+            # 应用API提供商条件
+            if api_provider_condition:
+                query = query.filter(and_(*api_provider_condition))
+            
+            # 查找在Offer表中没有优惠券的商品
+            # 获取所有候选商品的ASIN
+            candidate_products = query.all()
+            products_to_delete = []
+            
+            for product in candidate_products:
+                # 检查该商品的所有offer是否都没有优惠券
+                offers = db.query(Offer).filter(
+                    Offer.product_id == product.asin,
+                    or_(
+                        Offer.coupon_type.isnot(None),
+                        Offer.coupon_value.isnot(None)
+                    )
+                ).all()
+                
+                # 如果没有带优惠券的offer，则添加到删除列表
+                if not offers:
+                    products_to_delete.append(product)
+                    
+                # 如果设置了限制，并且已达到限制，则停止处理
+                if limit is not None and len(products_to_delete) >= limit:
+                    break
+            
+            # 获取详细信息以便记录
+            products_info = [{
+                "asin": p.asin,
+                "title": p.title,
+                "price": p.current_price,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "api_provider": p.api_provider
+            } for p in products_to_delete]
+            
+            total_found = len(products_to_delete)
+            logger.info(f"找到 {total_found} 个没有优惠的商品")
+            
+            # 如果是dry_run模式，不执行删除操作
+            if dry_run:
+                logger.info("模拟模式，不执行实际删除")
+                
+                return {
+                    "dry_run": True,
+                    "total_found": total_found,
+                    "products": products_info
+                }
+            
+            # 实际执行删除操作
+            asins_to_delete = [p.asin for p in products_to_delete]
+            
+            # 记录将要删除的商品ASIN
+            logger.info(f"准备删除以下商品: {asins_to_delete}")
+            
+            # 使用批量删除方法执行删除
+            delete_result = ProductService.batch_delete_products(db, asins_to_delete)
+            
+            # 返回删除结果
+            return {
+                "dry_run": False,
+                "total_found": total_found,
+                "deleted": delete_result["success_count"],
+                "failed": delete_result["fail_count"],
+                "products": products_info
+            }
+            
+        except Exception as e:
+            logger.error(f"删除没有优惠的商品时出错: {str(e)}")
+            # 如果不是dry_run模式，尝试回滚事务
+            if not dry_run:
+                try:
+                    db.rollback()
+                except:
+                    pass
+            
+            # 返回错误信息
+            return {
+                "error": str(e),
+                "total_found": 0,
+                "deleted": 0,
+                "failed": 0
+            }
+
+    @staticmethod
     def list_coupon_products(
         db: Session,
         page: int = 1,

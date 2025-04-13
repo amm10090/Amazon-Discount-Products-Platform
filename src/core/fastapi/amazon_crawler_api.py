@@ -270,6 +270,16 @@ class ProductQueryRequest(BaseModel):
                 raise ValueError(f"无效的ASIN格式: {asin}")
         return v
 
+class DeleteProductsWithoutDiscountRequest(BaseModel):
+    """删除没有优惠的商品请求模型"""
+    dry_run: bool = Field(True, description="是否仅模拟执行而不实际删除，默认为True")
+    min_days_old: int = Field(0, ge=0, description="商品创建时间至少几天前，默认为0（不限制）")
+    max_days_old: Optional[int] = Field(None, ge=0, description="商品创建时间最多几天前，默认为None（不限制）")
+    api_provider: Optional[str] = Field(None, description="筛选特定API提供商的商品，如'pa-api'或'cj-api'")
+    min_price: Optional[float] = Field(None, ge=0, description="最低价格筛选")
+    max_price: Optional[float] = Field(None, ge=0, description="最高价格筛选")
+    limit: Optional[int] = Field(None, ge=1, description="最大处理数量，默认为None（不限制）")
+
 def get_db():
     """
     数据库会话依赖函数
@@ -731,6 +741,58 @@ async def batch_delete_products(request: BatchDeleteRequest, db: Session = Depen
         raise HTTPException(
             status_code=500,
             detail=f"批量删除失败: {str(e)}"
+        )
+
+@app.post("/api/products/remove-without-discount")
+async def remove_products_without_discount(request: DeleteProductsWithoutDiscountRequest, db: Session = Depends(get_db)):
+    """删除没有任何优惠的商品（既没有折扣也没有优惠券）
+    
+    Args:
+        request: 删除配置参数
+        db: 数据库会话
+        
+    Returns:
+        JSONResponse: 删除操作的结果统计
+    """
+    try:
+        result = ProductService.remove_products_without_discount(
+            db=db,
+            dry_run=request.dry_run,
+            min_days_old=request.min_days_old,
+            max_days_old=request.max_days_old,
+            api_provider=request.api_provider,
+            min_price=request.min_price,
+            max_price=request.max_price,
+            limit=request.limit
+        )
+        
+        # 如果是dry_run模式，在响应中包含详细信息
+        if request.dry_run:
+            return JSONResponse(
+                content={
+                    "status": "success",
+                    "message": "模拟删除完成，未实际删除商品",
+                    "total_found": result.get("total_found", 0),
+                    "products": result.get("products", [])[:20]  # 只返回前20个商品信息，避免响应过大
+                },
+                status_code=200
+            )
+        else:
+            return JSONResponse(
+                content={
+                    "status": "success",
+                    "message": "删除没有优惠的商品完成",
+                    "total_found": result.get("total_found", 0),
+                    "deleted": result.get("deleted", 0),
+                    "failed": result.get("failed", 0)
+                },
+                status_code=200
+            )
+    except Exception as e:
+        logger.error(f"删除没有优惠的商品失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"删除没有优惠的商品失败: {str(e)}"
         )
 
 @app.post("/api/products/save", include_in_schema=False)
