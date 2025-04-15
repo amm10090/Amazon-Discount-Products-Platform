@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from tqdm import tqdm
 from sqlalchemy import func, text
 import queue
+from pathlib import Path
 
 # 添加项目根目录到Python路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -32,8 +33,72 @@ if project_root not in sys.path:
 
 from models.database import Product, CouponHistory, Offer, get_db
 from src.core.webdriver_pool import WebDriverPool
-from src.core.discount_scheduler import DiscountUpdateScheduler, TaskLoggerAdapter
+from src.core.discount_scheduler import DiscountUpdateScheduler
 from src.core.discount_scraper import DiscountScraper
+from src.utils.log_config import get_logger, log_function_call, LogContext, LogConfig
+
+# 配置日志系统
+log_config = LogConfig({
+    "LOG_LEVEL": "INFO",
+    "LOG_PATH": "logs",  # 相对于项目根目录
+    "MAX_LOG_SIZE": "100 MB",
+    "LOG_RETENTION": "30 days",
+    "JSON_LOGS": False
+})
+
+# 初始化日志适配器
+class TaskLoggerAdapter:
+    """日志适配器，为日志添加任务ID上下文"""
+    
+    def __init__(self, logger, extra):
+        self.logger = logger
+        self.extra = extra
+        
+    def debug(self, msg, *args, **kwargs):
+        extra = self.extra.copy()
+        if 'extra' in kwargs:
+            extra.update(kwargs.pop('extra'))
+        with LogContext(**extra):
+            self.logger.debug(msg, *args, **kwargs)
+    
+    def info(self, msg, *args, **kwargs):
+        extra = self.extra.copy()
+        if 'extra' in kwargs:
+            extra.update(kwargs.pop('extra'))
+        with LogContext(**extra):
+            self.logger.info(msg, *args, **kwargs)
+    
+    def warning(self, msg, *args, **kwargs):
+        extra = self.extra.copy()
+        if 'extra' in kwargs:
+            extra.update(kwargs.pop('extra'))
+        with LogContext(**extra):
+            self.logger.warning(msg, *args, **kwargs)
+    
+    def error(self, msg, *args, **kwargs):
+        extra = self.extra.copy()
+        if 'extra' in kwargs:
+            extra.update(kwargs.pop('extra'))
+        with LogContext(**extra):
+            self.logger.error(msg, *args, **kwargs)
+    
+    def critical(self, msg, *args, **kwargs):
+        extra = self.extra.copy()
+        if 'extra' in kwargs:
+            extra.update(kwargs.pop('extra'))
+        with LogContext(**extra):
+            self.logger.critical(msg, *args, **kwargs)
+    
+    def exception(self, msg, *args, **kwargs):
+        extra = self.extra.copy()
+        if 'extra' in kwargs:
+            extra.update(kwargs.pop('extra'))
+        with LogContext(**extra):
+            try:
+                self.logger.exception(msg, *args, **kwargs)
+            except Exception:
+                # 如果loguru的logger没有exception方法，则使用error + exc_info
+                self.logger.error(msg, *args, exc_info=True, **kwargs)
 
 
 class ParallelDiscountScraper:
@@ -86,8 +151,13 @@ class ParallelDiscountScraper:
         # 线程本地存储
         self._thread_local = threading.local()
         
+        # 确保日志目录存在
+        log_dir = Path(project_root) / "logs"
+        log_dir.mkdir(exist_ok=True)
+        
         # 初始化日志记录器
-        self.logger = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': 'SYSTEM'})
+        self.logger = get_logger("ParallelDiscountScraper")
+        system_logger = TaskLoggerAdapter(self.logger, {'task_id': 'SYSTEM'})
         
         # 初始化调度器
         self.use_scheduler = use_scheduler
@@ -117,6 +187,8 @@ class ParallelDiscountScraper:
         self._processed_asins = set()
         self._lock = threading.Lock()
         
+        system_logger.info(f"并行优惠信息抓取器初始化完成，批处理大小={batch_size}，并发线程数={concurrent_workers}")
+        
     def _init_driver_pool(self):
         """初始化WebDriver池"""
         if not self.driver_pool:
@@ -125,19 +197,21 @@ class ParallelDiscountScraper:
                 headless=self.headless,
                 min_idle=1
             )
-            self.logger.info(f"WebDriver池初始化完成，最大并发数: {self.concurrent_workers}")
+            system_logger = TaskLoggerAdapter(self.logger, {'task_id': 'SYSTEM'})
+            system_logger.info(f"WebDriver池初始化完成，最大并发数: {self.concurrent_workers}")
             
     def _close_driver_pool(self):
         """关闭WebDriver池"""
         if self.driver_pool:
             self.driver_pool.close_all()
             self.driver_pool = None
-            self.logger.info("WebDriver池已关闭")
+            system_logger = TaskLoggerAdapter(self.logger, {'task_id': 'SYSTEM'})
+            system_logger.info("WebDriver池已关闭")
             
     def _process_product(self, driver, product):
         """处理单个商品"""
         task_id = f"PROCESS:{product.asin}"
-        task_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': task_id})
+        task_log = TaskLoggerAdapter(self.logger, {'task_id': task_id})
         
         try:
             # 为该商品创建一个临时DiscountScraper实例
@@ -196,6 +270,7 @@ class ParallelDiscountScraper:
             task_log.debug(f"异常堆栈: {traceback.format_exc()}")
             return False
 
+    @log_function_call
     def process_product(self, product: Product, driver) -> bool:
         """
         处理单个商品的优惠信息
@@ -208,7 +283,7 @@ class ParallelDiscountScraper:
             bool: 处理是否成功
         """
         task_id = f'PROCESS:{product.asin}'
-        task_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': task_id})
+        task_log = TaskLoggerAdapter(self.logger, {'task_id': task_id})
         thread_id = threading.get_ident()
         
         try:
@@ -278,6 +353,7 @@ class ParallelDiscountScraper:
             task_log.debug(f"异常堆栈: {traceback.format_exc()}")
             return False
             
+    @log_function_call
     def process_asin(self, asin: str, executor=None) -> Tuple[str, bool]:
         """
         处理单个商品ASIN的优惠信息
@@ -290,7 +366,7 @@ class ParallelDiscountScraper:
             Tuple[str, bool]: (ASIN, 是否成功)
         """
         task_id = f'ASIN:{asin}'
-        task_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': task_id})
+        task_log = TaskLoggerAdapter(self.logger, {'task_id': task_id})
         thread_id = threading.get_ident()
         
         # 检查是否已经处理过
@@ -450,7 +526,7 @@ class ParallelDiscountScraper:
                 
     def run(self):
         """运行并行抓取器"""
-        main_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': 'MAIN'})
+        main_log = TaskLoggerAdapter(self.logger, {'task_id': 'MAIN'})
         self.stats['start_time'] = time.time()
         
         try:
@@ -778,7 +854,7 @@ class ParallelDiscountScraper:
                           coupon_type: str, coupon_value: float, deal_badge: str,
                           deal_type: str, actual_current_price: float = None):
         """更新商品折扣信息，比较字段并统计更新数量"""
-        task_log = TaskLoggerAdapter(logging.getLogger("ParallelScraper"), {'task_id': f'UPDATE:{product.asin}'})
+        task_log = TaskLoggerAdapter(self.logger, {'task_id': f'UPDATE:{product.asin}'})
         
         # 如果没有优惠信息记录，创建一个新的
         if not product.offers:
@@ -882,102 +958,126 @@ def main():
     args = parser.parse_args()
 
     # 配置日志级别
-    log_level = getattr(logging, args.log_level) if not args.debug else logging.DEBUG
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s [%(levelname)s] %(message)s',
-        handlers=[logging.StreamHandler()]
-    )
+    log_level = args.log_level
+    if args.debug:
+        log_level = "DEBUG"
     
-    # 设置第三方库的日志级别为WARNING，避免过多输出
-    logging.getLogger("selenium").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("requests").setLevel(logging.WARNING)
+    # 使用LogConfig配置日志系统
+    log_config = LogConfig({
+        "LOG_LEVEL": log_level,
+        "LOG_PATH": "logs",  # 相对于项目根目录
+        "MAX_LOG_SIZE": "100 MB",
+        "LOG_RETENTION": "30 days",
+        "JSON_LOGS": False
+    })
     
-    # 初始化数据库会话
-    db = next(get_db())
+    # 创建日志记录器
+    logger = get_logger("ParallelDiscountScraper")
     
-    # 测试添加样本商品
-    if args.test_add_products:
-        try:
-            print("测试添加样本商品到数据库...")
-            # 常见的测试ASIN
-            test_asins = [
-                "B07ZPKN6YR",  # Echo Dot (4th Gen)
-                "B08DFPV5HL",  # Fire TV Stick 4K
-                "B07FZ8S74R",  # Echo Show 5
-                "B07P6X58BD",  # Kindle Paperwhite
-                "B0CFV3HSHF",  # USB C Cable
-                "B08HNHTTF1",  # TP-Link WiFi 6 Router
-                "B082LZ9GDW",  # Robot Vacuum
-                "B00FLYWNYQ",  # Anker PowerCore
-                "B07JH1CBGV",  # SAMSUNG EVO Select Micro SD
-                "B07XR5TRSZ",  # Apple AirPods Pro
-            ]
-            
-            # 检查数据库中是否已存在这些商品
-            for asin in test_asins:
-                existing = db.query(Product).filter(Product.asin == asin).first()
-                if existing:
-                    print(f"商品已存在: {asin}")
-                else:
-                    # 创建新商品
-                    new_product = Product(
-                        asin=asin,
-                        created_at=datetime.now(UTC),
-                        updated_at=datetime.now(UTC)
-                    )
-                    db.add(new_product)
-                    print(f"添加新商品: {asin}")
-            
-            db.commit()
-            print("样本商品添加完成！")
-            
-            # 确认添加结果
-            product_count = db.query(func.count(Product.id)).scalar()
-            print(f"数据库中现有商品总数: {product_count}")
-            
-            return
-        except Exception as e:
-            db.rollback()
-            print(f"添加样本商品时出错: {str(e)}")
-            return
-        finally:
-            db.close()
+    # 确保日志目录存在
+    log_dir = Path(project_root) / "logs"
+    log_dir.mkdir(exist_ok=True)
     
-    # 处理单个ASIN
-    specific_asins = None
-    if args.asin:
-        specific_asins = [args.asin]
-        print(f"将只处理指定的ASIN: {args.asin}")
-    
-    # 初始化调度器
-    scheduler = DiscountUpdateScheduler(
-        db=db, 
+    # 使用LogContext添加上下文信息
+    with LogContext(
         batch_size=args.batch_size,
-        force_update=args.force_update
-    )
-    
-    # 初始化并行爬虫
-    scraper = ParallelDiscountScraper(
-        db=db,
-        batch_size=args.batch_size,
-        concurrent_workers=args.workers,
-        scheduler=scheduler,
+        workers=args.workers,
         headless=not args.no_headless,
-        specific_asins=specific_asins,
+        force_update=args.force_update,
+        debug=args.debug,
+        asin=args.asin,
         before_date=args.before_date,
         use_scheduler=not args.skip_scheduler
-    )
+    ):
+        logger.info(f"启动并行优惠信息抓取器: 批处理大小={args.batch_size}, 工作线程数={args.workers}, "
+                   f"无头模式={not args.no_headless}, 强制更新={args.force_update}, "
+                   f"调试模式={args.debug}, 指定ASIN={args.asin or '无'}, "
+                   f"日期过滤={args.before_date or '无'}, 使用调度器={not args.skip_scheduler}")
     
-    try:
-        # 运行爬虫
-        scraper.run()
-    except KeyboardInterrupt:
-        logging.info("收到中断信号，正在停止爬虫...")
-    finally:
-        # 关闭数据库连接
-        db.close()
+        # 初始化数据库会话
+        db = next(get_db())
+        
+        # 测试添加样本商品
+        if args.test_add_products:
+            try:
+                logger.info("测试添加样本商品到数据库...")
+                # 常见的测试ASIN
+                test_asins = [
+                    "B07ZPKN6YR",  # Echo Dot (4th Gen)
+                    "B08DFPV5HL",  # Fire TV Stick 4K
+                    "B07FZ8S74R",  # Echo Show 5
+                    "B07P6X58BD",  # Kindle Paperwhite
+                    "B0CFV3HSHF",  # USB C Cable
+                    "B08HNHTTF1",  # TP-Link WiFi 6 Router
+                    "B082LZ9GDW",  # Robot Vacuum
+                    "B00FLYWNYQ",  # Anker PowerCore
+                    "B07JH1CBGV",  # SAMSUNG EVO Select Micro SD
+                    "B07XR5TRSZ",  # Apple AirPods Pro
+                ]
+                
+                # 检查数据库中是否已存在这些商品
+                for asin in test_asins:
+                    existing = db.query(Product).filter(Product.asin == asin).first()
+                    if existing:
+                        logger.info(f"商品已存在: {asin}")
+                    else:
+                        # 创建新商品
+                        new_product = Product(
+                            asin=asin,
+                            created_at=datetime.now(UTC),
+                            updated_at=datetime.now(UTC)
+                        )
+                        db.add(new_product)
+                        logger.info(f"添加新商品: {asin}")
+                
+                db.commit()
+                logger.info("样本商品添加完成！")
+                
+                # 确认添加结果
+                product_count = db.query(func.count(Product.id)).scalar()
+                logger.info(f"数据库中现有商品总数: {product_count}")
+                
+                return
+            except Exception as e:
+                db.rollback()
+                logger.exception(f"添加样本商品时出错: {str(e)}")
+                return
+            finally:
+                db.close()
+        
+        # 处理单个ASIN
+        specific_asins = None
+        if args.asin:
+            specific_asins = [args.asin]
+            logger.info(f"将只处理指定的ASIN: {args.asin}")
+        
+        # 初始化调度器
+        scheduler = DiscountUpdateScheduler(
+            db=db, 
+            batch_size=args.batch_size,
+            force_update=args.force_update
+        )
+        
+        # 初始化并行爬虫
+        scraper = ParallelDiscountScraper(
+            db=db,
+            batch_size=args.batch_size,
+            concurrent_workers=args.workers,
+            scheduler=scheduler,
+            headless=not args.no_headless,
+            specific_asins=specific_asins,
+            before_date=args.before_date,
+            use_scheduler=not args.skip_scheduler
+        )
+        
+        try:
+            # 运行爬虫
+            scraper.run()
+        except KeyboardInterrupt:
+            logger.info("收到中断信号，正在停止爬虫...")
+        finally:
+            # 关闭数据库连接
+            db.close()
 
 if __name__ == "__main__":
     main() 
