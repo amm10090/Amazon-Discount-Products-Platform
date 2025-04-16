@@ -198,6 +198,8 @@ class CouponHistory(Base):
     # 优惠券信息
     coupon_type = Column(String(50))  # 优惠券类型：percentage(百分比)/fixed(固定金额)
     coupon_value = Column(Float)  # 优惠券面值
+    expiration_date = Column(DateTime(timezone=True), nullable=True)  # 优惠券有效期
+    terms = Column(Text, nullable=True)  # 优惠券条款和条件
     
     # 时间信息
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # 记录创建时间
