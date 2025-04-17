@@ -393,7 +393,7 @@ def main():
     task_categories = {
         "crawler": {
             "title": get_text("crawler_tasks"),
-            "types": ["bestseller", "coupon", "all"],
+            "types": ["bestseller", "coupon", "all", "discount"],
             "icon": "🕷️"
         },
         "update": {
@@ -477,6 +477,173 @@ def main():
                     value=0
                 )
         
+        # 添加更新器参数配置界面
+        if task_category == "update" and task_type == "update":
+            st.markdown("---")
+            st.subheader("更新器高级配置")
+            show_advanced_config = st.checkbox("显示高级配置选项", value=False)
+            
+            updater_config = {}
+            
+            if show_advanced_config:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # 优先级配置
+                    updater_config["urgent_priority_hours"] = st.number_input(
+                        "紧急优先级更新间隔(小时)",
+                        min_value=1,
+                        max_value=24,
+                        value=1,
+                        help="紧急优先级商品（价格为0）的更新间隔"
+                    )
+                    
+                    updater_config["high_priority_hours"] = st.number_input(
+                        "高优先级更新间隔(小时)",
+                        min_value=1,
+                        max_value=48,
+                        value=6,
+                        help="高优先级商品的更新间隔"
+                    )
+                    
+                    updater_config["medium_priority_hours"] = st.number_input(
+                        "中优先级更新间隔(小时)",
+                        min_value=1,
+                        max_value=72,
+                        value=24,
+                        help="中优先级商品的更新间隔"
+                    )
+                    
+                    updater_config["low_priority_hours"] = st.number_input(
+                        "低优先级更新间隔(小时)",
+                        min_value=1,
+                        max_value=168,
+                        value=72,
+                        help="低优先级商品的更新间隔"
+                    )
+                    
+                    updater_config["very_low_priority_hours"] = st.number_input(
+                        "非常低优先级更新间隔(小时)",
+                        min_value=1,
+                        max_value=720,
+                        value=168,
+                        help="非常低优先级商品的更新间隔"
+                    )
+                
+                with col2:
+                    # 处理配置
+                    updater_config["batch_size"] = st.number_input(
+                        "批处理大小",
+                        min_value=10,
+                        max_value=1000,
+                        value=500,
+                        help="每批处理的商品数量"
+                    )
+                    
+                    updater_config["max_retries"] = st.number_input(
+                        "最大重试次数",
+                        min_value=1,
+                        max_value=10,
+                        value=3,
+                        help="API请求失败时的最大重试次数"
+                    )
+                    
+                    updater_config["retry_delay"] = st.number_input(
+                        "重试延迟(秒)",
+                        min_value=0.5,
+                        max_value=10.0,
+                        value=2.0,
+                        step=0.5,
+                        help="重试之间的延迟时间"
+                    )
+                    
+                    updater_config["parallel_requests"] = st.number_input(
+                        "并行请求数量",
+                        min_value=1,
+                        max_value=20,
+                        value=5,
+                        help="并行处理的请求数量"
+                    )
+                    
+                    updater_config["update_category_info"] = st.checkbox(
+                        "更新品类信息",
+                        value=False,
+                        help="是否更新商品品类信息（不常变化）"
+                    )
+                    
+                    updater_config["force_cj_check"] = st.checkbox(
+                        "强制检查CJ平台",
+                        value=False,
+                        help="是否强制检查所有商品在CJ平台的可用性"
+                    )
+        
+        # 添加折扣爬虫的高级配置界面
+        elif task_category == "crawler" and task_type == "discount":
+            st.markdown("---")
+            st.subheader("优惠券更新爬虫高级配置")
+            show_discount_config = st.checkbox("显示高级配置选项", value=False)
+            
+            discount_config = {}
+            
+            if show_discount_config:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # 线程和批量配置
+                    discount_config["num_threads"] = st.number_input(
+                        "爬虫线程数",
+                        min_value=1,
+                        max_value=16,
+                        value=4,
+                        help="并行处理的线程数量，根据系统性能调整"
+                    )
+                    
+                    discount_config["update_interval"] = st.number_input(
+                        "更新间隔(小时)",
+                        min_value=1,
+                        max_value=168,
+                        value=24,
+                        help="优惠券信息更新间隔，超过该时间的商品将被重新抓取"
+                    )
+                    
+                    discount_config["force_update"] = st.checkbox(
+                        "强制更新",
+                        value=False,
+                        help="强制更新所有商品，忽略更新间隔"
+                    )
+                
+                with col2:
+                    # 抓取配置
+                    discount_config["headless"] = st.checkbox(
+                        "无头模式",
+                        value=True,
+                        help="启用无头模式，不显示浏览器窗口"
+                    )
+                    
+                    discount_config["min_delay"] = st.number_input(
+                        "最小延迟(秒)",
+                        min_value=0.5,
+                        max_value=10.0,
+                        value=2.0,
+                        step=0.5,
+                        help="请求之间的最小延迟时间"
+                    )
+                    
+                    discount_config["max_delay"] = st.number_input(
+                        "最大延迟(秒)",
+                        min_value=1.0,
+                        max_value=15.0,
+                        value=4.0,
+                        step=0.5,
+                        help="请求之间的最大延迟时间"
+                    )
+                    
+                    discount_config["debug"] = st.checkbox(
+                        "调试模式",
+                        value=False,
+                        help="启用调试模式，输出更详细的日志"
+                    )
+        
         submitted = st.form_submit_button(get_text("add_job"))
         
         if submitted:
@@ -498,6 +665,18 @@ def main():
                     "hours": hours,
                     "minutes": minutes
                 })
+            
+            # 添加更新器配置
+            if task_category == "update" and task_type == "update" and show_advanced_config:
+                job_config["updater_config"] = updater_config
+                
+            # 添加折扣爬虫配置
+            if task_category == "crawler" and task_type == "discount" and show_discount_config:
+                # 直接添加到job_config根级别，而不是嵌套在updater_config中
+                job_config["discount_config"] = discount_config
+                # 打印配置以便调试
+                st.write("将发送以下折扣爬虫配置:")
+                st.json(discount_config)
             
             # 添加任务
             if add_job(api_url, job_config):
@@ -595,6 +774,22 @@ def main():
                         f"{get_text(f'crawler_{job['crawler_type']}')}"
                     )
                     st.markdown(f"**{get_text('max_items')}:** {job['max_items']}")
+                    
+                    # 显示更新器配置按钮
+                    if job['crawler_type'] == 'update' and 'updater_config' in job:
+                        updater_config = job.get('updater_config', {})
+                        if updater_config:
+                            if st.button("查看更新器配置", key=f"show_config_{job['id']}"):
+                                st.session_state[f"show_updater_config_{job['id']}"] = \
+                                    not st.session_state.get(f"show_updater_config_{job['id']}", False)
+                    
+                    # 显示折扣爬虫配置按钮
+                    elif job['crawler_type'] == 'discount' and 'discount_config' in job:
+                        discount_config = job.get('discount_config', {})
+                        if discount_config:
+                            if st.button("查看优惠券更新配置", key=f"show_discount_config_{job['id']}"):
+                                st.session_state[f"show_discount_config_{job['id']}"] = \
+                                    not st.session_state.get(f"show_discount_config_{job['id']}", False)
                 
                 with col2:
                     if job['type'] == 'cron':
@@ -663,6 +858,60 @@ def main():
                         if execute_job(api_url, job['id']):
                             st.success(get_text("job_started"))
                             st.rerun()
+                
+                # 显示更新器配置详情
+                if job['crawler_type'] == 'update' and 'updater_config' in job and \
+                   st.session_state.get(f"show_updater_config_{job['id']}", False):
+                    st.markdown("---")
+                    st.subheader("更新器配置详情")
+                    
+                    updater_config = job.get('updater_config', {})
+                    if updater_config:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**优先级配置**")
+                            st.markdown(f"- 紧急优先级更新间隔: {updater_config.get('urgent_priority_hours', 1)}小时")
+                            st.markdown(f"- 高优先级更新间隔: {updater_config.get('high_priority_hours', 6)}小时")
+                            st.markdown(f"- 中优先级更新间隔: {updater_config.get('medium_priority_hours', 24)}小时")
+                            st.markdown(f"- 低优先级更新间隔: {updater_config.get('low_priority_hours', 72)}小时")
+                            st.markdown(f"- 非常低优先级更新间隔: {updater_config.get('very_low_priority_hours', 168)}小时")
+                        
+                        with col2:
+                            st.markdown("**处理配置**")
+                            st.markdown(f"- 批处理大小: {updater_config.get('batch_size', 500)}")
+                            st.markdown(f"- 最大重试次数: {updater_config.get('max_retries', 3)}")
+                            st.markdown(f"- 重试延迟: {updater_config.get('retry_delay', 2.0)}秒")
+                            st.markdown(f"- 并行请求数量: {updater_config.get('parallel_requests', 5)}")
+                            st.markdown(f"- 更新品类信息: {'是' if updater_config.get('update_category_info', False) else '否'}")
+                            st.markdown(f"- 强制检查CJ平台: {'是' if updater_config.get('force_cj_check', False) else '否'}")
+                    else:
+                        st.info("该任务使用默认更新器配置")
+                
+                # 显示折扣爬虫配置详情
+                if job['crawler_type'] == 'discount' and 'discount_config' in job and \
+                   st.session_state.get(f"show_discount_config_{job['id']}", False):
+                    st.markdown("---")
+                    st.subheader("优惠券更新配置详情")
+                    
+                    discount_config = job.get('discount_config', {})
+                    if discount_config:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**基本配置**")
+                            st.markdown(f"- 线程数量: {discount_config.get('num_threads', 4)}")
+                            st.markdown(f"- 更新间隔: {discount_config.get('update_interval', 24)}小时")
+                            st.markdown(f"- 强制更新: {'是' if discount_config.get('force_update', False) else '否'}")
+                        
+                        with col2:
+                            st.markdown("**抓取配置**")
+                            st.markdown(f"- 无头模式: {'是' if discount_config.get('headless', True) else '否'}")
+                            st.markdown(f"- 最小延迟: {discount_config.get('min_delay', 2.0)}秒")
+                            st.markdown(f"- 最大延迟: {discount_config.get('max_delay', 4.0)}秒")
+                            st.markdown(f"- 调试模式: {'是' if discount_config.get('debug', False) else '否'}")
+                    else:
+                        st.info("该任务使用默认优惠券更新配置")
                 
                 # 显示最近执行记录
                 if st.checkbox(

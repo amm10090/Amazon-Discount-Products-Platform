@@ -47,8 +47,8 @@ from models.product_service import ProductService
 from src.utils.log_config import get_logger, LogContext, track_performance
 from src.utils.api_retry import with_retry
 from src.utils.config_loader import config_loader
-from src.core.parallel_discount_scraper import ParallelDiscountScraper
-from src.core.discount_scraper import DiscountScraper
+from src.core.discount_scraper_mt import CouponScraperMT
+from src.core.discount_scraper import CouponScraper
 
 class TaskLogContext:
     """
@@ -696,58 +696,55 @@ class ProductUpdater:
         task_id = f"COUPON:{product.asin}"
         with TaskLogContext(task_id=task_id):
             try:
-                # 创建一个临时的ParallelDiscountScraper实例
-                if not self.coupon_scraper:
-                    self.coupon_scraper = ParallelDiscountScraper(
-                        db=db,  # 使用传入的db会话
-                        batch_size=1,
-                        concurrent_workers=1,
-                        headless=True
-                    )
-                    self.coupon_scraper._init_driver_pool()
+                # 创建一个临时的CouponScraperMT实例，只处理单个商品
+                temp_scraper = CouponScraperMT(
+                    num_threads=1,         # 只使用1个线程
+                    batch_size=1,          # 只处理1个商品
+                    headless=True,         # 使用无头模式
+                    min_delay=1.0,         # 最小延迟
+                    max_delay=2.0,         # 最大延迟
+                    specific_asins=[product.asin], # 只处理这个ASIN
+                    debug=False,           # 不开启调试
+                    verbose=False          # 不输出详细信息
+                )
                 
-                driver = self.coupon_scraper.driver_pool.get_driver()
-                if not driver:
-                    self.logger.error(f"无法初始化WebDriver，跳过优惠券检查")
-                    return None, None
+                # 运行爬虫处理商品
+                temp_scraper.run()
                 
-                try:
-                    # 访问商品页面并检查优惠券
-                    url = f"https://www.amazon.com/dp/{product.asin}?th=1"
-                    self.logger.debug(f"访问商品页面: {url}")
-                    driver.get(url)
+                # 获取处理结果
+                stats = temp_scraper.stats.get()
+                
+                # 如果成功处理了商品，从数据库中获取最新的优惠券信息
+                if stats['success_count'] > 0:
+                    # 刷新数据库中的商品信息
+                    db.refresh(product)
                     
-                    # 随机等待1-2秒，避免被检测
-                    wait_time = random.uniform(1, 2)
-                    time.sleep(wait_time)
-                    
-                    # 使用DiscountScraper的方法提取优惠券信息
-                    temp_scraper = DiscountScraper(db)  # 使用传入的db会话
-                    temp_scraper.driver = driver
-                    coupon_type, coupon_value = temp_scraper._extract_coupon_info()
-                    
-                    self.logger.info(
-                        f"优惠券检查结果: "
-                        f"类型={coupon_type or '无'}, "
-                        f"金额={coupon_value or '无'}"
-                    )
-                    
-                    return coupon_type, coupon_value
-                    
-                finally:
-                    # 释放driver
-                    if driver:
-                        self.coupon_scraper.driver_pool.release_driver(driver)
+                    # 获取优惠券信息
+                    if product.offers and len(product.offers) > 0:
+                        offer = product.offers[0]
+                        coupon_type = offer.coupon_type
+                        coupon_value = offer.coupon_value
+                        
+                        self.logger.info(
+                            f"优惠券检查结果: "
+                            f"类型={coupon_type or '无'}, "
+                            f"金额={coupon_value or '无'}"
+                        )
+                        
+                        return coupon_type, coupon_value
+                
+                # 如果无法获取优惠券信息，返回None
+                self.logger.info(f"商品 {product.asin} 没有优惠券信息")
+                return None, None
                     
             except Exception as e:
                 self.logger.error(f"检查优惠券信息时出错: {str(e)}")
                 return None, None
                 
     async def close_coupon_scraper(self):
-        """关闭优惠券检查器"""
-        if self.coupon_scraper:
-            self.coupon_scraper._close_driver_pool()
-            self.coupon_scraper = None
+        """关闭优惠券检查器（现在使用CouponScraperMT，不需要特别关闭资源）"""
+        # CouponScraperMT会在run方法执行完毕后自动关闭资源
+        self.coupon_scraper = None
 
     async def process_batch_cj_availability(self, asins: List[str]) -> Dict[str, bool]:
         """批量检查CJ平台商品可用性"""

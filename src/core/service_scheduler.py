@@ -113,6 +113,13 @@ class SchedulerManager:
                         "hours": 2,  # 每2小时执行一次
                         "crawler_type": "update",
                         "max_items": 100  # 每次更新100个商品
+                    },
+                    {
+                        "id": "discount_daily",
+                        "type": "interval",
+                        "hours": 8,  # 每8小时执行一次
+                        "crawler_type": "discount",
+                        "max_items": 50  # 每次处理50个商品
                     }
                 ],
                 "timezone": "Asia/Shanghai",
@@ -203,6 +210,28 @@ class SchedulerManager:
                 success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
                 result = success_count
                 logger.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
+            elif crawler_type == "discount":
+                # 执行折扣商品爬虫任务
+                from src.core.discount_scraper_mt import CouponScraperMT
+                
+                # 创建折扣爬虫实例
+                scraper = CouponScraperMT(
+                    num_threads=int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4")),
+                    batch_size=max_items,
+                    headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true",
+                    min_delay=float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")),
+                    max_delay=float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")),
+                    update_interval=int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24")),
+                    force_update=os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true"
+                )
+                
+                # 运行爬虫
+                scraper.run()
+                
+                # 获取统计数据
+                stats = scraper.stats.get()
+                result = stats['success_count']
+                logger.success(f"折扣商品爬取完成，处理: {stats['processed_count']}，成功: {result}，失败: {stats['failure_count']}")
             elif crawler_type == "cj":
                 # 执行CJ爬虫任务
                 # 获取数据库会话

@@ -142,12 +142,13 @@ class SchedulerManager:
         return SchedulerManager._scheduler
     
     @staticmethod
-    async def _crawl_products(crawler_type: str, max_items: int):
+    async def _crawl_products(crawler_type: str, max_items: int, updater_config: Optional[Dict[str, Any]] = None):
         """执行爬虫任务
         
         Args:
             crawler_type: 爬虫类型 (bestseller/coupon/all/update/cj)
             max_items: 最大采集数量
+            updater_config: 更新器配置参数
             
         Returns:
             int: 采集到的商品数量
@@ -177,9 +178,31 @@ class SchedulerManager:
             try:
                 # 如果是更新任务，使用ProductUpdater
                 if crawler_type == "update":
-                    updater = ProductUpdater()
+                    # 根据传入的更新器配置创建配置对象
+                    if updater_config:
+                        task_log.info(f"使用自定义更新器配置: {updater_config}")
+                        update_config = UpdateConfiguration(
+                            urgent_priority_hours=updater_config.get('urgent_priority_hours', 1),
+                            high_priority_hours=updater_config.get('high_priority_hours', 6),
+                            medium_priority_hours=updater_config.get('medium_priority_hours', 24),
+                            low_priority_hours=updater_config.get('low_priority_hours', 72),
+                            very_low_priority_hours=updater_config.get('very_low_priority_hours', 168),
+                            batch_size=updater_config.get('batch_size', max_items),
+                            max_retries=updater_config.get('max_retries', 3),
+                            retry_delay=updater_config.get('retry_delay', 2.0),
+                            update_category_info=updater_config.get('update_category_info', False),
+                            force_cj_check=updater_config.get('force_cj_check', False),
+                            parallel_requests=updater_config.get('parallel_requests', 5)
+                        )
+                        updater = ProductUpdater(config=update_config)
+                    else:
+                        task_log.info("使用默认更新器配置")
+                        updater = ProductUpdater()
+                        
                     await updater.initialize_clients()
-                    success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
+                    # 如果传入了batch_size，则使用它，否则使用max_items
+                    batch_size = updater_config.get('batch_size', max_items) if updater_config else max_items
+                    success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=batch_size)
                     task_log.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
                     return success_count
                 # 如果是CJ爬虫任务
@@ -201,6 +224,86 @@ class SchedulerManager:
                         return success
                     finally:
                         db.close()
+                # 折扣商品爬虫
+                elif crawler_type == "discount":
+                    from src.core.discount_scraper_mt import CouponScraperMT
+                    # 导入需要的模块
+                    task_log.info(f"启动优惠券更新爬虫，批量大小: {max_items}")
+                    
+                    try:
+                        # 记录完整的配置信息
+                        task_log.info(f"完整配置参数: {updater_config}")
+                        
+                        # 创建折扣爬虫并设置参数
+                        if updater_config:
+                            # 检查是否存在discount_config配置
+                            discount_config = None
+                            if isinstance(updater_config, dict):
+                                # 直接在updater_config字典中查找discount_config
+                                if "discount_config" in updater_config:
+                                    discount_config = updater_config["discount_config"]
+                                    task_log.info(f"从updater_config中解析出discount_config: {discount_config}")
+                                # 或者updater_config本身就是discount_config
+                                elif "num_threads" in updater_config or "force_update" in updater_config:
+                                    discount_config = updater_config
+                                    task_log.info(f"将updater_config作为discount_config使用: {discount_config}")
+                            
+                            if discount_config:
+                                task_log.info(f"使用自定义优惠券更新爬虫配置: {discount_config}")
+                                scraper = CouponScraperMT(
+                                    num_threads=discount_config.get("num_threads", int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4"))),
+                                    batch_size=max_items,
+                                    headless=discount_config.get("headless", os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"),
+                                    min_delay=discount_config.get("min_delay", float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0"))),
+                                    max_delay=discount_config.get("max_delay", float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0"))),
+                                    update_interval=discount_config.get("update_interval", int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24"))),
+                                    force_update=discount_config.get("force_update", os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true"),
+                                    debug=discount_config.get("debug", os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true"),
+                                    log_to_console=discount_config.get("log_to_console", os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true")
+                                )
+                            else:
+                                # 使用默认配置
+                                task_log.info("未找到优惠券更新爬虫配置，使用默认配置")
+                                scraper = CouponScraperMT(
+                                    num_threads=int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4")),
+                                    batch_size=max_items,
+                                    headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true",
+                                    min_delay=float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")),
+                                    max_delay=float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")),
+                                    update_interval=int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24")),
+                                    force_update=os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true",
+                                    debug=os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true",
+                                    log_to_console=os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true"
+                                )
+                        else:
+                            # 使用默认配置
+                            task_log.info("使用默认优惠券更新爬虫配置")
+                            scraper = CouponScraperMT(
+                                num_threads=int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4")),
+                                batch_size=max_items,
+                                headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true",
+                                min_delay=float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")),
+                                max_delay=float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")),
+                                update_interval=int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24")),
+                                force_update=os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true",
+                                debug=os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true",
+                                log_to_console=os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true"
+                            )
+                        
+                        # 运行爬虫
+                        task_log.info("开始运行优惠券更新爬虫")
+                        scraper.run()
+                        
+                        # 获取统计数据
+                        stats = scraper.stats.get()
+                        success_count = stats['success_count']
+                        task_log.success(f"优惠券更新爬虫完成，处理: {stats['processed_count']}，成功: {success_count}，失败: {stats['failure_count']}")
+                        return success_count
+                    except Exception as e:
+                        import traceback
+                        task_log.error(f"优惠券爬虫执行失败: {str(e)}")
+                        task_log.error(f"错误详情: {traceback.format_exc()}")
+                        raise
                 # 其他爬虫类型
                 else:
                     # 初始化API客户端
@@ -257,7 +360,7 @@ class SchedulerManager:
                 raise
 
     @staticmethod
-    def _execute_job(job_id: str, crawler_type: str, max_items: int):
+    def _execute_job(job_id: str, crawler_type: str, max_items: int, config_params: Optional[Dict[str, Any]] = None):
         """执行任务"""
         import asyncio
         from sqlalchemy import create_engine
@@ -267,6 +370,12 @@ class SchedulerManager:
         try:
             with TaskLogContext(task_id=job_id) as task_log:
                 task_log.info(f"开始执行任务，类型：{crawler_type}，目标数量：{max_items}")
+                if config_params:
+                    # 记录配置参数信息
+                    if "updater_config" in config_params:
+                        task_log.info(f"使用自定义更新器配置: {config_params['updater_config']}")
+                    if "discount_config" in config_params:
+                        task_log.info(f"使用自定义折扣爬虫配置: {config_params['discount_config']}")
                 
                 # 优先使用环境变量中的数据库路径
                 if "SCHEDULER_DB_PATH" in os.environ:
@@ -302,9 +411,9 @@ class SchedulerManager:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     
-                    # 执行爬虫任务
+                    # 执行爬虫任务，传递配置参数
                     items_collected = loop.run_until_complete(
-                        SchedulerManager._crawl_products(crawler_type, max_items)
+                        SchedulerManager._crawl_products(crawler_type, max_items, config_params)
                     )
                     
                     task_log.success(f"执行完成，采集到 {items_collected} 个商品")
@@ -356,16 +465,46 @@ class SchedulerManager:
         else:
             raise ValueError(f"不支持的任务类型: {job_type}")
         
+        # 处理任务配置参数
+        args = [
+            job_id,
+            job_config["crawler_type"],
+            job_config["max_items"]
+        ]
+        
+        # 添加额外的配置参数
+        extra_config = {}
+        
+        # 处理更新器配置
+        if "updater_config" in job_config:
+            extra_config["updater_config"] = job_config["updater_config"]
+            self._logger.info(f"任务 {job_id} 包含updater_config: {job_config['updater_config']}")
+            
+        # 处理折扣爬虫配置
+        if "discount_config" in job_config:
+            # 将discount_config直接添加到extra_config根级别
+            if job_config["crawler_type"] == "discount":
+                # 如果是discount爬虫，把discount_config作为单独参数
+                extra_config["discount_config"] = job_config["discount_config"]
+                self._logger.info(f"任务 {job_id} 包含discount_config: {job_config['discount_config']}")
+            else:
+                # 其他类型则放入updater_config
+                if "updater_config" not in extra_config:
+                    extra_config["updater_config"] = {}
+                extra_config["updater_config"]["discount_config"] = job_config["discount_config"]
+                self._logger.info(f"任务 {job_id} 的updater_config中添加了discount_config")
+        
+        # 将所有配置合并为一个参数传递
+        args.append(extra_config if extra_config else None)
+        
+        self._logger.info(f"任务 {job_id} 最终配置参数: {extra_config}")
+        
         # 添加任务
         self.scheduler.add_job(
             self._execute_job,
             trigger=trigger,
             id=job_id,
-            args=[
-                job_id,
-                job_config["crawler_type"],
-                job_config["max_items"]
-            ],
+            args=args,
             replace_existing=True
         )
         
@@ -384,6 +523,19 @@ class SchedulerManager:
                     "next_run_time": job.next_run_time.timestamp() if job.next_run_time else None,
                     "paused": job.next_run_time is None
                 }
+                
+                # 添加任务配置参数（如果有的话）
+                if len(job.args) > 3 and job.args[3] is not None:
+                    config_params = job.args[3]
+                    
+                    # 添加更新器配置
+                    if job_info["crawler_type"] == "update" and isinstance(config_params, dict) and "updater_config" in config_params:
+                        job_info["updater_config"] = config_params["updater_config"]
+                    
+                    # 添加折扣爬虫配置
+                    if job_info["crawler_type"] == "discount" and isinstance(config_params, dict):
+                        if "discount_config" in config_params:
+                            job_info["discount_config"] = config_params["discount_config"]
                 
                 # 添加触发器特定的信息
                 if isinstance(job.trigger, CronTrigger):
@@ -587,9 +739,11 @@ class SchedulerManager:
             
             # 在后台执行任务
             import threading
+            # 检查是否有额外配置参数
+            config_params = job.args[3] if len(job.args) > 3 else None
             thread = threading.Thread(
                 target=self._execute_job,
-                args=[job_id, crawler_type, max_items]
+                args=[job_id, crawler_type, max_items, config_params]
             )
             thread.start()
             
@@ -597,4 +751,7 @@ class SchedulerManager:
             
         except Exception as e:
             self._logger.error(f"立即执行任务 {job_id} 失败: {str(e)}")
+            # 添加异常堆栈跟踪以便调试
+            import traceback
+            self._logger.error(f"异常详情: {traceback.format_exc()}")
             raise 

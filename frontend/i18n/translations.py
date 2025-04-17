@@ -206,6 +206,7 @@ TRANSLATIONS = {
         "crawler_all": "全部商品",
         "crawler_update": "商品更新",
         "crawler_cj": "CJ商品",
+        "crawler_discount": "优惠券更新",
         
         # 调度器相关
         "start_time": "开始时间",
@@ -576,12 +577,13 @@ TRANSLATIONS = {
         "not_finished": "Not Finished",
         "running": "Running",
         
-        # Crawler Types
-        "crawler_bestseller": "Bestsellers",
+        # Crawler types
+        "crawler_bestseller": "Bestseller Products",
         "crawler_coupon": "Coupon Products",
         "crawler_all": "All Products",
         "crawler_update": "Product Update",
         "crawler_cj": "CJ Products",
+        "crawler_discount": "Coupon Update",
         
         # Scheduler Related
         "start_time": "Start Time",

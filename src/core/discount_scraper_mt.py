@@ -49,6 +49,8 @@ def parse_arguments():
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default=None, help='设置日志级别')
     parser.add_argument('--log-to-console', action='store_true', help='同时将日志输出到控制台')
     parser.add_argument('--threads', type=int, default=4, help='抓取线程数量')
+    parser.add_argument('--update-interval', type=int, default=72, help='优惠券信息更新间隔(小时)，默认72小时')
+    parser.add_argument('--force-update', action='store_true', help='强制更新所有商品，忽略更新间隔')
     return parser.parse_args()
 
 # 初始化Loguru日志配置
@@ -58,6 +60,9 @@ def init_logger(log_level=None, log_to_console=False):
     Args:
         log_level: 日志级别，可以是 DEBUG, INFO, WARNING, ERROR
         log_to_console: 是否同时输出到控制台
+        
+    Returns:
+        logger: 配置好的logger实例
     """
     # 使用项目根目录下的logs目录
     log_dir = Path(project_root) / os.getenv("APP_LOG_DIR", "logs")
@@ -85,7 +90,9 @@ def init_logger(log_level=None, log_to_console=False):
     LogConfig(config)
     
     # 返回当前模块的logger
-    return get_logger("CouponScraperMT")
+    logger = get_logger("CouponScraperMT")
+    logger.debug(f"日志已初始化: 级别={level}, 控制台输出={log_to_console}")
+    return logger
 
 # 全局日志记录器
 logger = None  # 将在main函数中初始化
@@ -819,7 +826,8 @@ class CouponScraperMT:
     
     def __init__(self, num_threads: int = 4, batch_size: int = 50, headless: bool = True,
                  min_delay: float = 2.0, max_delay: float = 4.0, specific_asins: list = None,
-                 debug: bool = False, verbose: bool = False):
+                 debug: bool = False, verbose: bool = False, update_interval: int = 24,
+                 force_update: bool = False, log_to_console: bool = False):
         """
         初始化多线程抓取器
         
@@ -832,7 +840,19 @@ class CouponScraperMT:
             specific_asins: 指定要处理的商品ASIN列表
             debug: 是否启用调试模式
             verbose: 是否输出更多详细信息
+            update_interval: 优惠券信息更新间隔(小时)，默认24小时
+            force_update: 强制更新所有商品，忽略更新间隔
+            log_to_console: 是否将日志输出到控制台
         """
+        # 确保logger已初始化
+        global logger
+        if logger is None:
+            logger = init_logger(
+                log_level="DEBUG" if debug else "INFO",
+                log_to_console=log_to_console
+            )
+            logger.info("在CouponScraperMT实例化过程中初始化了logger")
+            
         self.num_threads = max(1, min(num_threads, 32))  # 限制线程数在1-32之间
         self.batch_size = batch_size
         self.headless = headless
@@ -841,11 +861,15 @@ class CouponScraperMT:
         self.specific_asins = specific_asins
         self.debug = debug
         self.verbose = verbose
+        self.update_interval = update_interval
+        self.force_update = force_update
         
         # 初始化数据库会话
+        from models.database import get_db
         self.db = next(get_db())
         
         # 初始化任务队列
+        import queue
         self.task_queue = queue.Queue()
         
         # 初始化线程安全统计数据
@@ -853,26 +877,149 @@ class CouponScraperMT:
         
         # 工作线程列表
         self.workers = []
+        
+        # 添加完整的配置日志
+        logger.info(
+            "CouponScraperMT配置详情: 线程数={}, 批大小={}, 无头模式={}, 最小延迟={}, 最大延迟={}, "
+            "调试模式={}, 详细模式={}, 更新间隔={}小时, 强制更新={}, 日志到控制台={}",
+            self.num_threads, self.batch_size, self.headless, self.min_delay, self.max_delay,
+            self.debug, self.verbose, self.update_interval, self.force_update, log_to_console
+        )
     
     @track_performance
     def _populate_queue(self):
-        """填充任务队列"""
+        """填充任务队列，使用智能更新策略"""
         # 处理特定的ASIN列表或从数据库获取商品
         if self.specific_asins:
             logger.info("将处理指定的 {} 个商品ASIN", len(self.specific_asins))
             asins_to_process = self.specific_asins
         else:
-            # 获取商品，仅处理source为'coupon'的商品
-            logger.info("从数据库获取待处理商品列表 (仅source='coupon')...")
+            logger.info("从数据库获取待处理商品列表，使用智能更新策略...")
+            
+            # 计算更新间隔的时间点
+            from datetime import timedelta
+            update_threshold = datetime.now(UTC) - timedelta(hours=self.update_interval)
+            current_time = datetime.now(UTC)
+            
+            # 增加关于force_update的日志
+            if self.force_update:
+                logger.info("强制更新模式已启用 - 将忽略更新间隔检查")
+            else:
+                logger.info("智能更新模式 - 更新间隔设置为 {} 小时，更新阈值时间: {}", 
+                          self.update_interval, update_threshold.strftime("%Y-%m-%d %H:%M:%S"))
+            
             with LogContext(operation="db_query", component="QueuePopulation"):
-                products = self.db.query(Product).filter(
-                    Product.source == 'coupon'
-                ).order_by(
-                    Product.created_at
-                ).limit(self.batch_size).all()
+                if self.force_update:
+                    # 强制更新模式 - 忽略时间间隔限制
+                    logger.info("强制更新模式 - 获取所有source为'coupon'的商品")
+                    products = self.db.query(Product).filter(
+                        Product.source == 'coupon'
+                    ).order_by(Product.created_at).limit(self.batch_size).all()
+                    logger.info("强制更新模式 - 获取到 {} 个商品", len(products))
+                else:
+                    # 智能更新模式 - 使用SQL查询根据优惠券历史记录筛选需要更新的商品
+                    logger.info("智能更新模式 - 过滤需要更新的商品 (更新间隔: {}小时)", self.update_interval)
+                    
+                    # 查询符合以下条件之一的商品:
+                    # 1. 从未抓取过优惠券信息的商品 (不在 CouponHistory 表中)
+                    # 2. 最后更新时间超过了更新间隔
+                    # 3. 优惠券已过期
+                    
+                    # 首先获取所有存在于coupon_history的商品ASIN
+                    history_asins = self.db.query(CouponHistory.product_id).distinct().all()
+                    history_asins = [asin[0] for asin in history_asins]
+                    
+                    # 获取没有历史记录的商品
+                    new_products = self.db.query(Product).filter(
+                        Product.source == 'coupon',
+                        ~Product.asin.in_(history_asins) if history_asins else True
+                    ).order_by(Product.created_at).limit(self.batch_size).all()
+                    
+                    # 如果新商品不足batch_size，再查询需要更新的商品
+                    if len(new_products) < self.batch_size:
+                        # 计算还需要多少商品
+                        remaining = self.batch_size - len(new_products)
+                        
+                        # 获取有历史记录但需要更新的商品
+                        # 子查询：获取每个商品最新的优惠券历史记录
+                        from sqlalchemy import func
+                        
+                        # 查询每个商品最新的历史记录ID
+                        latest_history_subq = self.db.query(
+                            CouponHistory.product_id,
+                            func.max(CouponHistory.id).label('latest_id')
+                        ).group_by(CouponHistory.product_id).subquery()
+                        
+                        # 关联查询获取最新历史记录的详细信息
+                        latest_histories = self.db.query(
+                            CouponHistory
+                        ).join(
+                            latest_history_subq,
+                            (CouponHistory.product_id == latest_history_subq.c.product_id) &
+                            (CouponHistory.id == latest_history_subq.c.latest_id)
+                        ).all()
+                        
+                        # 筛选需要更新的商品ASIN
+                        update_asins = []
+                        
+                        for history in latest_histories:
+                            # 需要更新的条件:
+                            # 1. 最后更新时间超过了更新间隔
+                            # 2. 优惠券已过期（如果有设置过期时间）
+                            need_update = False
+                            
+                            # 检查最后更新时间
+                            if history.updated_at:
+                                # 为了解决时区问题，确保比较时两者都具有时区信息
+                                if history.updated_at.tzinfo is None:
+                                    # 如果数据库中的时间没有时区信息，假定为UTC
+                                    history_updated_at = history.updated_at.replace(tzinfo=UTC)
+                                else:
+                                    history_updated_at = history.updated_at
+                                
+                                if history_updated_at < update_threshold:
+                                    need_update = True
+                                    logger.debug("商品 {} 需要更新：最后更新时间 {} 超过了更新间隔",
+                                               history.product_id, history_updated_at)
+                            
+                            # 检查优惠券是否已过期
+                            if history.expiration_date:
+                                # 同样处理有效期的时区问题
+                                if history.expiration_date.tzinfo is None:
+                                    history_expiration_date = history.expiration_date.replace(tzinfo=UTC)
+                                else:
+                                    history_expiration_date = history.expiration_date
+                                
+                                if history_expiration_date < current_time:
+                                    need_update = True
+                                    logger.debug("商品 {} 需要更新：优惠券已于 {} 过期",
+                                               history.product_id, history_expiration_date)
+                            
+                            if need_update:
+                                update_asins.append(history.product_id)
+                                
+                                # 如果已收集足够的ASIN，提前退出循环
+                                if len(update_asins) >= remaining:
+                                    break
+                        
+                        # 查询这些需要更新的商品的完整信息
+                        if update_asins:
+                            update_products = self.db.query(Product).filter(
+                                Product.asin.in_(update_asins),
+                                Product.source == 'coupon'  # 确保只处理coupon来源的商品
+                            ).all()
+                            # 合并结果
+                            products = new_products + update_products
+                        else:
+                            products = new_products
+                    else:
+                        # 如果新商品足够，直接使用
+                        products = new_products
             
             asins_to_process = [p.asin for p in products]
-            logger.info("获取到 {} 个待处理商品", len(asins_to_process))
+            logger.info("获取到 {} 个待处理商品 (其中新商品: {})",
+                       len(asins_to_process),
+                       len(new_products) if 'new_products' in locals() else "全部")
         
         # 填充队列
         for asin in asins_to_process:
@@ -896,7 +1043,14 @@ class CouponScraperMT:
                 logger.info("=====================================================")
                 logger.info("             开始多线程优惠券信息抓取任务")
                 logger.info("=====================================================")
-                logger.info("线程数: {}", self.num_threads)
+                logger.info("配置信息:")
+                logger.info("- 线程数: {}", self.num_threads)
+                logger.info("- 批处理大小: {}", self.batch_size)
+                logger.info("- 更新间隔: {}小时", self.update_interval)
+                logger.info("- 强制更新模式: {}", "启用" if self.force_update else "禁用")
+                logger.info("- 无头模式: {}", "启用" if self.headless else "禁用")
+                logger.info("- 调试模式: {}", "启用" if self.debug else "禁用")
+                logger.info("=====================================================")
                 
                 # 填充任务队列
                 task_count = self._populate_queue()
@@ -994,7 +1148,9 @@ def main():
             max_delay=args.max_delay,
             specific_asins=specific_asins,
             debug=args.debug,
-            verbose=args.verbose
+            verbose=args.verbose,
+            update_interval=args.update_interval,
+            force_update=args.force_update
         )
     
     try:
@@ -1009,7 +1165,9 @@ def main():
                 "specific_asins": specific_asins,
                 "debug": args.debug,
                 "verbose": args.verbose,
-                "log_level": args.log_level or ('DEBUG' if args.debug else 'INFO')
+                "log_level": args.log_level or ('DEBUG' if args.debug else 'INFO'),
+                "update_interval": args.update_interval,
+                "force_update": args.force_update
             })
         
         # 运行爬虫
