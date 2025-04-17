@@ -187,7 +187,7 @@ class SchedulerManager:
         )
         
     @staticmethod
-    async def _execute_crawler(job_id: str, crawler_type: str, max_items: int):
+    async def _execute_crawler(job_id: str, crawler_type: str, max_items: int, config_params: Optional[Dict[str, Any]] = None):
         """执行爬虫任务
         
         根据指定的爬虫类型执行相应的数据采集任务。
@@ -196,6 +196,7 @@ class SchedulerManager:
             job_id: 任务ID
             crawler_type: 爬虫类型（bestseller/coupon/update/cj）
             max_items: 最大采集商品数量
+            config_params: 额外的配置参数
             
         Raises:
             ValueError: 不支持的爬虫类型
@@ -214,16 +215,35 @@ class SchedulerManager:
                 # 执行折扣商品爬虫任务
                 from src.core.discount_scraper_mt import CouponScraperMT
                 
-                # 创建折扣爬虫实例
-                scraper = CouponScraperMT(
-                    num_threads=int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4")),
-                    batch_size=max_items,
-                    headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true",
-                    min_delay=float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")),
-                    max_delay=float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")),
-                    update_interval=int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24")),
-                    force_update=os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true"
-                )
+                # 检查是否有自定义配置
+                if config_params:
+                    logger.info(f"使用自定义优惠券爬虫配置: {config_params}")
+                    # 创建折扣爬虫实例，使用自定义配置
+                    scraper = CouponScraperMT(
+                        num_threads=config_params.get("num_threads", int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4"))),
+                        batch_size=max_items,
+                        headless=config_params.get("headless", os.getenv("CRAWLER_HEADLESS", "true").lower() == "true"),
+                        min_delay=config_params.get("min_delay", float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0"))),
+                        max_delay=config_params.get("max_delay", float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0"))),
+                        update_interval=config_params.get("update_interval", int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24"))),
+                        force_update=config_params.get("force_update", os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true"),
+                        debug=config_params.get("debug", os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true"),
+                        log_to_console=config_params.get("log_to_console", os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true")
+                    )
+                else:
+                    # 使用默认配置
+                    logger.info("使用默认优惠券爬虫配置")
+                    scraper = CouponScraperMT(
+                        num_threads=int(os.getenv("DISCOUNT_SCRAPER_THREADS", "4")),
+                        batch_size=max_items,
+                        headless=os.getenv("CRAWLER_HEADLESS", "true").lower() == "true",
+                        min_delay=float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")),
+                        max_delay=float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")),
+                        update_interval=int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24")),
+                        force_update=os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true",
+                        debug=os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true",
+                        log_to_console=os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true"
+                    )
                 
                 # 运行爬虫
                 scraper.run()
@@ -356,21 +376,150 @@ class SchedulerManager:
         else:
             raise ValueError(f"不支持的任务类型: {job_type}")
             
+        # 准备任务参数
+        args = [
+            job_id,
+            job_config["crawler_type"],
+            job_config.get("max_items", 100)
+        ]
+        
+        # 添加配置参数
+        config_params = {}
+        if "updater_config" in job_config:
+            config_params = job_config["updater_config"]
+        elif "discount_config" in job_config:
+            config_params = job_config["discount_config"]
+            
+        # 如果有配置参数，添加到args
+        if config_params:
+            args.append(config_params)
+            logger.info(f"任务 {job_id} 添加了自定义配置参数: {config_params}")
+            
         # 添加任务，使用静态方法
         self.scheduler.add_job(
             SchedulerManager._execute_crawler,
             trigger=trigger,
             id=job_id,
-            args=[
-                job_id,
-                job_config["crawler_type"],
-                job_config.get("max_items", 100)
-            ],
+            args=args,
             replace_existing=True
         )
         
         logger.info(f"已添加任务: {job_id}")
+
+    def execute_job_now(self, job_id: str):
+        """立即执行任务
         
+        Args:
+            job_id: 任务ID
+            
+        Raises:
+            ValueError: 任务不存在时抛出
+        """
+        logger.info(f"正在立即执行任务：{job_id}")
+        try:
+            job = self.scheduler.get_job(job_id)
+            if not job:
+                raise ValueError(f"任务 {job_id} 不存在")
+            
+            # 获取任务参数
+            crawler_type = job.args[1]
+            max_items = job.args[2]
+            
+            logger.info(f"开始执行任务 {job_id}，类型：{crawler_type}，目标数量：{max_items}")
+            
+            # 在后台执行任务
+            import threading
+            # 检查是否有额外配置参数
+            config_params = job.args[3] if len(job.args) > 3 else None
+            thread = threading.Thread(
+                target=self._execute_job,
+                args=[job_id, crawler_type, max_items, config_params]
+            )
+            thread.start()
+            
+            logger.info(f"任务 {job_id} 已在后台开始执行")
+            
+        except Exception as e:
+            logger.error(f"立即执行任务 {job_id} 失败: {str(e)}")
+            # 添加异常堆栈跟踪以便调试
+            import traceback
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            raise
+
+    @staticmethod
+    def _execute_job(job_id: str, crawler_type: str, max_items: int, config_params: Optional[Dict[str, Any]] = None):
+        """执行任务"""
+        import asyncio
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from src.core.product_updater import TaskLogContext
+        from models.scheduler import Base
+        
+        try:
+            with TaskLogContext(task_id=job_id) as task_log:
+                task_log.info(f"开始执行任务，类型：{crawler_type}，目标数量：{max_items}")
+                if config_params:
+                    task_log.info(f"使用自定义配置参数: {config_params}")
+                
+                # 优先使用环境变量中的数据库路径
+                if "SCHEDULER_DB_PATH" in os.environ:
+                    db_file = os.environ["SCHEDULER_DB_PATH"]
+                    db_path = f"sqlite:///{db_file}"
+                else:
+                    # 默认路径
+                    data_dir = Path(__file__).parent.parent / "data" / "db"
+                    data_dir.mkdir(parents=True, exist_ok=True)
+                    db_path = f"sqlite:///{data_dir}/scheduler.db"
+                
+                task_log.info(f"使用数据库路径: {db_path}")
+                
+                # 创建数据库引擎和会话
+                engine = create_engine(db_path)
+                Base.metadata.create_all(engine)  # 确保表已创建
+                Session = sessionmaker(bind=engine)
+                session = Session()
+                
+                # 创建历史记录
+                history = JobHistoryModel(
+                    job_id=job_id,
+                    start_time=datetime.now(),
+                    status='running'
+                )
+                session.add(history)
+                session.commit()
+                
+                try:
+                    # 创建事件循环
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # 执行实际的任务
+                    result = loop.run_until_complete(SchedulerManager._execute_crawler(job_id, crawler_type, max_items, config_params))
+                    
+                    # 更新历史记录
+                    history.end_time = datetime.now()
+                    history.status = 'success'
+                    history.items_collected = result
+                    session.commit()
+                    
+                    task_log.success(f"任务执行成功，采集数量: {result}")
+                    return result
+                except Exception as e:
+                    # 更新失败状态
+                    history.end_time = datetime.now()
+                    history.status = 'failed'
+                    history.error = str(e)
+                    session.commit()
+                    
+                    task_log.error(f"任务执行失败: {str(e)}")
+                    raise
+                finally:
+                    session.close()
+        except Exception as e:
+            task_log.error(f"任务执行出错: {str(e)}")
+            import traceback
+            task_log.error(f"错误详情: {traceback.format_exc()}")
+
     def start(self):
         """启动调度器
         

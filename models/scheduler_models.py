@@ -12,6 +12,18 @@ class JobConfig(BaseModel):
     minute: Optional[str] = Field(None, description="Cron任务的分钟设置")
     hours: Optional[int] = Field(None, ge=0, le=24, description="间隔任务的小时数")
     minutes: Optional[int] = Field(None, ge=0, le=59, description="间隔任务的分钟数")
+    # 折扣爬虫配置参数
+    updater_config: Optional[dict] = Field(None, description="更新器配置参数")
+    discount_config: Optional[dict] = Field(None, description="折扣爬虫配置参数")
+    # 直接支持的折扣爬虫参数
+    num_threads: Optional[int] = Field(None, description="爬虫线程数")
+    update_interval: Optional[int] = Field(None, description="更新间隔(小时)")
+    force_update: Optional[bool] = Field(None, description="强制更新")
+    headless: Optional[bool] = Field(None, description="无头模式")
+    min_delay: Optional[float] = Field(None, description="最小延迟(秒)")
+    max_delay: Optional[float] = Field(None, description="最大延迟(秒)")
+    debug: Optional[bool] = Field(None, description="调试模式")
+    log_to_console: Optional[bool] = Field(None, description="输出日志到控制台")
 
     class Config:
         json_schema_extra = {
@@ -24,6 +36,8 @@ class JobConfig(BaseModel):
                 "minute": "0"
             }
         }
+        # 允许额外的属性
+        extra = "allow"
 
 class JobStatus(BaseModel):
     """任务状态模型"""
@@ -37,6 +51,18 @@ class JobStatus(BaseModel):
     minute: Optional[str] = Field(None, description="Cron任务的分钟设置")
     hours: Optional[int] = Field(None, description="间隔任务的小时数")
     minutes: Optional[int] = Field(None, description="间隔任务的分钟数")
+    # 折扣爬虫配置参数
+    updater_config: Optional[dict] = Field(None, description="更新器配置参数")
+    discount_config: Optional[dict] = Field(None, description="折扣爬虫配置参数")
+    # 直接支持的折扣爬虫参数
+    num_threads: Optional[int] = Field(None, description="爬虫线程数")
+    update_interval: Optional[int] = Field(None, description="更新间隔(小时)")
+    force_update: Optional[bool] = Field(None, description="强制更新")
+    headless: Optional[bool] = Field(None, description="无头模式")
+    min_delay: Optional[float] = Field(None, description="最小延迟(秒)")
+    max_delay: Optional[float] = Field(None, description="最大延迟(秒)")
+    debug: Optional[bool] = Field(None, description="调试模式")
+    log_to_console: Optional[bool] = Field(None, description="输出日志到控制台")
 
     class Config:
         json_schema_extra = {
@@ -51,6 +77,8 @@ class JobStatus(BaseModel):
                 "minute": "0"
             }
         }
+        # 允许额外的属性
+        extra = "allow"
 
 class SchedulerStatus(BaseModel):
     """调度器状态模型"""

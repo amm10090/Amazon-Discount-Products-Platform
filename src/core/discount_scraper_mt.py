@@ -910,116 +910,62 @@ class CouponScraperMT:
             
             with LogContext(operation="db_query", component="QueuePopulation"):
                 if self.force_update:
-                    # 强制更新模式 - 忽略时间间隔限制
+                    # 强制更新模式 - 获取所有source为'coupon'的商品
                     logger.info("强制更新模式 - 获取所有source为'coupon'的商品")
                     products = self.db.query(Product).filter(
                         Product.source == 'coupon'
                     ).order_by(Product.created_at).limit(self.batch_size).all()
                     logger.info("强制更新模式 - 获取到 {} 个商品", len(products))
                 else:
-                    # 智能更新模式 - 使用SQL查询根据优惠券历史记录筛选需要更新的商品
+                    # 智能更新模式 - 使用改进的查询逻辑
                     logger.info("智能更新模式 - 过滤需要更新的商品 (更新间隔: {}小时)", self.update_interval)
                     
-                    # 查询符合以下条件之一的商品:
-                    # 1. 从未抓取过优惠券信息的商品 (不在 CouponHistory 表中)
-                    # 2. 最后更新时间超过了更新间隔
-                    # 3. 优惠券已过期
+                    # 修改查询逻辑: 查询所有source='coupon'的商品
+                    all_coupon_products = self.db.query(Product).filter(
+                        Product.source == 'coupon'
+                    ).all()
                     
-                    # 首先获取所有存在于coupon_history的商品ASIN
-                    history_asins = self.db.query(CouponHistory.product_id).distinct().all()
-                    history_asins = [asin[0] for asin in history_asins]
+                    # 查询所有已有历史记录的商品ASIN
+                    history_asins_query = self.db.query(CouponHistory.product_id).distinct()
+                    history_asins = [asin[0] for asin in history_asins_query.all()]
                     
-                    # 获取没有历史记录的商品
-                    new_products = self.db.query(Product).filter(
-                        Product.source == 'coupon',
-                        ~Product.asin.in_(history_asins) if history_asins else True
-                    ).order_by(Product.created_at).limit(self.batch_size).all()
+                    # 筛选需要更新的商品
+                    products_to_update = []
                     
-                    # 如果新商品不足batch_size，再查询需要更新的商品
-                    if len(new_products) < self.batch_size:
-                        # 计算还需要多少商品
-                        remaining = self.batch_size - len(new_products)
+                    # 处理没有历史记录的商品（直接添加）
+                    new_products = [p for p in all_coupon_products if p.asin not in history_asins]
+                    logger.info("找到 {} 个没有历史记录的新商品", len(new_products))
+                    products_to_update.extend(new_products)
+                    
+                    # 如果新商品数量不足批处理大小，再处理有历史记录但需要更新的商品
+                    if len(products_to_update) < self.batch_size and history_asins:
+                        # 使用updated_at或discount_updated_at字段查询需要更新的商品（满足任一条件）
+                        from sqlalchemy import or_
+                        products_need_update = self.db.query(Product).filter(
+                            Product.source == 'coupon',
+                            Product.asin.in_(history_asins),
+                            or_(
+                                Product.updated_at < update_threshold,
+                                Product.discount_updated_at < update_threshold
+                            )
+                        ).order_by(Product.updated_at).limit(self.batch_size - len(products_to_update)).all()
                         
-                        # 获取有历史记录但需要更新的商品
-                        # 子查询：获取每个商品最新的优惠券历史记录
-                        from sqlalchemy import func
-                        
-                        # 查询每个商品最新的历史记录ID
-                        latest_history_subq = self.db.query(
-                            CouponHistory.product_id,
-                            func.max(CouponHistory.id).label('latest_id')
-                        ).group_by(CouponHistory.product_id).subquery()
-                        
-                        # 关联查询获取最新历史记录的详细信息
-                        latest_histories = self.db.query(
-                            CouponHistory
-                        ).join(
-                            latest_history_subq,
-                            (CouponHistory.product_id == latest_history_subq.c.product_id) &
-                            (CouponHistory.id == latest_history_subq.c.latest_id)
-                        ).all()
-                        
-                        # 筛选需要更新的商品ASIN
-                        update_asins = []
-                        
-                        for history in latest_histories:
-                            # 需要更新的条件:
-                            # 1. 最后更新时间超过了更新间隔
-                            # 2. 优惠券已过期（如果有设置过期时间）
-                            need_update = False
-                            
-                            # 检查最后更新时间
-                            if history.updated_at:
-                                # 为了解决时区问题，确保比较时两者都具有时区信息
-                                if history.updated_at.tzinfo is None:
-                                    # 如果数据库中的时间没有时区信息，假定为UTC
-                                    history_updated_at = history.updated_at.replace(tzinfo=UTC)
-                                else:
-                                    history_updated_at = history.updated_at
-                                
-                                if history_updated_at < update_threshold:
-                                    need_update = True
-                                    logger.debug("商品 {} 需要更新：最后更新时间 {} 超过了更新间隔",
-                                               history.product_id, history_updated_at)
-                            
-                            # 检查优惠券是否已过期
-                            if history.expiration_date:
-                                # 同样处理有效期的时区问题
-                                if history.expiration_date.tzinfo is None:
-                                    history_expiration_date = history.expiration_date.replace(tzinfo=UTC)
-                                else:
-                                    history_expiration_date = history.expiration_date
-                                
-                                if history_expiration_date < current_time:
-                                    need_update = True
-                                    logger.debug("商品 {} 需要更新：优惠券已于 {} 过期",
-                                               history.product_id, history_expiration_date)
-                            
-                            if need_update:
-                                update_asins.append(history.product_id)
-                                
-                                # 如果已收集足够的ASIN，提前退出循环
-                                if len(update_asins) >= remaining:
-                                    break
-                        
-                        # 查询这些需要更新的商品的完整信息
-                        if update_asins:
-                            update_products = self.db.query(Product).filter(
-                                Product.asin.in_(update_asins),
-                                Product.source == 'coupon'  # 确保只处理coupon来源的商品
-                            ).all()
-                            # 合并结果
-                            products = new_products + update_products
-                        else:
-                            products = new_products
-                    else:
-                        # 如果新商品足够，直接使用
-                        products = new_products
+                        logger.info("找到 {} 个需要更新的已有历史记录的商品", len(products_need_update))
+                        products_to_update.extend(products_need_update)
+                    
+                    # 使用最终筛选出的商品列表
+                    products = products_to_update
+                    
+                    # 根据创建时间排序
+                    products.sort(key=lambda p: p.created_at if p.created_at else datetime.min)
+                    
+                    # 限制数量
+                    products = products[:self.batch_size]
             
             asins_to_process = [p.asin for p in products]
             logger.info("获取到 {} 个待处理商品 (其中新商品: {})",
                        len(asins_to_process),
-                       len(new_products) if 'new_products' in locals() else "全部")
+                       len(new_products) if 'new_products' in locals() else "未知")
         
         # 填充队列
         for asin in asins_to_process:
