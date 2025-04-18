@@ -1059,11 +1059,45 @@ async def clear_all_cache():
 async def add_job(job_config: JobConfig):
     """添加新的定时任务"""
     try:
+        # 检查必填字段
+        job_id = job_config.id
+        if not job_id or job_id.strip() == "":
+            raise ValueError("任务ID不能为空")
+            
+        # 记录传入的参数便于调试
+        logger.info(f"添加任务请求: {job_config.model_dump_json()}")
+        
+        # 获取任务类型和爬虫类型
+        job_type = job_config.type
+        crawler_type = job_config.crawler_type
+        
+        # 检查job_type
+        if job_type not in ["cron", "interval"]:
+            raise ValueError(f"不支持的任务类型: {job_type}")
+            
+        # 检查crawler_type
+        valid_crawler_types = ["bestseller", "coupon", "all", "update", "discount", "cj"]
+        if crawler_type not in valid_crawler_types:
+            raise ValueError(f"不支持的爬虫类型: {crawler_type}")
+            
+        # 检查interval类型的参数
+        if job_type == "interval" and (job_config.hours is None and job_config.minutes is None):
+            raise ValueError("间隔任务必须设置hours或minutes")
+            
+        # 构建调度器任务配置
+        scheduler_config = job_config.model_dump(exclude_unset=True)
+        
+        # 创建调度器管理器并添加任务
         scheduler_manager = SchedulerManager()
-        scheduler_manager.add_job(job_config.dict())
+        scheduler_manager.add_job(scheduler_config)
+        
         return {"status": "success", "message": "任务添加成功"}
-    except Exception as e:
+    except ValueError as e:
+        logger.error(f"添加任务参数错误: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"添加任务出错: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"添加任务失败: {str(e)}")
 
 @app.get("/api/scheduler/jobs", response_model=List[JobStatus], include_in_schema=False)
 async def list_jobs():

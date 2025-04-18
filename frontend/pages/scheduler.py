@@ -150,17 +150,56 @@ def add_job(
         bool: 是否添加成功
     """
     try:
+        # 检查任务ID
+        job_id = job_config.get("id", "")
+        if not job_id or job_id.strip() == "":
+            st.error("任务ID不能为空")
+            return False
+            
+        # 确保crawler_type存在
+        if "crawler_type" not in job_config:
+            st.error("任务类型不能为空")
+            return False
+            
+        # 打印提交的配置到控制台以便调试
+        print(f"发送任务配置: {job_config}")
+            
+        # 发送API请求
         response = requests.post(
             f"{api_url}/api/scheduler/jobs",
-            json=job_config
+            json=job_config,
+            timeout=10  # 设置超时时间
         )
-        success = response.status_code == 200
-        if success:
+        
+        # 检查响应
+        if response.status_code == 200:
             # 清除任务列表缓存
             cache_manager.clear_cache()
-        return success
+            return True
+        else:
+            # 完整记录错误响应
+            print(f"服务器返回错误 - 状态码: {response.status_code}, 响应内容: {response.text}")
+            
+            # 尝试从响应中获取错误信息
+            try:
+                error_data = response.json()
+                error_message = error_data.get("detail", "未知错误")
+                st.error(f"{get_text('add_job_failed')}: {error_message}")
+            except Exception as json_error:
+                # JSON解析失败，直接显示响应文本
+                st.error(f"{get_text('add_job_failed')}: 状态码 {response.status_code}, 响应: {response.text[:200]}")
+                print(f"解析响应JSON失败: {str(json_error)}")
+            return False
+            
+    except requests.RequestException as e:
+        # 网络请求错误
+        st.error(f"{get_text('add_job_failed')}: 网络请求错误 - {str(e)}")
+        print(f"请求错误: {str(e)}")
+        return False
     except Exception as e:
+        # 其他未知错误
         st.error(f"{get_text('add_job_failed')}: {str(e)}")
+        print(f"添加任务时发生未知错误: {str(e)}")
         return False
 
 def pause_job(api_url: str, job_id: str) -> bool:
@@ -400,6 +439,10 @@ def main():
     scheduler_status = get_scheduler_status(api_url)
     current_timezone = scheduler_status.get('timezone', 'UTC')
     
+    # 预先加载所有任务作为全局变量供验证使用
+    existing_jobs = load_jobs(api_url)
+    existing_job_ids = [job['id'] for job in existing_jobs] if existing_jobs else []
+    
     # 创建任务类型分类
     task_categories = {
         "crawler": {
@@ -468,8 +511,21 @@ def main():
             options=["cron", "interval"],
             key="job_type_select",
             on_change=update_job_type,
+            format_func=lambda x: "定时任务 (Cron)" if x == "cron" else "间隔任务 (Interval)",
             help=get_text("job_type_help")
         )
+        
+        # 添加清晰的说明
+        st.markdown("""
+        <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-top: 10px;">
+        <strong>📝 任务创建说明:</strong>
+        <ul>
+          <li>任务ID必须填写且不能重复</li>
+          <li>定时任务(Cron)按指定时间执行</li>
+          <li>间隔任务(Interval)按固定间隔执行</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
     
     # 在表单外显示高级配置选项
     if st.session_state.task_category == "update" and st.session_state.task_type == "update":
@@ -482,9 +538,22 @@ def main():
         st.subheader("优惠券更新爬虫高级配置")
         show_config = st.checkbox("显示高级配置选项", value=st.session_state.show_discount_config, on_change=toggle_discount_config)
     
+    # 添加CJ爬虫高级配置选项
+    elif st.session_state.task_category == "cj_crawler" and st.session_state.task_type == "cj":
+        st.markdown("---")
+        st.subheader("CJ爬虫高级配置")
+        if "show_cj_config" not in st.session_state:
+            st.session_state.show_cj_config = False
+            
+        def toggle_cj_config():
+            st.session_state.show_cj_config = not st.session_state.show_cj_config
+            
+        show_config = st.checkbox("显示高级配置选项", value=st.session_state.show_cj_config, on_change=toggle_cj_config)
+    
     # 根据高级配置状态显示相应的配置选项
     updater_config = {}
     discount_config = {}
+    cj_config = {}
     
     # 更新器高级配置
     if st.session_state.task_category == "update" and st.session_state.task_type == "update" and st.session_state.show_advanced_config:
@@ -639,6 +708,48 @@ def main():
                 help="启用调试模式，输出更详细的日志"
             )
     
+    # CJ爬虫高级配置
+    elif st.session_state.task_category == "cj_crawler" and st.session_state.task_type == "cj" and st.session_state.show_cj_config:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 并行抓取配置
+            cj_config["use_parallel"] = st.checkbox(
+                "启用并行抓取",
+                value=True,
+                help="启用多工作进程并行抓取，提高效率"
+            )
+            
+            cj_config["workers"] = st.number_input(
+                "工作进程数量",
+                min_value=1,
+                max_value=10,
+                value=3,
+                help="并行工作进程数量，根据系统性能调整"
+            )
+            
+            cj_config["skip_existing"] = st.checkbox(
+                "跳过已存在商品",
+                value=True,
+                help="是否跳过数据库中已存在的商品"
+            )
+        
+        with col2:
+            # 游标策略配置
+            cj_config["use_random_cursor"] = st.checkbox(
+                "使用随机游标",
+                value=False,
+                help="是否使用随机游标策略（当不使用并行抓取时有效）"
+            )
+            
+            cj_config["filter_similar_variants"] = st.checkbox(
+                "过滤相似变体",
+                value=True,
+                help="是否过滤优惠相同的变体商品"
+            )
+            
+            st.info("游标优先级队列已启用，基于成功率、商品密度和时间衰减因子自动选择最优游标")
+    
     # 添加新任务表单 - 现在表单只包含基本输入项，其他配置都在外部
     with st.form("add_job"):
         col1, col2 = st.columns(2)
@@ -646,8 +757,12 @@ def main():
         with col1:
             job_id = st.text_input(
                 get_text("job_id"),
-                help=get_text("job_id_help")
+                help=get_text("job_id_help"),
+                placeholder="例如: daily_bestseller_1"
             )
+            
+            # 添加提示说明
+            st.caption("任务ID必须是唯一的，不能与现有任务重复")
         
         with col2:
             max_items = st.number_input(
@@ -687,41 +802,72 @@ def main():
         submitted = st.form_submit_button(get_text("add_job"))
         
         if submitted:
-            # 构建任务配置 - 使用session_state中的值
-            job_config = {
-                "id": job_id,
-                "type": st.session_state.job_type,
-                "crawler_type": st.session_state.task_type,
-                "max_items": max_items
-            }
+            # 获取当前输入值并去除空格
+            current_job_id = job_id.strip() if job_id else ""
             
-            if st.session_state.job_type == "cron":
-                job_config.update({
-                    "hour": hour,
-                    "minute": minute
-                })
+            # 验证任务ID
+            if not current_job_id:
+                st.error("任务ID不能为空")
+            elif current_job_id in existing_job_ids:
+                # 显示已存在的任务
+                matching_job = next((job for job in existing_jobs if job['id'] == current_job_id), None)
+                if matching_job:
+                    crawler_type = matching_job.get('crawler_type', 'unknown')
+                    max_items = matching_job.get('max_items', '未知')
+                    st.error(f"任务ID '{current_job_id}' 已存在，请使用其他ID")
+                    st.warning(
+                        f"已存在的任务信息: "
+                        f"类型={get_text(f'crawler_{crawler_type}')}，"
+                        f"最大采集数量={max_items}"
+                    )
             else:
-                job_config.update({
-                    "hours": hours,
-                    "minutes": minutes
-                })
-            
-            # 添加更新器配置
-            if st.session_state.task_category == "update" and st.session_state.task_type == "update" and st.session_state.show_advanced_config:
-                job_config["updater_config"] = updater_config
-                
-            # 添加折扣爬虫配置
-            if st.session_state.task_category == "crawler" and st.session_state.task_type == "discount" and st.session_state.show_discount_config:
-                # 折扣爬虫配置保持在discount_config字段中
-                job_config["discount_config"] = discount_config
-                # 打印配置以便调试
-                st.write("将发送以下配置:")
-                st.json(job_config)
-            
-            # 添加任务
-            if add_job(api_url, job_config):
-                st.success(get_text("job_added"))
-                st.rerun()
+                try:
+                    # 构建任务配置
+                    job_config = {
+                        "id": current_job_id,
+                        "type": st.session_state.job_type,
+                        "crawler_type": st.session_state.task_type,
+                        "max_items": max_items
+                    }
+                    
+                    if st.session_state.job_type == "cron":
+                        job_config.update({
+                            "hour": hour,
+                            "minute": minute
+                        })
+                    else:
+                        # 确保至少有一个时间参数大于0
+                        if hours <= 0 and minutes <= 0:
+                            st.error("间隔时间不能全为0")
+                            raise ValueError("间隔时间不能全为0")
+                            
+                        job_config.update({
+                            "hours": hours,
+                            "minutes": minutes
+                        })
+                    
+                    # 添加更新器配置
+                    if st.session_state.task_category == "update" and st.session_state.task_type == "update" and st.session_state.show_advanced_config:
+                        job_config["updater_config"] = updater_config
+                        
+                    # 添加折扣爬虫配置
+                    if st.session_state.task_category == "crawler" and st.session_state.task_type == "discount" and st.session_state.show_discount_config:
+                        job_config["discount_config"] = discount_config
+                    
+                    # 添加CJ爬虫配置
+                    if st.session_state.task_category == "cj_crawler" and st.session_state.task_type == "cj" and st.session_state.show_cj_config:
+                        job_config["cj_config"] = cj_config
+                    
+                    # 在界面上显示将要提交的配置
+                    with st.expander("提交的任务配置", expanded=False):
+                        st.json(job_config)
+                    
+                    # 添加任务
+                    if add_job(api_url, job_config):
+                        st.success(get_text("job_added"))
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"创建任务出错: {str(e)}")
     
     # 显示现有任务
     st.markdown("---")
@@ -974,6 +1120,47 @@ def main():
                             st.markdown(f"- 调试模式: {'是' if discount_config.get('debug', False) else '否'}")
                     else:
                         st.info("该任务使用默认优惠券更新配置")
+                
+                # 显示CJ爬虫配置详情
+                if job['crawler_type'] == 'cj':
+                    # 初始化会话状态，如果不存在
+                    if f"show_cj_config_{job['id']}" not in st.session_state:
+                        st.session_state[f"show_cj_config_{job['id']}"] = False
+                        
+                    # 定义回调函数来切换状态
+                    def toggle_cj_view(job_id=job['id']):
+                        st.session_state[f"show_cj_config_{job_id}"] = not st.session_state[f"show_cj_config_{job_id}"]
+                        
+                    # 显示查看按钮
+                    st.button("查看CJ爬虫配置", 
+                              key=f"show_cj_btn_{job['id']}", 
+                              on_click=toggle_cj_view, 
+                              args=(job['id'],))
+                    
+                    # 显示配置详情
+                    if st.session_state.get(f"show_cj_config_{job['id']}", False):
+                        st.markdown("---")
+                        st.subheader("CJ爬虫配置详情")
+                        
+                        # 获取配置信息
+                        cj_config = job.get('cj_config', {})
+                        
+                        if cj_config:
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("**并行配置**")
+                                st.markdown(f"- 并行抓取: {'启用' if cj_config.get('use_parallel', True) else '禁用'}")
+                                st.markdown(f"- 工作进程: {cj_config.get('workers', 3)}个")
+                                st.markdown(f"- 跳过已存在: {'是' if cj_config.get('skip_existing', True) else '否'}")
+                            
+                            with col2:
+                                st.markdown("**游标策略**")
+                                st.markdown(f"- 随机游标: {'启用' if cj_config.get('use_random_cursor', False) else '禁用'}")
+                                st.markdown(f"- 过滤变体: {'是' if cj_config.get('filter_similar_variants', True) else '否'}")
+                                st.markdown("- 游标优先级队列: 已启用")
+                        else:
+                            st.info("该任务使用默认CJ爬虫配置")
                 
                 # 显示最近执行记录
                 if st.checkbox(

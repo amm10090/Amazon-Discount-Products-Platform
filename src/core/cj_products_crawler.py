@@ -12,6 +12,8 @@ import sys
 import json
 import asyncio
 import re
+import heapq
+import time
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, UTC, timedelta
 from pathlib import Path
@@ -53,6 +55,9 @@ class CJProductsCrawler:
         self.cursor_expiry_days = 7  # 单个游标过期时间（天）
         self.full_scan_expiry_days = 30  # 全局扫描过期时间（天）
         
+        # 游标优先级队列
+        self.cursor_priority_queue = []
+        
         # 加载历史游标
         self._load_cursor_history()
     
@@ -75,17 +80,67 @@ class CJProductsCrawler:
                                 self.cursor_history[cursor] = {
                                     'asins': cursor_data.get('asins', []),
                                     'last_used': datetime.fromisoformat(cursor_data.get('last_used', datetime.now().isoformat())),
-                                    'success_count': cursor_data.get('success_count', 0)
+                                    'success_count': cursor_data.get('success_count', 0),
+                                    'scan_count': cursor_data.get('scan_count', 1),
+                                    'success_rate': cursor_data.get('success_count', 0) / max(1, cursor_data.get('scan_count', 1))
                                 }
                 
                 self.logger.info(f"已加载 {len(self.cursor_history)} 条游标历史记录")
                 if self.last_full_scan:
                     self.logger.info(f"上次全局扫描时间: {self.last_full_scan.isoformat()}")
+                
+                # 初始化游标优先级队列
+                self._initialize_cursor_priority_queue()
         except Exception as e:
             self.logger.error(f"加载游标历史记录失败: {str(e)}")
             # 如果加载失败，使用空的游标历史
             self.cursor_history = {}
             self.last_full_scan = None
+    
+    def _initialize_cursor_priority_queue(self) -> None:
+        """初始化游标优先级队列"""
+        self.cursor_priority_queue = []
+        
+        for cursor, data in self.cursor_history.items():
+            # 计算优先级评分
+            score = self._calculate_cursor_score(cursor, data)
+            heapq.heappush(self.cursor_priority_queue, (-score, cursor))  # 负分数使高分优先
+            
+        self.logger.debug(f"游标优先级队列已初始化，共 {len(self.cursor_priority_queue)} 个游标")
+    
+    def _calculate_cursor_score(self, cursor: str, data: Dict) -> float:
+        """计算游标优先级分数"""
+        if not data:
+            return 0.0
+        
+        # 基础因素
+        last_used = data.get('last_used', datetime.now())
+        if isinstance(last_used, str):
+            last_used = datetime.fromisoformat(last_used)
+        
+        success_rate = data.get('success_rate', 0)
+        if not success_rate and 'success_count' in data and 'scan_count' in data:
+            scan_count = max(1, data.get('scan_count', 1))
+            success_rate = data.get('success_count', 0) / scan_count
+            
+        product_count = len(data.get('asins', []))
+        scan_count = data.get('scan_count', 1)
+        
+        # 时间衰减因子（越久没扫描优先级越高）
+        time_diff = (datetime.now() - last_used).total_seconds()
+        time_factor = min(10, time_diff / (24 * 3600))
+        
+        # 成功率因子（成功率高的优先级较高）
+        success_factor = success_rate * 2
+        
+        # 产品密度因子（产品密度高的区域优先级较高）
+        density_factor = min(5, product_count / max(1, scan_count))
+        
+        # 合并评分
+        score = time_factor * 0.5 + success_factor * 0.3 + density_factor * 0.2
+        
+        self.logger.debug(f"游标 {cursor[:20]}... 评分: {score:.2f} (时间:{time_factor:.2f}, 成功率:{success_factor:.2f}, 密度:{density_factor:.2f})")
+        return score
     
     def _save_cursor_history(self) -> None:
         """保存游标历史记录到文件"""
@@ -98,11 +153,17 @@ class CJProductsCrawler:
             
             # 转换游标历史为可序列化格式
             for cursor, info in self.cursor_history.items():
+                success_count = info.get('success_count', 0)
+                scan_count = info.get('scan_count', 1)
+                success_rate = success_count / max(1, scan_count)
+                
                 data['cursors'].append({
                     'cursor': cursor,
                     'asins': info.get('asins', []),
                     'last_used': info.get('last_used', datetime.now()).isoformat(),
-                    'success_count': info.get('success_count', 0)
+                    'success_count': success_count,
+                    'scan_count': scan_count,
+                    'success_rate': success_rate
                 })
             
             # 写入文件
@@ -114,7 +175,7 @@ class CJProductsCrawler:
             self.logger.error(f"保存游标历史记录失败: {str(e)}")
     
     def _is_cursor_expired(self, cursor: str) -> bool:
-        """检查游标是否已过期
+        """判断游标是否已过期需要重新扫描
         
         Args:
             cursor: 要检查的游标
@@ -123,15 +184,45 @@ class CJProductsCrawler:
             bool: 如果游标已过期，返回True，否则返回False
         """
         if cursor not in self.cursor_history:
-            return False
-            
-        last_used = self.cursor_history[cursor].get('last_used')
-        if not last_used:
             return True
             
-        # 计算游标是否超过过期时间
-        expiry_date = datetime.now() - timedelta(days=self.cursor_expiry_days)
-        return last_used < expiry_date
+        data = self.cursor_history[cursor]
+        
+        # 获取最后扫描时间
+        last_used = data.get('last_used')
+        if isinstance(last_used, str):
+            try:
+                last_used = datetime.fromisoformat(last_used)
+            except ValueError:
+                return True
+                
+        if not last_used:
+            return True
+        
+        # 计算成功率
+        scan_count = data.get('scan_count', 0)
+        success_count = data.get('success_count', 0)
+        success_rate = success_count / max(1, scan_count)
+        
+        # 基础过期时间（24小时）
+        base_expiry = timedelta(hours=24)
+        
+        # 成功率高的游标更频繁地扫描
+        if success_rate > 0.8:
+            expiry_time = base_expiry * 0.5  # 12小时
+        elif success_rate > 0.5:
+            expiry_time = base_expiry  # 24小时
+        elif success_rate > 0.2:
+            expiry_time = base_expiry * 2  # 48小时
+        else:
+            expiry_time = base_expiry * 4  # 96小时
+        
+        # 随机波动±20%，避免同时过期
+        random_factor = random.uniform(0.8, 1.2)
+        expiry_time = expiry_time * random_factor
+        
+        # 当前时间减去最后扫描时间 > 过期时间则过期
+        return (datetime.now() - last_used) > expiry_time
     
     def _is_full_scan_expired(self) -> bool:
         """检查是否需要执行全局扫描
@@ -147,7 +238,7 @@ class CJProductsCrawler:
         return self.last_full_scan < expiry_date
     
     def _select_cursor(self) -> str:
-        """根据历史记录和过期状态选择合适的游标
+        """智能选择下一个要扫描的游标
         
         Returns:
             str: 选择的游标，如果需要重新扫描，返回空字符串
@@ -160,27 +251,44 @@ class CJProductsCrawler:
             self._save_cursor_history()
             return ""
         
-        # 过滤出未过期的游标
-        valid_cursors = {
-            cursor: info for cursor, info in self.cursor_history.items() 
-            if not self._is_cursor_expired(cursor)
-        }
+        # 20%概率完全随机选择（探索新区域）
+        if random.random() < 0.2:
+            random_cursor = self._get_random_cursor(self.cursor_history)
+            self.logger.info(f"随机探索策略选择游标: {random_cursor[:30] if random_cursor else '无'}")
+            return random_cursor
+            
+        # 初始化优先级队列（如果尚未初始化）
+        if not self.cursor_priority_queue:
+            self._initialize_cursor_priority_queue()
+            
+        # 80%概率使用优先级队列
+        temp_queue = self.cursor_priority_queue.copy()
         
-        if not valid_cursors:
-            self.logger.info("没有有效的游标，使用空游标从头开始")
-            return ""
+        while temp_queue:
+            _, cursor = heapq.heappop(temp_queue)
+            
+            # 检查是否还需要扫描该游标
+            if not self._is_cursor_expired(cursor):
+                # 将游标重新放回主队列，但调整优先级
+                if cursor in self.cursor_history:
+                    new_score = self._calculate_cursor_score(cursor, self.cursor_history.get(cursor, {})) * 0.8
+                    for i, (score, c) in enumerate(self.cursor_priority_queue):
+                        if c == cursor:
+                            # 更新分数
+                            self.cursor_priority_queue[i] = (-new_score, cursor)
+                            # 重建堆
+                            heapq.heapify(self.cursor_priority_queue)
+                            break
+                            
+                self.logger.debug(f"游标 {cursor[:30]}... 未过期，跳过")
+                continue
+                
+            self.logger.info(f"优先级队列选择游标: {cursor[:30] if cursor else '无'}")
+            return cursor
         
-        # 按照成功获取商品数量排序，选择最有可能获取新商品的游标
-        sorted_cursors = sorted(
-            valid_cursors.items(),
-            key=lambda x: x[1].get('success_count', 0),
-            reverse=True
-        )
-        
-        # 选择历史上成功率最高的游标
-        selected_cursor = sorted_cursors[0][0]
-        self.logger.info(f"选择游标: {selected_cursor[:30]}... (历史成功获取商品数: {sorted_cursors[0][1].get('success_count', 0)})")
-        return selected_cursor
+        # 如果队列为空或所有游标都未过期，从头开始
+        self.logger.info("没有可用的游标，使用空游标从头开始")
+        return ""
     
     def _update_cursor_history(self, cursor: str, asins: List[str], success_count: int) -> None:
         """更新游标历史信息
@@ -196,16 +304,49 @@ class CJProductsCrawler:
             self.cursor_history[cursor] = {
                 'asins': [],
                 'last_used': now,
-                'success_count': 0
+                'success_count': 0,
+                'scan_count': 0,
+                'success_rate': 0.0
             }
         
         # 更新游标信息
-        self.cursor_history[cursor]['asins'].extend(asins)
+        existing_asins = set(self.cursor_history[cursor].get('asins', []))
+        new_asins = [asin for asin in asins if asin not in existing_asins]
+        
+        # 合并ASIN列表（去重）
+        updated_asins = list(existing_asins.union(new_asins))
+        
+        # 更新字段
+        self.cursor_history[cursor]['asins'] = updated_asins
         self.cursor_history[cursor]['last_used'] = now
         self.cursor_history[cursor]['success_count'] += success_count
         
+        # 增加扫描计数
+        scan_count = self.cursor_history[cursor].get('scan_count', 0) + 1
+        self.cursor_history[cursor]['scan_count'] = scan_count
+        
+        # 计算成功率
+        total_success = self.cursor_history[cursor]['success_count']
+        self.cursor_history[cursor]['success_rate'] = total_success / max(1, scan_count)
+        
         # 保存更新后的历史
         self._save_cursor_history()
+        
+        # 更新优先级队列
+        score = self._calculate_cursor_score(cursor, self.cursor_history[cursor])
+        
+        # 在队列中查找并更新现有项，或添加新项
+        cursor_in_queue = False
+        for i, (_, c) in enumerate(self.cursor_priority_queue):
+            if c == cursor:
+                self.cursor_priority_queue[i] = (-score, cursor)
+                cursor_in_queue = True
+                # 重建堆
+                heapq.heapify(self.cursor_priority_queue)
+                break
+                
+        if not cursor_in_queue:
+            heapq.heappush(self.cursor_priority_queue, (-score, cursor))
     
     @log_function_call
     async def _generate_and_set_promo_link(self, product_info: ProductInfo) -> None:
@@ -1099,6 +1240,153 @@ class CJProductsCrawler:
             self.logger.success(f"批量获取完成，成功: {total_success}，失败: {total_fail}，优惠券: {total_coupon}，折扣: {total_discount}，变体: {total_variants}")
             return total_success, total_fail, total_variants, total_coupon, total_discount
 
+    @log_function_call
+    async def fetch_all_products_parallel(
+        self,
+        db: Session,
+        max_items: int = 1000,
+        max_workers: int = 3,  # 并行工作数
+        skip_existing: bool = True,
+        filter_similar_variants: bool = True,
+        **kwargs
+    ) -> Tuple[int, int, int, int, int]:
+        """并行抓取商品数据
+        
+        Args:
+            db: 数据库会话
+            max_items: 最大获取商品数量
+            max_workers: 并行工作进程数量
+            skip_existing: 是否跳过已存在的商品
+            filter_similar_variants: 是否过滤优惠相同的变体
+            **kwargs: 传递给fetch_all_products的参数
+            
+        Returns:
+            Tuple: (成功数, 失败数, 变体数, 优惠券商品数, 折扣商品数)
+        """
+        with LogContext(max_items=max_items, max_workers=max_workers):
+            self.logger.info(f"开始并行抓取商品，最大数量: {max_items}，工作进程数: {max_workers}")
+            
+            # 创建共享计数器
+            total_success = 0
+            total_fail = 0
+            total_variants = 0
+            total_coupon = 0
+            total_discount = 0
+            
+            # 共享计数器锁
+            success_counter_lock = asyncio.Lock()
+            
+            # 每个工作进程处理的商品数
+            items_per_worker = max(10, max_items // max_workers)
+            
+            # 定义工作进程函数
+            async def worker(worker_id):
+                nonlocal total_success, total_fail, total_variants, total_coupon, total_discount
+                
+                # 为这个工作进程选择游标
+                cursor = self._select_cursor()
+                self.logger.info(f"工作进程 {worker_id} 使用游标: {cursor[:30] if cursor else '空'}")
+                
+                # 为这个工作进程设置单独的数据库会话
+                from models.database import SessionLocal
+                worker_db = SessionLocal()
+                
+                try:
+                    # 调用现有的抓取方法
+                    success, fail, variants, coupon, discount = await self.fetch_all_products(
+                        db=worker_db,
+                        max_items=items_per_worker,
+                        cursor=cursor,
+                        skip_existing=skip_existing,
+                        filter_similar_variants=filter_similar_variants,
+                        **kwargs
+                    )
+                    
+                    # 获取锁，更新共享计数器
+                    async with success_counter_lock:
+                        total_success += success
+                        total_fail += fail
+                        total_variants += variants
+                        total_coupon += coupon
+                        total_discount += discount
+                        
+                    self.logger.success(f"工作进程 {worker_id} 完成，成功: {success}，失败: {fail}")
+                    
+                except Exception as e:
+                    self.logger.error(f"工作进程 {worker_id} 出错: {str(e)}")
+                finally:
+                    # 关闭工作进程的数据库会话
+                    worker_db.close()
+            
+            # 创建并运行所有工作进程
+            tasks = [worker(i) for i in range(max_workers)]
+            await asyncio.gather(*tasks)
+            
+            self.logger.success(f"并行抓取完成，总计: 成功={total_success}，失败={total_fail}，" 
+                              f"优惠券={total_coupon}，折扣={total_discount}，变体={total_variants}")
+                              
+            return total_success, total_fail, total_variants, total_coupon, total_discount
+
+    def _partition_cursors(self) -> Dict[str, List[str]]:
+        """将游标按类别分区
+        
+        Returns:
+            Dict[str, List[str]]: 按类别分组的游标字典
+        """
+        cursor_history = self.cursor_history
+        partitions = {}
+        
+        for cursor in cursor_history:
+            # 提取类别标识（假设游标格式包含类别信息）
+            category = self._extract_category_from_cursor(cursor)
+            if category not in partitions:
+                partitions[category] = []
+            
+            partitions[category].append(cursor)
+        
+        # 记录分区情况
+        for category, cursors in partitions.items():
+            self.logger.debug(f"游标分区 '{category}': {len(cursors)} 个游标")
+            
+        return partitions
+    
+    def _extract_category_from_cursor(self, cursor: str) -> str:
+        """从游标中提取类别信息
+        
+        Args:
+            cursor: 游标字符串
+            
+        Returns:
+            str: 提取的类别标识符
+        """
+        # 示例实现，实际根据游标格式调整
+        # 尝试提取可能的类别标识
+        if not cursor:
+            return "default"
+            
+        # 尝试使用 "=" 分割提取参数
+        if "=" in cursor:
+            # 检查是否包含category参数
+            parts = cursor.split("&")
+            for part in parts:
+                if part.startswith("category="):
+                    category = part.split("=")[1]
+                    return category
+                if part.startswith("subcategory="):
+                    subcategory = part.split("=")[1]
+                    return subcategory
+        
+        # 尝试将游标按"-"分割
+        parts = cursor.split("-")
+        if len(parts) > 1:
+            return parts[0]
+            
+        # 退化情况：直接使用游标的前10个字符作为标识
+        if len(cursor) > 10:
+            return cursor[:10]
+            
+        return "default"
+
 @log_function_call
 async def main():
     """命令行入口函数"""
@@ -1116,6 +1404,8 @@ async def main():
     parser.add_argument('--random-cursor', action='store_true', help='使用随机游标策略')
     parser.add_argument('--no-skip-existing', action='store_true', help='不跳过已存在的商品')
     parser.add_argument('--no-filter-variants', action='store_true', help='不过滤优惠相同的变体商品')
+    parser.add_argument('--parallel', action='store_true', help='启用并行抓取')
+    parser.add_argument('--workers', type=int, default=3, help='并行工作进程数量')
     
     args = parser.parse_args()
     
@@ -1130,12 +1420,15 @@ async def main():
         debug=args.debug,
         random_cursor=args.random_cursor,
         skip_existing=not args.no_skip_existing,
-        filter_variants=not args.no_filter_variants
+        filter_variants=not args.no_filter_variants,
+        parallel=args.parallel,
+        workers=args.workers
     ):
         logger.info(f"启动CJ商品爬虫: 类别={args.category or '全部'}, 子类别={args.subcategory or '全部'}, "
                    f"最大数量={args.limit}, 优惠券筛选={args.have_coupon}, 最低折扣={args.min_discount}, "
                    f"随机游标={args.random_cursor}, 跳过已存在={not args.no_skip_existing}, "
-                   f"过滤相似变体={not args.no_filter_variants}")
+                   f"过滤相似变体={not args.no_filter_variants}, 并行抓取={args.parallel}, "
+                   f"工作进程数={args.workers if args.parallel else 1}")
         
         # 创建爬虫实例
         crawler = CJProductsCrawler()
@@ -1145,20 +1438,35 @@ async def main():
         db = SessionLocal()
         
         try:
-            # 获取所有商品
-            success, fail, variants, coupon, discount = await crawler.fetch_all_products(
-                db=db,
-                max_items=args.limit,
-                category=args.category,
-                subcategory=args.subcategory,
-                have_coupon=args.have_coupon,
-                discount_min=args.min_discount,
-                save_variants=args.save_variants,
-                use_random_cursor=args.random_cursor,
-                skip_existing=not args.no_skip_existing,
-                use_persistent_cursor=True,
-                filter_similar_variants=not args.no_filter_variants
-            )
+            if args.parallel:
+                # 使用并行抓取
+                success, fail, variants, coupon, discount = await crawler.fetch_all_products_parallel(
+                    db=db,
+                    max_items=args.limit,
+                    max_workers=args.workers,
+                    category=args.category,
+                    subcategory=args.subcategory,
+                    have_coupon=args.have_coupon,
+                    discount_min=args.min_discount,
+                    save_variants=args.save_variants,
+                    skip_existing=not args.no_skip_existing,
+                    filter_similar_variants=not args.no_filter_variants
+                )
+            else:
+                # 使用常规抓取
+                success, fail, variants, coupon, discount = await crawler.fetch_all_products(
+                    db=db,
+                    max_items=args.limit,
+                    category=args.category,
+                    subcategory=args.subcategory,
+                    have_coupon=args.have_coupon,
+                    discount_min=args.min_discount,
+                    save_variants=args.save_variants,
+                    use_random_cursor=args.random_cursor,
+                    skip_existing=not args.no_skip_existing,
+                    use_persistent_cursor=True,
+                    filter_similar_variants=not args.no_filter_variants
+                )
             
             # 输出结果
             result_msg = f"爬取完成，成功: {success}, 失败: {fail}, 优惠券: {coupon}, 折扣: {discount}, 变体关系: {variants}"

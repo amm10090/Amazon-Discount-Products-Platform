@@ -299,7 +299,8 @@ class LogConfig:
                 encoding="utf-8",
                 backtrace=True,
                 diagnose=True,
-                catch=True
+                catch=True,
+                colorize=False  # 明确禁用颜色代码，避免日志文件中出现ANSI转义序列
             )
         else:
             handler_id = logger.add(
@@ -312,7 +313,8 @@ class LogConfig:
                 encoding="utf-8",
                 backtrace=True,
                 diagnose=True,
-                catch=True
+                catch=True,
+                colorize=False  # 明确禁用颜色代码，避免日志文件中出现ANSI转义序列
             )
         LogConfig._handler_ids.append(handler_id)
         
@@ -329,6 +331,7 @@ class LogConfig:
             backtrace=True,
             diagnose=True,
             catch=True,
+            colorize=False,  # 明确禁用颜色代码，避免日志文件中出现ANSI转义序列
             filter=lambda record: record["level"].name == "ERROR"
         )
         LogConfig._handler_ids.append(handler_id)

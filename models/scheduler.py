@@ -361,86 +361,166 @@ class SchedulerManager:
 
     @staticmethod
     def _execute_job(job_id: str, crawler_type: str, max_items: int, config_params: Optional[Dict[str, Any]] = None):
-        """执行任务"""
-        import asyncio
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from src.core.product_updater import TaskLogContext
+        """执行任务（使用独立进程）"""
+        import subprocess
+        import sys
+        import json
+        import tempfile
+        import os
+        from pathlib import Path
         
         try:
-            with TaskLogContext(task_id=job_id) as task_log:
-                task_log.info(f"开始执行任务，类型：{crawler_type}，目标数量：{max_items}")
-                if config_params:
-                    # 记录配置参数信息
-                    if "updater_config" in config_params:
-                        task_log.info(f"使用自定义更新器配置: {config_params['updater_config']}")
-                    if "discount_config" in config_params:
-                        task_log.info(f"使用自定义折扣爬虫配置: {config_params['discount_config']}")
+            # 创建日志上下文
+            project_root = Path(__file__).parent.parent
+            log_dir = Path(os.getenv("APP_LOG_DIR", str(project_root / "logs"))).resolve()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"准备在独立进程中执行任务 {job_id}，类型：{crawler_type}")
+            
+            # 创建临时文件来存储配置参数
+            config_file = None
+            if config_params:
+                config_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False)
+                json.dump(config_params, config_file)
+                config_file.close()
+                logger.info(f"配置参数已写入临时文件: {config_file.name}")
+            
+            # 根据爬虫类型准备命令
+            cmd = [sys.executable]
+            
+            if crawler_type == "discount":
+                # 直接调用折扣爬虫脚本
+                cmd.extend(["-m", "src.core.discount_scraper_mt", 
+                           "--batch-size", str(max_items)])
                 
-                # 优先使用环境变量中的数据库路径
-                if "SCHEDULER_DB_PATH" in os.environ:
-                    db_file = os.environ["SCHEDULER_DB_PATH"]
-                    db_path = f"sqlite:///{db_file}"
-                else:
-                    # 默认路径
-                    data_dir = Path(__file__).parent.parent / "data" / "db"
-                    data_dir.mkdir(parents=True, exist_ok=True)
-                    db_path = f"sqlite:///{data_dir}/scheduler.db"
+                # 添加配置参数
+                if config_params and "discount_config" in config_params:
+                    dc = config_params["discount_config"]
+                    if "num_threads" in dc:
+                        cmd.extend(["--threads", str(dc["num_threads"])])
+                    if "force_update" in dc and dc["force_update"]:
+                        cmd.append("--force-update")
+                    if "headless" in dc and not dc["headless"]:
+                        cmd.append("--no-headless")
+                    if "min_delay" in dc:
+                        cmd.extend(["--min-delay", str(dc["min_delay"])])
+                    if "max_delay" in dc:
+                        cmd.extend(["--max-delay", str(dc["max_delay"])])
+                    if "update_interval" in dc:
+                        cmd.extend(["--update-interval", str(dc["update_interval"])])
+                    if "debug" in dc and dc["debug"]:
+                        cmd.append("--debug")
+                    if "log_to_console" in dc and dc["log_to_console"]:
+                        cmd.append("--log-to-console")
+            else:
+                # 对于其他爬虫类型，调用通用爬虫执行脚本
+                cmd.extend(["-m", "src.core.run_crawler", 
+                           "--job-id", job_id,
+                           "--crawler-type", crawler_type,
+                           "--max-items", str(max_items)])
+                           
+                # 如果有配置文件，添加配置文件参数
+                if config_file:
+                    cmd.extend(["--config-file", config_file.name])
+            
+            # 创建日志文件
+            log_file = log_dir / f"task_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            
+            logger.info(f"启动独立进程执行任务: {' '.join(cmd)}")
+            
+            # 创建数据库引擎和会话
+            engine = create_engine(f"sqlite:///{project_root}/data/db/scheduler.db")
+            Base.metadata.create_all(engine)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            
+            # 创建历史记录
+            history = JobHistoryModel(
+                job_id=job_id,
+                start_time=datetime.now(),
+                status='running'
+            )
+            session.add(history)
+            session.commit()
+            
+            # 启动进程，将输出重定向到日志文件
+            with open(log_file, 'w', encoding='utf-8') as f:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    env=os.environ.copy()
+                )
+            
+            logger.info(f"任务 {job_id} a已在独立进程中启动，进程ID: {process.pid}，日志文件: {log_file}")
+            
+            # 等待进程完成
+            returncode = process.wait()
+            
+            # 更新历史记录状态
+            if returncode == 0:
+                # 尝试从日志文件中提取处理的商品数量
+                items_collected = 0
+                try:
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        log_content = f.read()
+                        import re
+                        # 尝试匹配"处理商品数: X"或"成功: X"等模式
+                        matches = re.findall(r'成功[:：]\s*(\d+)', log_content)
+                        if matches:
+                            items_collected = int(matches[-1])
+                        else:
+                            matches = re.findall(r'处理商品数[:：]\s*(\d+)', log_content)
+                            if matches:
+                                items_collected = int(matches[-1])
+                except Exception as e:
+                    logger.error(f"从日志文件中提取处理商品数量失败: {str(e)}")
                 
-                task_log.info(f"使用数据库路径: {db_path}")
+                history.end_time = datetime.now()
+                history.status = 'completed'
+                history.items_collected = items_collected
+                history.error = f"任务已完成，日志文件: {log_file}"
+                session.commit()
+                logger.info(f"任务 {job_id} 已完成，处理商品数量: {items_collected}")
+            else:
+                history.end_time = datetime.now()
+                history.status = 'failed'
+                history.error = f"任务执行失败，退出代码: {returncode}，日志文件: {log_file}"
+                session.commit()
+                logger.error(f"任务 {job_id} 执行失败，退出代码: {returncode}")
+            
+            session.close()
+            
+            # 清理临时文件
+            if config_file and os.path.exists(config_file.name):
+                try:
+                    os.unlink(config_file.name)
+                except:
+                    pass
                 
-                # 创建数据库引擎和会话
-                engine = create_engine(db_path)
-                Base.metadata.create_all(engine)  # 确保表已创建
+        except Exception as e:
+            logger.error(f"执行任务 {job_id} 出错: {str(e)}")
+            import traceback
+            logger.error(f"错误详情: {traceback.format_exc()}")
+            
+            # 更新任务状态为失败
+            try:
+                engine = create_engine(f"sqlite:///{project_root}/data/db/scheduler.db")
                 Session = sessionmaker(bind=engine)
                 session = Session()
                 
-                # 创建历史记录
                 history = JobHistoryModel(
                     job_id=job_id,
                     start_time=datetime.now(),
-                    status='running'
+                    end_time=datetime.now(),
+                    status='failed',
+                    error=str(e)
                 )
                 session.add(history)
                 session.commit()
-                
-                try:
-                    task_log.info("开始执行爬虫")
-                    
-                    # 创建新的事件循环来运行异步任务
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    # 执行爬虫任务，传递配置参数
-                    items_collected = loop.run_until_complete(
-                        SchedulerManager._crawl_products(crawler_type, max_items, config_params)
-                    )
-                    
-                    task_log.success(f"执行完成，采集到 {items_collected} 个商品")
-                    
-                    # 更新历史记录
-                    history.end_time = datetime.now()
-                    history.status = 'completed'
-                    history.items_collected = items_collected
-                    session.commit()
-                    
-                    # 关闭事件循环
-                    loop.close()
-                    
-                except Exception as e:
-                    task_log.error(f"执行失败: {str(e)}")
-                    history.end_time = datetime.now()
-                    history.status = 'failed'
-                    history.error = str(e)
-                    session.commit()
-                    raise
-                
-                finally:
-                    session.close()
-                    
-        except Exception as e:
-            logger.error(f"任务 {job_id} 执行过程中发生错误: {str(e)}")
-            raise
+                session.close()
+            except Exception as db_error:
+                logger.error(f"更新任务状态失败: {str(db_error)}")
 
     def add_job(self, job_config: Dict[str, Any]):
         """添加新任务"""
@@ -737,17 +817,91 @@ class SchedulerManager:
             
             self._logger.info(f"开始执行任务 {job_id}，类型：{crawler_type}，目标数量：{max_items}")
             
-            # 在后台执行任务
-            import threading
             # 检查是否有额外配置参数
             config_params = job.args[3] if len(job.args) > 3 else None
-            thread = threading.Thread(
-                target=self._execute_job,
-                args=[job_id, crawler_type, max_items, config_params]
-            )
-            thread.start()
             
-            self._logger.info(f"任务 {job_id} 已在后台开始执行")
+            # 使用独立进程而不是线程来执行任务
+            import subprocess
+            import sys
+            import json
+            import tempfile
+            import os
+            
+            # 创建临时文件来存储配置参数
+            config_file = None
+            if config_params:
+                config_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False)
+                json.dump(config_params, config_file)
+                config_file.close()
+                self._logger.info(f"配置参数已写入临时文件: {config_file.name}")
+            
+            # 根据爬虫类型准备命令
+            cmd = [sys.executable]
+            
+            if crawler_type == "discount":
+                # 直接调用折扣爬虫脚本
+                cmd.extend(["-m", "src.core.discount_scraper_mt", 
+                           "--batch-size", str(max_items)])
+                
+                # 添加配置参数
+                if config_params and "discount_config" in config_params:
+                    dc = config_params["discount_config"]
+                    if "num_threads" in dc:
+                        cmd.extend(["--threads", str(dc["num_threads"])])
+                    if "force_update" in dc and dc["force_update"]:
+                        cmd.append("--force-update")
+                    if "headless" in dc and not dc["headless"]:
+                        cmd.append("--no-headless")
+                    if "min_delay" in dc:
+                        cmd.extend(["--min-delay", str(dc["min_delay"])])
+                    if "max_delay" in dc:
+                        cmd.extend(["--max-delay", str(dc["max_delay"])])
+                    if "update_interval" in dc:
+                        cmd.extend(["--update-interval", str(dc["update_interval"])])
+                    if "debug" in dc and dc["debug"]:
+                        cmd.append("--debug")
+                    if "log_to_console" in dc and dc["log_to_console"]:
+                        cmd.append("--log-to-console")
+            else:
+                # 对于其他爬虫类型，调用通用爬虫执行脚本
+                cmd.extend(["-m", "src.core.run_crawler", 
+                           "--job-id", job_id,
+                           "--crawler-type", crawler_type,
+                           "--max-items", str(max_items)])
+                           
+                # 如果有配置文件，添加配置文件参数
+                if config_file:
+                    cmd.extend(["--config-file", config_file.name])
+            
+            # 启动独立进程
+            self._logger.info(f"启动独立进程执行任务: {' '.join(cmd)}")
+            
+            # 创建日志文件路径
+            log_dir = Path(os.getenv("APP_LOG_DIR", str(Path(project_root) / "logs"))).resolve()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"task_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            
+            # 启动进程，将输出重定向到日志文件
+            with open(log_file, 'w', encoding='utf-8') as f:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    env=os.environ.copy()
+                )
+            
+            self._logger.info(f"任务 {job_id} 已在独立进程中启动，进程ID: {process.pid}，日志文件: {log_file}")
+            
+            # 记录任务启动状态
+            with self.Session() as session:
+                history = JobHistoryModel(
+                    job_id=job_id,
+                    start_time=datetime.now(),
+                    status='running',
+                    error=f"任务已启动，进程ID: {process.pid}，日志文件: {log_file}"
+                )
+                session.add(history)
+                session.commit()
             
         except Exception as e:
             self._logger.error(f"立即执行任务 {job_id} 失败: {str(e)}")

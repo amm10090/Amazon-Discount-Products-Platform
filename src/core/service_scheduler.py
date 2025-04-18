@@ -208,6 +208,13 @@ class SchedulerManager:
             if crawler_type == "update":
                 # 执行商品更新任务
                 updater = ProductUpdater()
+                
+                # 确保使用前端设置的商品更新数量
+                if config_params and "batch_size" in config_params:
+                    logger.info(f"配置中的batch_size为: {config_params['batch_size']}, 但将使用前端设置的数量: {max_items}")
+                    # 修改配置中的batch_size为前端传入的值
+                    config_params["batch_size"] = max_items
+                
                 success_count, failed_count, deleted_count = await updater.run_scheduled_update(batch_size=max_items)
                 result = success_count
                 logger.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
@@ -259,14 +266,34 @@ class SchedulerManager:
                 try:
                     # 创建CJ爬虫实例
                     crawler = CJProductsCrawler()
-                    # 执行CJ爬虫
-                    success, fail, variants, coupon, discount = await crawler.fetch_all_products(
-                        db=db,
-                        max_items=max_items,
-                        use_random_cursor=False,
-                        skip_existing=False,
-                        use_persistent_cursor=True  # 使用持久化游标功能
-                    )
+                    
+                    # 检查配置参数
+                    use_parallel = config_params.get("use_parallel", True) if config_params else True
+                    workers = config_params.get("workers", 3) if config_params else 3
+                    use_random_cursor = config_params.get("use_random_cursor", False) if config_params else False
+                    skip_existing = config_params.get("skip_existing", True) if config_params else True
+                    
+                    if use_parallel:
+                        # 使用并行抓取
+                        logger.info(f"使用并行抓取模式，工作进程数: {workers}")
+                        success, fail, variants, coupon, discount = await crawler.fetch_all_products_parallel(
+                            db=db,
+                            max_items=max_items,
+                            max_workers=workers,
+                            skip_existing=skip_existing,
+                            filter_similar_variants=True
+                        )
+                    else:
+                        # 使用串行抓取
+                        logger.info("使用串行抓取模式")
+                        success, fail, variants, coupon, discount = await crawler.fetch_all_products(
+                            db=db,
+                            max_items=max_items,
+                            use_random_cursor=use_random_cursor,
+                            skip_existing=skip_existing,
+                            use_persistent_cursor=True
+                        )
+                        
                     logger.success(f"CJ商品爬取完成，成功：{success}，失败：{fail}，优惠券：{coupon}，折扣：{discount}，变体：{variants}")
                     result = success
                 finally:
@@ -355,10 +382,18 @@ class SchedulerManager:
             job_config: 任务配置字典，包含任务ID、类型、执行计划等
             
         Raises:
-            ValueError: 不支持的任务类型
+            ValueError: 不支持的任务类型或无效的任务ID
         """
-        job_id = job_config["id"]
+        # 检查任务ID是否有效
+        job_id = job_config.get("id")
+        if not job_id or not isinstance(job_id, str) or job_id.strip() == "":
+            logger.error(f"添加任务失败: 任务ID不能为空")
+            raise ValueError("任务ID不能为空")
+            
+        job_id = job_id.strip()  # 去除可能的前后空格
         job_type = job_config["type"]
+        
+        logger.info(f"正在添加任务: {job_id}，类型: {job_type}")
         
         # 创建触发器
         if job_type == "cron":
@@ -374,7 +409,9 @@ class SchedulerManager:
                 timezone=self.config['scheduler']['timezone']
             )
         else:
-            raise ValueError(f"不支持的任务类型: {job_type}")
+            error_msg = f"不支持的任务类型: {job_type}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
             
         # 准备任务参数
         args = [
@@ -394,17 +431,24 @@ class SchedulerManager:
         if config_params:
             args.append(config_params)
             logger.info(f"任务 {job_id} 添加了自定义配置参数: {config_params}")
+        else:
+            logger.info(f"任务 {job_id} 使用默认配置")
             
-        # 添加任务，使用静态方法
-        self.scheduler.add_job(
-            SchedulerManager._execute_crawler,
-            trigger=trigger,
-            id=job_id,
-            args=args,
-            replace_existing=True
-        )
-        
-        logger.info(f"已添加任务: {job_id}")
+        try:
+            # 添加任务，使用静态方法
+            self.scheduler.add_job(
+                SchedulerManager._execute_crawler,
+                trigger=trigger,
+                id=job_id,
+                args=args,
+                replace_existing=True
+            )
+            
+            logger.info(f"成功添加任务: {job_id}")
+            return True
+        except Exception as e:
+            logger.error(f"添加任务 {job_id} 失败: {str(e)}", exc_info=True)
+            raise
 
     def execute_job_now(self, job_id: str):
         """立即执行任务
@@ -519,6 +563,7 @@ class SchedulerManager:
             task_log.error(f"任务执行出错: {str(e)}")
             import traceback
             task_log.error(f"错误详情: {traceback.format_exc()}")
+            raise
 
     def start(self):
         """启动调度器
