@@ -125,6 +125,8 @@ GET /api/products/list
 | binding | 字符串 | 绑定类型 |
 | is_coupon | 布尔值 | 是否有优惠券 |
 | coupon_info | 对象/null | 优惠券信息 |
+| coupon_expiration_date | 字符串/null | 优惠券过期日期(ISO格式) |
+| coupon_terms | 字符串/null | 优惠券使用条款说明 |
 | created_at | 字符串 | 创建时间(ISO格式) |
 | updated_at | 字符串 | 更新时间(ISO格式) |
 | source | 字符串 | 数据来源 |

@@ -59,6 +59,8 @@ class ProductInfo(BaseModel):
     cj_url: Optional[str] = None  # CJ推广链接
     api_provider: Optional[str] = "pa-api"  # API提供者，默认为pa-api
     raw_data: Optional[Dict] = None  # 原始数据，用于存储元数据
+    coupon_expiration_date: Optional[datetime] = None  # 优惠券过期日期
+    coupon_terms: Optional[str] = None  # 优惠券条款
     
     class Config:
         json_encoders = {
@@ -69,6 +71,10 @@ class ProductInfo(BaseModel):
         """重写dict方法以支持datetime序列化和raw_data的JSON序列化"""
         d = super().dict(*args, **kwargs)
         d['timestamp'] = self.timestamp.isoformat()
+        
+        # 处理coupon_expiration_date的序列化
+        if 'coupon_expiration_date' in d and d['coupon_expiration_date'] is not None:
+            d['coupon_expiration_date'] = d['coupon_expiration_date'].isoformat()
         
         # 处理raw_data的序列化
         if 'raw_data' in d and d['raw_data'] is not None:
@@ -93,5 +99,7 @@ class ProductInfo(BaseModel):
             "main_image": self.main_image,
             "offers": [offer.dict() for offer in self.offers],
             "timestamp": self.timestamp.isoformat(),
-            "cj_url": self.cj_url
+            "cj_url": self.cj_url,
+            "coupon_expiration_date": self.coupon_expiration_date.isoformat() if self.coupon_expiration_date else None,
+            "coupon_terms": self.coupon_terms
         } 

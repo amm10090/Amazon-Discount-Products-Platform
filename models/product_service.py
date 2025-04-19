@@ -162,6 +162,11 @@ class ProductService:
             # 获取商品的所有优惠信息
             offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
             print(f"Debug - 商品 {product.asin} 有 {len(offers)} 个优惠")
+            
+            # 获取最新的优惠券历史记录
+            latest_coupon = db.query(CouponHistory).filter(
+                CouponHistory.product_id == product.asin
+            ).order_by(CouponHistory.created_at.desc()).first()
                 
             return ProductInfo(
                 asin=product.asin,
@@ -186,7 +191,10 @@ class ProductService:
                         coupon_type=o.coupon_type if hasattr(o, 'coupon_type') else None,
                         coupon_value=o.coupon_value if hasattr(o, 'coupon_value') else None
                     ) for o in offers
-                ]
+                ],
+                # 添加优惠券过期日期和条款
+                coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                coupon_terms=latest_coupon.terms if latest_coupon else None
             )
         except Exception as e:
             print(f"Debug - 获取商品 {asin} 详情时出错: {str(e)}")
@@ -328,41 +336,36 @@ class ProductService:
         """获取单个商品的详细信息(内部方法)"""
         try:
             product = db.query(Product).filter(Product.asin == asin).first()
-            
             if not product:
                 return None
+            
+            # 解析JSON字符串
+            categories = json.loads(product.categories) if product.categories else []
+            browse_nodes = json.loads(product.browse_nodes) if product.browse_nodes else []
+            features = json.loads(product.features) if product.features else []
+            
+            # 确保解析后的数据是列表类型
+            if not isinstance(categories, list):
+                categories = []
+            if not isinstance(browse_nodes, list):
+                browse_nodes = []
+            if not isinstance(features, list):
+                features = []
+            
+            # 如果提供了include_browse_nodes参数，进行筛选
+            if include_browse_nodes:
+                browse_nodes = [
+                    node for node in browse_nodes 
+                    if node.get('id') in include_browse_nodes
+                ]
             
             # 获取商品的优惠信息
             offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
             
-            # 解析JSON字符串
-            categories = []
-            browse_nodes = []
-            features = []
-            
-            if product.categories:
-                try:
-                    categories = json.loads(product.categories)
-                except:
-                    pass
-                    
-            if product.browse_nodes:
-                try:
-                    all_browse_nodes = json.loads(product.browse_nodes)
-                    
-                    # 如果提供了include_browse_nodes参数，进行筛选
-                    if include_browse_nodes:
-                        browse_nodes = [node for node in all_browse_nodes if node.get('id') in include_browse_nodes]
-                    else:
-                        browse_nodes = all_browse_nodes
-                except:
-                    pass
-            
-            if product.features:
-                try:
-                    features = json.loads(product.features)
-                except:
-                    pass
+            # 获取最新的优惠券历史记录
+            latest_coupon = db.query(CouponHistory).filter(
+                CouponHistory.product_id == product.asin
+            ).order_by(CouponHistory.created_at.desc()).first()
             
             # 构建商品信息对象
             product_info = ProductInfo(
@@ -396,7 +399,10 @@ class ProductService:
                         coupon_value=getattr(o, 'coupon_value', None),
                         commission=o.commission if product.api_provider == "cj-api" else None
                     ) for o in offers
-                ]
+                ],
+                # 添加优惠券过期日期和条款
+                coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                coupon_terms=latest_coupon.terms if latest_coupon else None
             )
             
             # 添加元数据（如果需要）
@@ -851,6 +857,11 @@ class ProductService:
                     
                     offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                     
+                    # 获取最新的优惠券历史记录
+                    latest_coupon = db.query(CouponHistory).filter(
+                        CouponHistory.product_id == product.asin
+                    ).order_by(CouponHistory.created_at.desc()).first()
+                    
                     product_info = ProductInfo(
                         asin=product.asin,
                         title=product.title,
@@ -882,7 +893,10 @@ class ProductService:
                                 coupon_value=getattr(offer, 'coupon_value', None),
                                 commission=offer.commission if product.api_provider == "cj-api" else None
                             ) for offer in offers
-                        ]
+                        ],
+                        # 添加优惠券过期日期和条款
+                        coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                        coupon_terms=latest_coupon.terms if latest_coupon else None
                     )
                     result.append(product_info)
                 except json.JSONDecodeError as e:
@@ -1254,6 +1268,11 @@ class ProductService:
                     
                     offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                     
+                    # 获取最新的优惠券历史记录，包含过期日期和条款
+                    latest_coupon = db.query(CouponHistory).filter(
+                        CouponHistory.product_id == product.asin
+                    ).order_by(CouponHistory.created_at.desc()).first()
+                    
                     product_info = ProductInfo(
                         asin=product.asin,
                         title=product.title,
@@ -1285,7 +1304,10 @@ class ProductService:
                                 coupon_value=getattr(offer, 'coupon_value', None),
                                 commission=offer.commission if product.api_provider == "cj-api" else None
                             ) for offer in offers
-                        ]
+                        ],
+                        # 添加优惠券过期日期和条款
+                        coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                        coupon_terms=latest_coupon.terms if latest_coupon else None
                     )
                     result.append(product_info)
                 except json.JSONDecodeError as e:
