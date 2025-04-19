@@ -62,6 +62,7 @@ class ProductInfo(BaseModel):
     raw_data: Optional[Dict] = None  # 原始数据，用于存储元数据
     coupon_expiration_date: Optional[datetime] = None  # 优惠券过期日期
     coupon_terms: Optional[str] = None  # 优惠券条款
+    coupon_history: Optional[Dict] = None  # 优惠券历史记录
     
     class Config:
         json_encoders = {
@@ -103,5 +104,6 @@ class ProductInfo(BaseModel):
             "cj_url": self.cj_url,
             "source": self.source,
             "coupon_expiration_date": self.coupon_expiration_date.isoformat() if self.coupon_expiration_date else None,
-            "coupon_terms": self.coupon_terms
+            "coupon_terms": self.coupon_terms,
+            "coupon_history": self.coupon_history
         } 

@@ -122,6 +122,9 @@ POST /api/products/query
 | features | 商品特性列表 |
 | cj_url | CJ推广链接(仅CJ商品) |
 | api_provider | 数据来源(pa-api/cj-api) |
+| source | 数据来源类型(bestseller/coupon/discount) |
+| coupon_expiration_date | 优惠券过期日期(仅优惠券商品) |
+| coupon_terms | 优惠券使用条款(仅优惠券商品) |
 
 ### 优惠信息字段说明
 

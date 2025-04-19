@@ -239,6 +239,35 @@ class ProductService:
                     offers_dict[offer.product_id] = []
                 offers_dict[offer.product_id].append(offer)
             
+            # 获取所有相关的优惠券历史记录
+            # 使用子查询获取每个商品的最新优惠券历史记录
+            latest_coupon_subquery = db.query(
+                CouponHistory.product_id,
+                func.max(CouponHistory.updated_at).label('max_updated_at')
+            ).filter(
+                CouponHistory.product_id.in_(asins)
+            ).group_by(CouponHistory.product_id).subquery()
+            
+            latest_coupons = db.query(CouponHistory).join(
+                latest_coupon_subquery,
+                and_(
+                    CouponHistory.product_id == latest_coupon_subquery.c.product_id,
+                    CouponHistory.updated_at == latest_coupon_subquery.c.max_updated_at
+                )
+            ).all()
+            
+            coupon_dict = {}
+            for coupon in latest_coupons:
+                coupon_dict[coupon.product_id] = {
+                    "id": coupon.id,
+                    "product_id": coupon.product_id,
+                    "coupon_type": coupon.coupon_type,
+                    "coupon_value": coupon.coupon_value,
+                    "expiration_date": coupon.expiration_date.isoformat() if coupon.expiration_date else None,
+                    "terms": coupon.terms,
+                    "updated_at": coupon.updated_at.isoformat() if coupon.updated_at else None
+                }
+            
             # 构建结果列表
             results = []
             for asin in asins:
@@ -271,6 +300,9 @@ class ProductService:
                     # 获取商品的优惠信息
                     product_offers = offers_dict.get(asin, [])
                     
+                    # 获取优惠券历史记录
+                    coupon_history = coupon_dict.get(asin)
+                    
                     # 构建商品信息对象
                     product_info = ProductInfo(
                         asin=product.asin,
@@ -286,6 +318,7 @@ class ProductService:
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
                         api_provider=product.api_provider,
+                        source=product.source,  # 添加数据来源字段
                         offers=[
                             ProductOffer(
                                 condition=o.condition or "New",
@@ -303,7 +336,11 @@ class ProductService:
                                 coupon_value=getattr(o, 'coupon_value', None),
                                 commission=o.commission if product.api_provider == "cj-api" else None
                             ) for o in product_offers
-                        ]
+                        ],
+                        # 添加优惠券过期日期、条款和历史记录
+                        coupon_expiration_date=coupon_history["expiration_date"] if coupon_history else None,
+                        coupon_terms=coupon_history["terms"] if coupon_history else None,
+                        coupon_history=coupon_history
                     )
                     
                     # 添加元数据（如果需要）
@@ -363,10 +400,23 @@ class ProductService:
             # 获取商品的优惠信息
             offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
             
-            # 获取最新的优惠券历史记录
+            # 获取最新的优惠券历史记录，改用updated_at排序
             latest_coupon = db.query(CouponHistory).filter(
                 CouponHistory.product_id == product.asin
-            ).order_by(CouponHistory.created_at.desc()).first()
+            ).order_by(CouponHistory.updated_at.desc()).first()
+            
+            # 转换优惠券对象为字典
+            coupon_history = None
+            if latest_coupon:
+                coupon_history = {
+                    "id": latest_coupon.id,
+                    "product_id": latest_coupon.product_id,
+                    "coupon_type": latest_coupon.coupon_type,
+                    "coupon_value": latest_coupon.coupon_value,
+                    "expiration_date": latest_coupon.expiration_date.isoformat() if latest_coupon.expiration_date else None,
+                    "terms": latest_coupon.terms,
+                    "updated_at": latest_coupon.updated_at.isoformat() if latest_coupon.updated_at else None
+                }
             
             # 构建商品信息对象
             product_info = ProductInfo(
@@ -404,7 +454,9 @@ class ProductService:
                 ],
                 # 添加优惠券过期日期和条款
                 coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
-                coupon_terms=latest_coupon.terms if latest_coupon else None
+                coupon_terms=latest_coupon.terms if latest_coupon else None,
+                # 添加完整的优惠券历史信息
+                coupon_history=coupon_history
             )
             
             # 添加元数据（如果需要）
@@ -1274,7 +1326,20 @@ class ProductService:
                     # 获取最新的优惠券历史记录，包含过期日期和条款
                     latest_coupon = db.query(CouponHistory).filter(
                         CouponHistory.product_id == product.asin
-                    ).order_by(CouponHistory.created_at.desc()).first()
+                    ).order_by(CouponHistory.updated_at.desc()).first()
+                    
+                    # 转换优惠券对象为字典
+                    coupon_history = None
+                    if latest_coupon:
+                        coupon_history = {
+                            "id": latest_coupon.id,
+                            "product_id": latest_coupon.product_id,
+                            "coupon_type": latest_coupon.coupon_type,
+                            "coupon_value": latest_coupon.coupon_value,
+                            "expiration_date": latest_coupon.expiration_date.isoformat() if latest_coupon.expiration_date else None,
+                            "terms": latest_coupon.terms,
+                            "updated_at": latest_coupon.updated_at.isoformat() if latest_coupon.updated_at else None
+                        }
                     
                     product_info = ProductInfo(
                         asin=product.asin,
@@ -1311,7 +1376,9 @@ class ProductService:
                         ],
                         # 添加优惠券过期日期和条款
                         coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
-                        coupon_terms=latest_coupon.terms if latest_coupon else None
+                        coupon_terms=latest_coupon.terms if latest_coupon else None,
+                        # 添加完整的优惠券历史信息
+                        coupon_history=coupon_history
                     )
                     result.append(product_info)
                 except json.JSONDecodeError as e:
@@ -1435,6 +1502,24 @@ class ProductService:
                     
                     offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                     
+                    # 获取最新的优惠券历史记录，使用updated_at排序
+                    latest_coupon = db.query(CouponHistory).filter(
+                        CouponHistory.product_id == product.asin
+                    ).order_by(CouponHistory.updated_at.desc()).first()
+                    
+                    # 转换优惠券对象为字典
+                    coupon_history = None
+                    if latest_coupon:
+                        coupon_history = {
+                            "id": latest_coupon.id,
+                            "product_id": latest_coupon.product_id,
+                            "coupon_type": latest_coupon.coupon_type,
+                            "coupon_value": latest_coupon.coupon_value,
+                            "expiration_date": latest_coupon.expiration_date.isoformat() if latest_coupon.expiration_date else None,
+                            "terms": latest_coupon.terms,
+                            "updated_at": latest_coupon.updated_at.isoformat() if latest_coupon.updated_at else None
+                        }
+                    
                     product_info = ProductInfo(
                         asin=product.asin,
                         title=product.title,
@@ -1467,7 +1552,12 @@ class ProductService:
                                 coupon_value=getattr(offer, 'coupon_value', None),
                                 commission=offer.commission if product.api_provider == "cj-api" else None
                             ) for offer in offers
-                        ]
+                        ],
+                        # 添加优惠券过期日期和条款
+                        coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                        coupon_terms=latest_coupon.terms if latest_coupon else None,
+                        # 添加完整的优惠券历史信息
+                        coupon_history=coupon_history
                     )
                     result.append(product_info)
                 except json.JSONDecodeError as e:
@@ -1811,6 +1901,13 @@ class ProductService:
                         # 获取商品的优惠信息
                         offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                         
+                        # 如果是优惠券商品，获取优惠券历史记录
+                        latest_coupon = None
+                        if product.source == "coupon":
+                            latest_coupon = db.query(CouponHistory).filter(
+                                CouponHistory.product_id == product.asin
+                            ).order_by(CouponHistory.updated_at.desc()).first()
+                        
                         # 转换为ProductOffer对象
                         product_offers = []
                         for offer in offers:
@@ -1842,7 +1939,6 @@ class ProductService:
                             url=product.url,
                             brand=product.brand,
                             main_image=product.main_image,
-                            offers=product_offers,
                             timestamp=product.timestamp or datetime.utcnow(),
                             binding=product.binding,
                             product_group=product.product_group,
@@ -1851,7 +1947,11 @@ class ProductService:
                             features=features,
                             cj_url=product.cj_url,
                             api_provider=product.api_provider,
-                            source=product.source  # 添加数据来源字段
+                            source=product.source,  # 添加数据来源字段
+                            offers=product_offers,
+                            # 只有优惠券商品才添加优惠券过期日期和条款
+                            coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                            coupon_terms=latest_coupon.terms if latest_coupon else None
                         )
                         
                         return {
@@ -1983,31 +2083,26 @@ class ProductService:
                     # 获取商品的优惠信息
                     offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
                     
-                    # 转换为ProductOffer对象
-                    product_offers = []
-                    for offer in offers:
-                        product_offers.append(
-                            ProductOffer(
-                                condition=offer.condition,
-                                price=offer.price,
-                                original_price=product.original_price,
-                                currency=offer.currency,
-                                savings=offer.savings,
-                                savings_percentage=offer.savings_percentage,
-                                is_prime=offer.is_prime,
-                                is_amazon_fulfilled=offer.is_amazon_fulfilled,
-                                is_free_shipping_eligible=offer.is_free_shipping_eligible,
-                                availability=offer.availability,
-                                merchant_name=offer.merchant_name,
-                                is_buybox_winner=offer.is_buybox_winner,
-                                deal_type=offer.deal_type,
-                                coupon_type=offer.coupon_type,
-                                coupon_value=offer.coupon_value,
-                                commission=offer.commission
-                            )
-                        )
+                    # 如果是优惠券商品，获取优惠券历史记录
+                    latest_coupon = None
+                    if product.source == "coupon":
+                        latest_coupon = db.query(CouponHistory).filter(
+                            CouponHistory.product_id == product.asin
+                        ).order_by(CouponHistory.updated_at.desc()).first()
                     
-                    # 创建ProductInfo对象
+                    # 转换优惠券对象为字典
+                    coupon_history = None
+                    if latest_coupon:
+                        coupon_history = {
+                            "id": latest_coupon.id,
+                            "product_id": latest_coupon.product_id,
+                            "coupon_type": latest_coupon.coupon_type,
+                            "coupon_value": latest_coupon.coupon_value,
+                            "expiration_date": latest_coupon.expiration_date.isoformat() if latest_coupon.expiration_date else None,
+                            "terms": latest_coupon.terms,
+                            "updated_at": latest_coupon.updated_at.isoformat() if latest_coupon.updated_at else None
+                        }
+                    
                     product_info = ProductInfo(
                         asin=product.asin,
                         title=product.title,
@@ -2023,7 +2118,29 @@ class ProductService:
                         cj_url=product.cj_url,
                         api_provider=product.api_provider,
                         source=product.source,  # 添加数据来源字段
-                        offers=product_offers
+                        offers=[
+                            ProductOffer(
+                                condition=offer.condition or "New",
+                                price=offer.price or 0.0,
+                                original_price=product.original_price,
+                                currency=offer.currency or "USD",
+                                savings=offer.savings,
+                                savings_percentage=offer.savings_percentage,
+                                is_prime=offer.is_prime or False,
+                                availability=offer.availability or "Available",
+                                merchant_name=offer.merchant_name or "Amazon",
+                                is_buybox_winner=offer.is_buybox_winner or False,
+                                deal_type=offer.deal_type,
+                                coupon_type=offer.coupon_type,
+                                coupon_value=offer.coupon_value,
+                                commission=offer.commission
+                            ) for offer in offers
+                        ],
+                        # 添加优惠券过期日期和条款
+                        coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
+                        coupon_terms=latest_coupon.terms if latest_coupon else None,
+                        # 添加完整的优惠券历史信息
+                        coupon_history=coupon_history
                     )
                     
                     result.append(product_info)
