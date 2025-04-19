@@ -54,12 +54,13 @@ def parse_arguments():
     return parser.parse_args()
 
 # 初始化Loguru日志配置
-def init_logger(log_level=None, log_to_console=False):
+def init_logger(log_level=None, log_to_console=False, file_use_colors=False):
     """初始化Loguru日志配置
     
     Args:
         log_level: 日志级别，可以是 DEBUG, INFO, WARNING, ERROR
         log_to_console: 是否同时输出到控制台
+        file_use_colors: 是否在文件日志中使用颜色，默认False
         
     Returns:
         logger: 配置好的logger实例
@@ -74,16 +75,43 @@ def init_logger(log_level=None, log_to_console=False):
     else:
         level = "INFO"
     
+    # 检查环境变量，判断是否应该禁用颜色
+    force_no_color = False
+    if (os.getenv("COLORTERM") == "0" or 
+        os.getenv("DISCOUNT_SCRAPER_LOG_COLOR_OUTPUT") == "false" or
+        os.getenv("LOG_COLORS") == "false" or
+        os.getenv("FORCE_COLOR") == "0" or
+        os.getenv("TERM") == "dumb"):
+        force_no_color = True
+        print("检测到环境变量设置，强制禁用日志颜色")
+        file_use_colors = False  # 确保文件不使用颜色
+    
     # 配置Loguru
     config = {
         "LOG_LEVEL": level,
         "JSON_LOGS": False,
         "LOG_PATH": str(log_dir),
-        "LOG_FILE": "coupon_scraper_mt.log",
+        "LOG_FILE": f"coupon_scraper_mt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
         "CONSOLE_LOGS": log_to_console,
         "ASYNC_LOGS": True,  # 启用异步日志记录提高性能
         "ROTATION": "10 MB",
-        "RETENTION": "5 days"
+        "RETENTION": "5 days",
+        # 控制台日志格式（彩色）
+        "CONSOLE_LOG_FORMAT": (
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{extra[name]}</cyan> | "
+            "<level>{message}</level>"
+        ),
+        # 文件日志格式（无颜色）
+        "FILE_LOG_FORMAT": (
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+            "{level: <8} | "
+            "{extra[name]} | "
+            "{message}"
+        ),
+        "COLORIZE_CONSOLE": not force_no_color,   # 根据环境变量决定是否使用颜色
+        "COLORIZE_FILE": file_use_colors      # 文件日志是否使用颜色，默认False
     }
     
     # 应用配置
@@ -91,7 +119,7 @@ def init_logger(log_level=None, log_to_console=False):
     
     # 返回当前模块的logger
     logger = get_logger("CouponScraperMT")
-    logger.debug(f"日志已初始化: 级别={level}, 控制台输出={log_to_console}")
+    logger.debug(f"日志已初始化: 级别={level}, 控制台输出={log_to_console}, 文件日志颜色={file_use_colors}, 强制禁用颜色={force_no_color}")
     return logger
 
 # 全局日志记录器
@@ -827,7 +855,7 @@ class CouponScraperMT:
     def __init__(self, num_threads: int = 4, batch_size: int = 50, headless: bool = True,
                  min_delay: float = 2.0, max_delay: float = 4.0, specific_asins: list = None,
                  debug: bool = False, verbose: bool = False, update_interval: int = 24,
-                 force_update: bool = False, log_to_console: bool = False):
+                 force_update: bool = False, log_to_console: bool = False, file_use_colors: bool = False):
         """
         初始化多线程抓取器
         
@@ -843,15 +871,55 @@ class CouponScraperMT:
             update_interval: 优惠券信息更新间隔(小时)，默认24小时
             force_update: 强制更新所有商品，忽略更新间隔
             log_to_console: 是否将日志输出到控制台
+            file_use_colors: 是否在文件日志中使用颜色，默认False
         """
+        # 检查环境变量，判断是否应该禁用颜色
+        force_no_color = False
+        if (os.getenv("COLORTERM") == "0" or 
+            os.getenv("DISCOUNT_SCRAPER_LOG_COLOR_OUTPUT") == "false" or
+            os.getenv("LOG_COLORS") == "false" or
+            os.getenv("FORCE_COLOR") == "0" or
+            os.getenv("TERM") == "dumb"):
+            force_no_color = True
+            file_use_colors = False  # 确保文件不使用颜色
+            # 只打印一次，避免重复输出
+            
         # 确保logger已初始化
         global logger
         if logger is None:
-            logger = init_logger(
-                log_level="DEBUG" if debug else "INFO",
-                log_to_console=log_to_console
-            )
-            logger.info("在CouponScraperMT实例化过程中初始化了logger")
+            print("检测到环境变量设置，强制禁用日志颜色") if force_no_color else None
+            log_level = "DEBUG" if debug else "INFO"
+            # 创建配置字典
+            log_config = {
+                "LOG_LEVEL": log_level,
+                "JSON_LOGS": False,
+                "LOG_PATH": str(Path(project_root) / os.getenv("APP_LOG_DIR", "logs")),
+                "LOG_FILE": f"coupon_scraper_mt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
+                "CONSOLE_LOGS": log_to_console,
+                "ASYNC_LOGS": True,
+                "ROTATION": "10 MB",
+                "RETENTION": "5 days",
+                "CONSOLE_LOG_FORMAT": (
+                    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+                    "<level>{level: <8}</level> | "
+                    "<cyan>{extra[name]}</cyan> | "
+                    "<level>{message}</level>"
+                ),
+                "FILE_LOG_FORMAT": (
+                    "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+                    "{level: <8} | "
+                    "{extra[name]} | "
+                    "{message}"
+                ),
+                "COLORIZE_CONSOLE": not force_no_color,   # 根据环境变量决定是否使用颜色
+                "COLORIZE_FILE": file_use_colors  # 文件日志是否使用颜色，默认False
+            }
+            
+            # 应用配置
+            LogConfig(log_config)
+            logger = get_logger("CouponScraperMT")
+            logger.info("在CouponScraperMT实例化过程中初始化了logger，级别: {}，控制台输出: {}，文件日志颜色: {}，强制禁用颜色: {}", 
+                       log_level, log_to_console, file_use_colors, force_no_color)
             
         self.num_threads = max(1, min(num_threads, 32))  # 限制线程数在1-32之间
         self.batch_size = batch_size
@@ -881,9 +949,9 @@ class CouponScraperMT:
         # 添加完整的配置日志
         logger.info(
             "CouponScraperMT配置详情: 线程数={}, 批大小={}, 无头模式={}, 最小延迟={}, 最大延迟={}, "
-            "调试模式={}, 详细模式={}, 更新间隔={}小时, 强制更新={}, 日志到控制台={}",
+            "调试模式={}, 详细模式={}, 更新间隔={}小时, 强制更新={}, 日志到控制台={}, 文件日志颜色={}",
             self.num_threads, self.batch_size, self.headless, self.min_delay, self.max_delay,
-            self.debug, self.verbose, self.update_interval, self.force_update, log_to_console
+            self.debug, self.verbose, self.update_interval, self.force_update, log_to_console, file_use_colors
         )
     
     @track_performance

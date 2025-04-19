@@ -35,7 +35,9 @@ def init_logger():
             log_file=log_file,
             max_file_size=10 * 1024 * 1024,  # 10MB
             backup_count=5,
-            use_colors=True
+            use_colors=True,  # 控制台使用颜色
+            # 文件日志不使用颜色标记
+            file_use_colors=False  # 明确禁用文件日志的颜色
         )
         
         # 设置环境变量来控制日志级别

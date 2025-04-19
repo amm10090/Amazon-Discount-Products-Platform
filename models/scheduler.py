@@ -445,11 +445,21 @@ class SchedulerManager:
             
             # 启动进程，将输出重定向到日志文件
             with open(log_file, 'w', encoding='utf-8') as f:
+                # 创建环境变量副本，禁用颜色输出
+                env = os.environ.copy()
+                # 禁用所有可能的颜色输出
+                env["COLORTERM"] = "0"
+                env["DISCOUNT_SCRAPER_LOG_COLOR_OUTPUT"] = "false"
+                env["LOG_COLORS"] = "false"
+                env["PYTHONUNBUFFERED"] = "1"  # 确保输出不被缓冲
+                env["FORCE_COLOR"] = "0"  # 禁用强制颜色
+                env["TERM"] = "dumb"  # 使用不支持颜色的终端类型
+                
                 process = subprocess.Popen(
                     cmd,
                     stdout=f,
                     stderr=subprocess.STDOUT,
-                    env=os.environ.copy()
+                    env=env
                 )
             
             logger.info(f"任务 {job_id} a已在独立进程中启动，进程ID: {process.pid}，日志文件: {log_file}")
@@ -883,11 +893,21 @@ class SchedulerManager:
             
             # 启动进程，将输出重定向到日志文件
             with open(log_file, 'w', encoding='utf-8') as f:
+                # 创建环境变量副本，禁用颜色输出
+                env = os.environ.copy()
+                # 禁用所有可能的颜色输出
+                env["COLORTERM"] = "0"
+                env["DISCOUNT_SCRAPER_LOG_COLOR_OUTPUT"] = "false"
+                env["LOG_COLORS"] = "false"
+                env["PYTHONUNBUFFERED"] = "1"  # 确保输出不被缓冲
+                env["FORCE_COLOR"] = "0"  # 禁用强制颜色
+                env["TERM"] = "dumb"  # 使用不支持颜色的终端类型
+                
                 process = subprocess.Popen(
                     cmd,
                     stdout=f,
                     stderr=subprocess.STDOUT,
-                    env=os.environ.copy()
+                    env=env
                 )
             
             self._logger.info(f"任务 {job_id} 已在独立进程中启动，进程ID: {process.pid}，日志文件: {log_file}")

@@ -53,7 +53,7 @@ class ColoredFormatter(logging.Formatter):
         timestamp = datetime.fromtimestamp(record.created).strftime('%H:%M:%S')
         
         # 获取日志级别的颜色
-        level_color = COLOR_MAP.get(record.levelname, '')
+        level_color = COLOR_MAP.get(record.levelname, '') if self.use_colors else ''
         reset_color = Style.RESET_ALL if self.use_colors else ''
         
         # 根据日志级别使用不同的格式
@@ -100,6 +100,7 @@ class LoggerManager:
              log_level: str = 'INFO',
              log_file: Optional[str] = None,
              use_colors: bool = True,
+             file_use_colors: bool = False,  # 新增参数，默认文件不使用颜色
              max_file_size: int = 10 * 1024 * 1024,  # 10MB
              backup_count: int = 5):
         """
@@ -108,7 +109,8 @@ class LoggerManager:
         Args:
             log_level: 日志级别
             log_file: 日志文件路径
-            use_colors: 是否使用彩色输出
+            use_colors: 控制台是否使用彩色输出
+            file_use_colors: 文件日志是否使用彩色输出，默认为False
             max_file_size: 单个日志文件最大大小
             backup_count: 保留的日志文件数量
         """
@@ -118,12 +120,12 @@ class LoggerManager:
         # 设置日志级别
         self.logger.setLevel(LEVEL_MAP.get(log_level.upper(), logging.INFO))
         
-        # 添加控制台处理器
+        # 添加控制台处理器（使用颜色）
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(ColoredFormatter(use_colors=use_colors))
         self.logger.addHandler(console_handler)
         
-        # 如果指定了日志文件，添加文件处理器
+        # 如果指定了日志文件，添加文件处理器（禁用颜色）
         if log_file:
             os.makedirs(os.path.dirname(log_file), exist_ok=True)
             file_handler = RotatingFileHandler(
@@ -132,10 +134,17 @@ class LoggerManager:
                 backupCount=backup_count,
                 encoding='utf-8'
             )
-            file_handler.setFormatter(logging.Formatter(
-                '[%(asctime)s] [%(levelname)s] %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            ))
+            # 为文件处理器使用无颜色的格式化器
+            if file_use_colors:
+                # 如果明确要求文件使用颜色，则使用带颜色的格式化器
+                file_handler.setFormatter(ColoredFormatter(use_colors=file_use_colors))
+            else:
+                # 默认文件使用无颜色的简单格式
+                file_format = '[%(asctime)s] [%(levelname)s] %(message)s'
+                file_handler.setFormatter(logging.Formatter(
+                    file_format,
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                ))
             self.logger.addHandler(file_handler)
     
     def debug(self, message: str):

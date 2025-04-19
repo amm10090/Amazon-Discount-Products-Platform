@@ -8,6 +8,7 @@ import os
 import json
 import time
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List, TypeVar, Callable, AsyncContextManager
@@ -21,6 +22,42 @@ from loguru._logger import Logger
 # 计算项目根目录
 # 假设当前文件在 src/utils/log_config.py
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# ANSI颜色代码正则表达式
+ANSI_ESCAPE_PATTERN = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+def strip_ansi_codes(text: str) -> str:
+    """去除字符串中的ANSI颜色代码
+    
+    Args:
+        text: 原始字符串
+        
+    Returns:
+        无颜色代码的字符串
+    """
+    return ANSI_ESCAPE_PATTERN.sub('', text)
+
+# 自定义格式化器，去除ANSI颜色代码
+def clean_format(record):
+    """移除记录中的ANSI颜色代码
+    
+    这个函数用作Loguru的format参数，确保即使输出包含颜色代码，
+    写入文件时也会被去除。
+    
+    Args:
+        record: Loguru记录对象
+        
+    Returns:
+        无颜色代码的格式化字符串
+    """
+    # 首先使用正常的格式化字符串处理记录
+    formatted = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}"
+    
+    # 使用record的所有可用属性进行格式化
+    result = formatted.format_map(record)
+    
+    # 去除所有ANSI颜色代码
+    return strip_ansi_codes(result)
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -41,7 +78,9 @@ DEFAULT_CONFIG = {
         "{extra[name]} | "
         "process:{process} | thread:{thread} | "
         "{name}:{function}:{line} | {message}"
-    )
+    ),
+    "COLORIZE_CONSOLE": True,   # 控制台默认使用颜色
+    "COLORIZE_FILE": False      # 文件默认不使用颜色
 }
 
 # 上下文变量
@@ -279,7 +318,7 @@ class LogConfig:
             sys.stderr,
             format=self.config["CONSOLE_LOG_FORMAT"],
             level=self.config["LOG_LEVEL"],
-            colorize=True,
+            colorize=self.config.get("COLORIZE_CONSOLE", True),  # 使用配置项或默认为True
             backtrace=True,
             diagnose=True,
             catch=True
@@ -288,33 +327,39 @@ class LogConfig:
         
         # 添加主日志文件处理器
         log_file = self.log_path / "app.{time:YYYY-MM-DD}.log"
+        
+        # 如果有指定的LOG_FILE，则使用它而不是默认的app.log
+        if "LOG_FILE" in self.config:
+            log_file = self.log_path / self.config["LOG_FILE"]
+            
         if self.config.get("JSON_LOGS", False):
             handler_id = logger.add(
                 str(log_file),
                 serialize=True,  # 启用JSON序列化
                 level=self.config["LOG_LEVEL"],
-                rotation="00:00",  # 每天午夜轮转
-                retention=self.config["LOG_RETENTION"],
+                rotation=self.config.get("ROTATION", "00:00"),  # 使用配置的轮转设置
+                retention=self.config.get("LOG_RETENTION", "30 days"),
                 compression="zip",
                 encoding="utf-8",
                 backtrace=True,
                 diagnose=True,
                 catch=True,
-                colorize=False  # 明确禁用颜色代码，避免日志文件中出现ANSI转义序列
+                colorize=self.config.get("COLORIZE_FILE", False),  # 使用配置项或默认为False
+                format=clean_format
             )
         else:
             handler_id = logger.add(
                 str(log_file),
-                format=self.config["FILE_LOG_FORMAT"],
                 level=self.config["LOG_LEVEL"],
-                rotation="00:00",  # 每天午夜轮转
-                retention=self.config["LOG_RETENTION"],
+                rotation=self.config.get("ROTATION", "00:00"),  # 使用配置的轮转设置
+                retention=self.config.get("LOG_RETENTION", "30 days"),
                 compression="zip",
                 encoding="utf-8",
                 backtrace=True,
                 diagnose=True,
                 catch=True,
-                colorize=False  # 明确禁用颜色代码，避免日志文件中出现ANSI转义序列
+                colorize=self.config.get("COLORIZE_FILE", False),  # 使用配置项或默认为False
+                format=clean_format
             )
         LogConfig._handler_ids.append(handler_id)
         
@@ -322,17 +367,17 @@ class LogConfig:
         error_log = self.log_path / "error.{time:YYYY-MM-DD}.log"
         handler_id = logger.add(
             str(error_log),
-            format=self.config["FILE_LOG_FORMAT"],
-            rotation="00:00",  # 每天午夜轮转
-            retention=self.config["LOG_RETENTION"],
+            rotation=self.config.get("ROTATION", "00:00"),  # 使用配置的轮转设置
+            retention=self.config.get("LOG_RETENTION", "30 days"),
             level="ERROR",
             compression="zip",
             encoding="utf-8",
             backtrace=True,
             diagnose=True,
             catch=True,
-            colorize=False,  # 明确禁用颜色代码，避免日志文件中出现ANSI转义序列
-            filter=lambda record: record["level"].name == "ERROR"
+            colorize=self.config.get("COLORIZE_FILE", False),  # 使用配置项或默认为False
+            filter=lambda record: record["level"].name == "ERROR",
+            format=clean_format
         )
         LogConfig._handler_ids.append(handler_id)
     

@@ -234,6 +234,16 @@ async def main():
     log_dir = Path(os.getenv("APP_LOG_DIR", str(project_root / "logs"))).resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
     
+    # 检查环境变量，判断是否应该禁用颜色
+    force_no_color = False
+    if (os.getenv("COLORTERM") == "0" or 
+        os.getenv("DISCOUNT_SCRAPER_LOG_COLOR_OUTPUT") == "false" or
+        os.getenv("LOG_COLORS") == "false" or
+        os.getenv("FORCE_COLOR") == "0" or
+        os.getenv("TERM") == "dumb"):
+        force_no_color = True
+        print("检测到环境变量设置，强制禁用日志颜色")
+    
     # 设置日志配置
     log_config = {
         "LOG_LEVEL": "INFO",
@@ -243,12 +253,29 @@ async def main():
         "CONSOLE_LOGS": True,
         "ASYNC_LOGS": True,
         "ROTATION": "10 MB",
-        "RETENTION": "5 days"
+        "RETENTION": "5 days",
+        "CONSOLE_LOG_FORMAT": (
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{extra[name]}</cyan> | "
+            "<level>{message}</level>"
+        ),
+        "FILE_LOG_FORMAT": (
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+            "{level: <8} | "
+            "{extra[name]} | "
+            "{message}"
+        ),
+        "COLORIZE_CONSOLE": not force_no_color,  # 根据环境变量决定是否使用颜色
+        "COLORIZE_FILE": False  # 明确禁用文件日志的颜色
     }
     
     # 应用日志配置
     LogConfig(log_config)
     logger = get_logger(f"Crawler:{args.job_id}")
+    
+    if force_no_color:
+        logger.info("已禁用日志颜色输出")
     
     # 加载配置文件
     config = None

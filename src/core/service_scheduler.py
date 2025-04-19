@@ -67,12 +67,26 @@ class SchedulerManager:
         log_dir = Path(os.getenv("APP_LOG_DIR", str(Path(project_root) / "logs"))).resolve()
         log_dir.mkdir(parents=True, exist_ok=True)
         
+        # 移除默认处理器
+        logger.remove()
+        
+        # 添加控制台处理器（带颜色）
+        logger.add(
+            sys.stderr,
+            level="INFO",
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>",
+            colorize=True
+        )
+        
+        # 添加文件处理器（不带颜色）
         logger.add(
             log_dir / "scheduler.log",
             rotation="1 day",
             retention="7 days",
             level="INFO",
-            encoding="utf-8"
+            encoding="utf-8",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
+            colorize=False  # 明确禁用文件日志的颜色
         )
         
     def load_config(self, config_path: Optional[str]) -> dict:
@@ -235,7 +249,8 @@ class SchedulerManager:
                         update_interval=config_params.get("update_interval", int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24"))),
                         force_update=config_params.get("force_update", os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true"),
                         debug=config_params.get("debug", os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true"),
-                        log_to_console=config_params.get("log_to_console", os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true")
+                        log_to_console=config_params.get("log_to_console", os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true"),
+                        file_use_colors=False  # 明确设置文件日志不使用颜色
                     )
                 else:
                     # 使用默认配置
@@ -249,7 +264,8 @@ class SchedulerManager:
                         update_interval=int(os.getenv("DISCOUNT_SCRAPER_UPDATE_INTERVAL", "24")),
                         force_update=os.getenv("DISCOUNT_SCRAPER_FORCE_UPDATE", "false").lower() == "true",
                         debug=os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true",
-                        log_to_console=os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true"
+                        log_to_console=os.getenv("DISCOUNT_SCRAPER_LOG_TO_CONSOLE", "false").lower() == "true",
+                        file_use_colors=False  # 明确设置文件日志不使用颜色
                     )
                 
                 # 运行爬虫
