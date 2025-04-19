@@ -447,7 +447,7 @@ def main():
     task_categories = {
         "crawler": {
             "title": get_text("crawler_tasks"),
-            "types": ["bestseller", "coupon", "all", "discount"],
+            "types": ["bestseller", "coupon", "all", "discount", "coupon_details"],
             "icon": "🕷️"
         },
         "update": {
@@ -538,6 +538,17 @@ def main():
         st.subheader("优惠券更新爬虫高级配置")
         show_config = st.checkbox("显示高级配置选项", value=st.session_state.show_discount_config, on_change=toggle_discount_config)
     
+    elif st.session_state.task_category == "crawler" and st.session_state.task_type == "coupon_details":
+        st.markdown("---")
+        st.subheader("优惠券详情爬虫高级配置")
+        if "show_coupon_details_config" not in st.session_state:
+            st.session_state.show_coupon_details_config = False
+            
+        def toggle_coupon_details_config():
+            st.session_state.show_coupon_details_config = not st.session_state.show_coupon_details_config
+            
+        show_config = st.checkbox("显示高级配置选项", value=st.session_state.show_coupon_details_config, on_change=toggle_coupon_details_config)
+    
     # 添加CJ爬虫高级配置选项
     elif st.session_state.task_category == "cj_crawler" and st.session_state.task_type == "cj":
         st.markdown("---")
@@ -554,6 +565,7 @@ def main():
     updater_config = {}
     discount_config = {}
     cj_config = {}
+    coupon_details_config = {}
     
     # 更新器高级配置
     if st.session_state.task_category == "update" and st.session_state.task_type == "update" and st.session_state.show_advanced_config:
@@ -708,6 +720,54 @@ def main():
                 help="启用调试模式，输出更详细的日志"
             )
     
+    # 优惠券详情爬虫高级配置
+    elif st.session_state.task_category == "crawler" and st.session_state.task_type == "coupon_details" and st.session_state.show_coupon_details_config:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 线程配置
+            coupon_details_config["num_threads"] = st.number_input(
+                "爬虫线程数",
+                min_value=1,
+                max_value=8,
+                value=2,
+                help="并行处理的线程数量，建议设置较低值以避免触发Amazon反爬虫措施"
+            )
+            
+            coupon_details_config["headless"] = st.checkbox(
+                "无头模式",
+                value=True,
+                help="启用无头模式，不显示浏览器窗口"
+            )
+        
+        with col2:
+            # 抓取配置
+            coupon_details_config["min_delay"] = st.number_input(
+                "最小延迟(秒)",
+                min_value=1.0,
+                max_value=10.0,
+                value=2.0,
+                step=0.5,
+                help="请求之间的最小延迟时间"
+            )
+            
+            coupon_details_config["max_delay"] = st.number_input(
+                "最大延迟(秒)",
+                min_value=2.0,
+                max_value=15.0,
+                value=4.0,
+                step=0.5,
+                help="请求之间的最大延迟时间"
+            )
+            
+            coupon_details_config["debug"] = st.checkbox(
+                "调试模式",
+                value=False,
+                help="启用调试模式，输出更详细的日志"
+            )
+        
+        st.info("该任务用于检查并抓取优惠券的到期日期和条款信息，会自动从数据库中获取需要更新的商品。")
+    
     # CJ爬虫高级配置
     elif st.session_state.task_category == "cj_crawler" and st.session_state.task_type == "cj" and st.session_state.show_cj_config:
         col1, col2 = st.columns(2)
@@ -854,6 +914,10 @@ def main():
                     if st.session_state.task_category == "crawler" and st.session_state.task_type == "discount" and st.session_state.show_discount_config:
                         job_config["discount_config"] = discount_config
                     
+                    # 添加优惠券详情爬虫配置
+                    if st.session_state.task_category == "crawler" and st.session_state.task_type == "coupon_details" and st.session_state.show_coupon_details_config:
+                        job_config["coupon_details_config"] = coupon_details_config
+                    
                     # 添加CJ爬虫配置
                     if st.session_state.task_category == "cj_crawler" and st.session_state.task_type == "cj" and st.session_state.show_cj_config:
                         job_config["cj_config"] = cj_config
@@ -996,6 +1060,24 @@ def main():
                                       key=f"show_config_btn_{job['id']}", 
                                       on_click=toggle_config_view, 
                                       args=(job['id'],))
+                    
+                    # 显示优惠券详情爬虫配置按钮
+                    elif job['crawler_type'] == 'coupon_details':
+                        # 检查是否有任何配置
+                        if 'coupon_details_config' in job:
+                            # 初始化会话状态，如果不存在
+                            if f"show_coupon_details_config_{job['id']}" not in st.session_state:
+                                st.session_state[f"show_coupon_details_config_{job['id']}"] = False
+                                
+                            # 定义回调函数来切换状态
+                            def toggle_coupon_details_view(job_id=job['id']):
+                                st.session_state[f"show_coupon_details_config_{job_id}"] = not st.session_state[f"show_coupon_details_config_{job_id}"]
+                                
+                            # 使用on_click回调
+                            st.button("查看优惠券详情配置", 
+                                      key=f"show_coupon_details_btn_{job['id']}", 
+                                      on_click=toggle_coupon_details_view, 
+                                      args=(job['id'],))
                 
                 with col2:
                     if job['type'] == 'cron':
@@ -1120,6 +1202,31 @@ def main():
                             st.markdown(f"- 调试模式: {'是' if discount_config.get('debug', False) else '否'}")
                     else:
                         st.info("该任务使用默认优惠券更新配置")
+                
+                # 显示优惠券详情爬虫配置详情
+                if job['crawler_type'] == 'coupon_details' and \
+                   st.session_state.get(f"show_coupon_details_config_{job['id']}", False):
+                    st.markdown("---")
+                    st.subheader("优惠券详情爬虫配置详情")
+                    
+                    # 获取配置信息
+                    coupon_details_config = job.get('coupon_details_config', {})
+                    
+                    if coupon_details_config:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**线程配置**")
+                            st.markdown(f"- 爬虫线程数: {coupon_details_config.get('num_threads', 2)}")
+                            st.markdown(f"- 无头模式: {'是' if coupon_details_config.get('headless', True) else '否'}")
+                        
+                        with col2:
+                            st.markdown("**抓取配置**")
+                            st.markdown(f"- 最小延迟: {coupon_details_config.get('min_delay', 2.0)}秒")
+                            st.markdown(f"- 最大延迟: {coupon_details_config.get('max_delay', 4.0)}秒")
+                            st.markdown(f"- 调试模式: {'是' if coupon_details_config.get('debug', False) else '否'}")
+                    else:
+                        st.info("该任务使用默认优惠券详情爬虫配置")
                 
                 # 显示CJ爬虫配置详情
                 if job['crawler_type'] == 'cj':

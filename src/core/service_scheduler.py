@@ -275,6 +275,41 @@ class SchedulerManager:
                 stats = scraper.stats.get()
                 result = stats['success_count']
                 logger.success(f"折扣商品爬取完成，处理: {stats['processed_count']}，成功: {result}，失败: {stats['failure_count']}")
+            elif crawler_type == "coupon_details":
+                # 执行优惠券详情抓取任务
+                from src.core.discount_scraper_mt import check_and_scrape_coupon_details
+                
+                # 检查是否有自定义配置
+                num_threads = 2  # 默认使用较少线程，避免触发Amazon反爬
+                headless = True
+                min_delay = 2.0
+                max_delay = 4.0
+                debug = False
+                
+                if config_params and "coupon_details_config" in config_params:
+                    coupon_details_config = config_params.get("coupon_details_config", {})
+                    logger.info(f"使用自定义优惠券详情抓取配置: {coupon_details_config}")
+                    num_threads = coupon_details_config.get("num_threads", int(os.getenv("DISCOUNT_SCRAPER_THREADS", "2")))
+                    headless = coupon_details_config.get("headless", os.getenv("CRAWLER_HEADLESS", "true").lower() == "true")
+                    min_delay = coupon_details_config.get("min_delay", float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")))
+                    max_delay = coupon_details_config.get("max_delay", float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")))
+                    debug = coupon_details_config.get("debug", os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true")
+                else:
+                    logger.info("使用默认优惠券详情抓取配置")
+                
+                # 运行优惠券详情抓取
+                processed_count, updated_count = check_and_scrape_coupon_details(
+                    asins=None,  # 从数据库自动获取需要检查的商品
+                    batch_size=max_items,
+                    num_threads=num_threads,
+                    headless=headless,
+                    min_delay=min_delay,
+                    max_delay=max_delay,
+                    debug=debug
+                )
+                
+                result = updated_count
+                logger.success(f"优惠券详情抓取完成，处理: {processed_count}，成功更新: {updated_count}")
             elif crawler_type == "cj":
                 # 执行CJ爬虫任务
                 # 获取数据库会话

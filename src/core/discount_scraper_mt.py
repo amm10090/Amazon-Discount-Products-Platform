@@ -51,6 +51,7 @@ def parse_arguments():
     parser.add_argument('--threads', type=int, default=4, help='抓取线程数量')
     parser.add_argument('--update-interval', type=int, default=72, help='优惠券信息更新间隔(小时)，默认72小时')
     parser.add_argument('--force-update', action='store_true', help='强制更新所有商品，忽略更新间隔')
+    parser.add_argument('--check-details', action='store_true', help='检查并抓取优惠券的到期日期和条款信息检查并抓取优惠券的到期日期和条款信息')
     return parser.parse_args()
 
 # 初始化Loguru日志配置
@@ -137,13 +138,17 @@ class ThreadSafeStats:
             'processed_count': 0,
             'success_count': 0,
             'failure_count': 0,
+            'captcha_count': 0,        # 遇到验证码的次数
+            'retry_count': 0,          # 重试的次数
+            'max_retry_exceeded': 0,   # 超过最大重试次数的任务数
             'updated_fields': {
                 'coupon_type': 0,
                 'coupon_value': 0,
             },
             'coupon_history': {
                 'created': 0,
-                'updated': 0
+                'updated': 0,
+                'updated_with_details': 0  # 添加新的子键，用于跟踪更新了有效期或条款的记录数
             }
         }
     
@@ -203,6 +208,11 @@ class CouponScraperWorker:
         
         # 已处理的商品集合，避免重复处理
         self._processed_asins = set()
+        
+        # 重试计数器，用于跟踪每个ASIN的重试次数
+        self._retry_counter = {}
+        # 最大重试次数
+        self.max_retries = 3
          
     def _init_worker(self):
         """初始化工作线程环境"""
@@ -284,13 +294,15 @@ class CouponScraperWorker:
             fixed_amount_pattern = r'(?:[\$\£\€])?(\d+(?:\.\d{1,2})?)\s*(?:off|discount|save|coupon)'
             percentage_amount_pattern = r'(?:save|get|take)?\s*(\d+(?:\.\d{1,2})?)\s*(?:%|percent|percentage)'
             
-            # 用于匹配有效期的正则表达式
+            # 用于匹配有效期的正则表达式，增加更多模式
             date_patterns = [
                 r'Coupon\s+Expiry\s+Date\s*:?\s*(\w+\s+\d{1,2},?\s+\d{4})',  # Coupon Expiry Date: April 21, 2025
+                r'Coupon\s+Expiry\s+Date\s+(\w+\s+\d{1,2},?\s+\d{4})',  # Coupon Expiry Date April 21, 2025
                 r'(?:coupon|offer)\s+expires\s+(?:on)?\s*(\w+\s+\d{1,2},?\s+\d{4})',  # coupon expires on April 21, 2025
                 r'Valid\s+through\s+(\w+\s+\d{1,2},?\s+\d{4})',  # Valid through May 31, 2024
                 r'Promotion\s+(?:ends|expires)\s+(?:on)?\s*(\w+\s+\d{1,2},?\s+\d{4})',  # Promotion ends on April 21, 2025
-                r'(?:coupon|offer)\s+expires\s+(?:on)?\s*(\d{1,2}/\d{1,2}/\d{2,4})'  # coupon expires on 4/21/25
+                r'(?:coupon|offer)\s+expires\s+(?:on)?\s*(\d{1,2}/\d{1,2}/\d{2,4})',  # coupon expires on 4/21/25
+                r'Expir(?:y|ation)\s+Date\s*:?\s*(\w+\s+\d{1,2},?\s+\d{4})'  # Expiration Date: April 28, 2025
             ]
             
             # 初始化结果
@@ -408,9 +420,13 @@ class CouponScraperWorker:
                     terms_xpath3 = "//span[contains(@class, 'a-declarative') and contains(@data-a-modal, 'Terms')]//a"
                     terms_links.extend(self.driver.find_elements(By.XPATH, terms_xpath3))
                     
-                    # 方法4：使用最通用的方式查找
-                    terms_xpath4 = "//*[contains(@data-immersive-translate-walked, '4d8e3776')]//a"
+                    # 方法4：查找coupon页面上的Terms链接
+                    terms_xpath4 = "//span[contains(@class, 'a-truncate-full')]//a[contains(text(), 'Terms')]"
                     terms_links.extend(self.driver.find_elements(By.XPATH, terms_xpath4))
+                    
+                    # 方法5：查找任何可见的Terms链接
+                    terms_xpath5 = "//a[contains(@class, 'a-link-normal') and (contains(text(), 'Terms') or contains(text(), 'terms'))]"
+                    terms_links.extend(self.driver.find_elements(By.XPATH, terms_xpath5))
                     
                     # 如果找到了Terms链接，点击打开模态框
                     for terms_link in terms_links:
@@ -421,31 +437,69 @@ class CouponScraperWorker:
                                 # 使用JavaScript点击
                                 self.driver.execute_script("arguments[0].click();", terms_link)
                                 
-                                # 等待模态框出现
+                                # 等待模态框出现 - 增加等待时间确保完全加载
                                 time.sleep(2)
                                 
-                                # 尝试查找模态框内容
-                                modal_content_xpath = "//div[contains(@class, 'a-modal-content') or @id='a-popover-content-1']"
-                                modal_elements = self.driver.find_elements(By.XPATH, modal_content_xpath)
+                                # 尝试查找模态框内容 - 增加更多选择器以适应不同的弹窗结构
+                                modal_selectors = [
+                                    "//div[contains(@class, 'a-popover-content')]",
+                                    "//div[@id='a-popover-content-1']",
+                                    "//div[@id='a-popover-content-2']",
+                                    "//div[@id='a-popover-content-3']",
+                                    "//div[@id='a-popover-content-4']",
+                                    "//div[contains(@id, 'promo_tncPage_')]",
+                                    "//div[contains(@id, 'promo_tnc_popup_container_')]"
+                                ]
                                 
-                                if modal_elements:
-                                    modal_content = modal_elements[0].text.strip()
-                                    logger.debug("成功提取模态框内容: {}", modal_content[:50] + "..." if len(modal_content) > 50 else modal_content)
-                                    
-                                    # 保存完整条款
-                                    terms = modal_content
-                                    
-                                    # 尝试提取有效期
-                                    for pattern in date_patterns:
-                                        date_match = re.search(pattern, modal_content, re.IGNORECASE)
-                                        if date_match:
-                                            date_str = date_match.group(1)
-                                            try:
-                                                expiration_date = date_parser.parse(date_str)
-                                                logger.debug("从模态框提取到优惠券有效期: {}", expiration_date)
-                                                break
-                                            except Exception as e:
-                                                logger.debug("解析日期失败: {} - {}", date_str, e)
+                                for selector in modal_selectors:
+                                    modal_elements = self.driver.find_elements(By.XPATH, selector)
+                                    if modal_elements and modal_elements[0].is_displayed():
+                                        modal_content = modal_elements[0].text.strip()
+                                        if modal_content:
+                                            logger.debug("成功提取模态框内容，长度: {}", len(modal_content))
+                                            if self.debug and len(modal_content) > 0:
+                                                logger.debug("内容预览: {}", modal_content[:100] + "..." if len(modal_content) > 100 else modal_content)
+                                            
+                                            # 保存完整条款
+                                            terms = modal_content
+                                            
+                                            # 尝试直接从弹窗中提取到期日期
+                                            # 1. 寻找特定的到期日期元素
+                                            expiry_elements = self.driver.find_elements(By.XPATH, 
+                                                "//div[contains(@class, 'expiration') or contains(@id, 'expiration')]")
+                                            
+                                            if expiry_elements:
+                                                for expiry_elem in expiry_elements:
+                                                    expiry_text = expiry_elem.text.strip()
+                                                    if expiry_text:
+                                                        logger.debug("找到到期日期元素: {}", expiry_text)
+                                                        # 尝试从文本中提取日期
+                                                        for pattern in date_patterns:
+                                                            date_match = re.search(pattern, expiry_text, re.IGNORECASE)
+                                                            if date_match:
+                                                                date_str = date_match.group(1)
+                                                                try:
+                                                                    expiration_date = date_parser.parse(date_str)
+                                                                    logger.info("成功提取到期日期: {}", expiration_date.strftime('%Y-%m-%d'))
+                                                                    break
+                                                                except Exception as e:
+                                                                    logger.debug("解析日期失败: {} - {}", date_str, e)
+                                            
+                                            # 2. 如果没有找到特定元素，从整个弹窗内容中提取日期
+                                            if not expiration_date:
+                                                for pattern in date_patterns:
+                                                    date_match = re.search(pattern, modal_content, re.IGNORECASE)
+                                                    if date_match:
+                                                        date_str = date_match.group(1)
+                                                        try:
+                                                            expiration_date = date_parser.parse(date_str)
+                                                            logger.info("从模态框内容提取到到期日期: {}", expiration_date.strftime('%Y-%m-%d'))
+                                                            break
+                                                        except Exception as e:
+                                                            logger.debug("解析日期失败: {} - {}", date_str, e)
+                                            
+                                            # 成功提取内容，可以退出循环
+                                            break
                                 
                                 # 点击关闭按钮或按ESC关闭模态框
                                 try:
@@ -472,7 +526,8 @@ class CouponScraperWorker:
             if coupon_type and coupon_value is not None:
                 logger.debug("返回提取的优惠券信息: 类型={}, 值={}, 有效期={}, 条款长度={}", 
                             coupon_type, coupon_value, 
-                            expiration_date, len(terms) if terms else 0)
+                            expiration_date.strftime('%Y-%m-%d') if expiration_date else "None", 
+                            len(terms) if terms else 0)
                 return coupon_type, coupon_value, expiration_date, terms
             
             # 如果未能提取到优惠券信息，尝试其他方法
@@ -632,8 +687,25 @@ class CouponScraperWorker:
                 CouponHistory.product_id == product.asin
             ).order_by(CouponHistory.created_at.desc()).first()
             
-            if not latest_history or latest_history.coupon_type != coupon_type or latest_history.coupon_value != coupon_value:
-                # 如果没有历史记录或者优惠券信息发生变化，创建新记录
+            create_new_record = False
+            update_existing = False
+            
+            # 决定是创建新记录还是更新现有记录
+            if not latest_history:
+                # 如果没有历史记录，创建新记录
+                create_new_record = True
+                logger.info("没有现有的优惠券历史记录，将创建新记录")
+            elif latest_history.coupon_type != coupon_type or latest_history.coupon_value != coupon_value:
+                # 如果优惠券类型或金额有变化，创建新记录
+                create_new_record = True
+                logger.info("优惠券类型或金额有变化，将创建新记录")
+            else:
+                # 即使优惠券类型和金额没变，如果有新的到期日期或条款，也更新
+                update_existing = True
+                logger.info("优惠券类型和金额没变，检查是否需要更新到期日期和条款")
+            
+            # 创建新记录
+            if create_new_record:
                 coupon_history = CouponHistory(
                     product_id=product.asin,
                     coupon_type=coupon_type,
@@ -649,21 +721,34 @@ class CouponScraperWorker:
                           expiration_date.strftime('%Y-%m-%d') if expiration_date else "无", 
                           len(terms) if terms else 0)
                 self.stats.increment('coupon_history', 'created')
-            else:
-                # 即使优惠券类型和金额没变，也要更新有效期和条款
-                if (expiration_date and latest_history.expiration_date != expiration_date) or (terms and latest_history.terms != terms):
-                    if expiration_date:
-                        latest_history.expiration_date = expiration_date
-                    if terms:
-                        latest_history.terms = terms
-                    logger.info("更新优惠券历史记录的有效期和条款: 有效期={}, 条款长度={}", 
-                              expiration_date.strftime('%Y-%m-%d') if expiration_date else "无", 
-                              len(terms) if terms else 0)
+            # 更新现有记录
+            elif update_existing:
+                # 即使没有新的到期日期或条款，也强制更新字段
+                has_updates = False
+                
+                # 当提取到到期日期时总是更新，即使为None也更新
+                if expiration_date != latest_history.expiration_date:
+                    latest_history.expiration_date = expiration_date
+                    has_updates = True
+                    updated_fields.append(f"优惠券有效期: {latest_history.expiration_date} -> {expiration_date}")
+                    logger.info("更新优惠券历史记录的有效期: {}", 
+                               expiration_date.strftime('%Y-%m-%d') if expiration_date else "无")
+                
+                # 当提取到条款时总是更新，即使为None也更新
+                if terms != latest_history.terms:
+                    latest_history.terms = terms
+                    has_updates = True
+                    logger.info("更新优惠券历史记录的条款，长度: {}", len(terms) if terms else 0)
                 
                 # 更新时间戳
                 latest_history.updated_at = datetime.now(UTC)
-                logger.debug("更新优惠券历史记录时间戳")
-                self.stats.increment('coupon_history', 'updated')
+                
+                if has_updates:
+                    logger.info("优惠券历史记录已更新")
+                    self.stats.increment('coupon_history', 'updated_with_details')
+                else:
+                    logger.debug("优惠券历史记录时间戳已更新，但没有实质性变化")
+                    self.stats.increment('coupon_history', 'updated')
         
         # 如果有字段更新，记录详情
         if updated_fields:
@@ -671,6 +756,66 @@ class CouponScraperWorker:
         else:
             logger.debug("商品优惠券信息无变化")
         
+        # 尝试提交更改
+        try:
+            self.db_session.commit()
+            logger.debug("数据库更改已提交")
+        except Exception as e:
+            self.db_session.rollback()
+            logger.exception("提交数据库更改失败: {}", e)
+            raise
+    
+    def _is_captcha_page(self) -> bool:
+        """
+        检测当前页面是否为验证码人机验证页面
+        
+        Returns:
+            bool: 如果是验证码页面返回True，否则返回False
+        """
+        try:
+            # 检查页面源码中的特定特征
+            page_source = self.driver.page_source.lower()
+            
+            # 检查典型的验证码页面文本
+            captcha_texts = [
+                "enter the characters you see below",
+                "type the characters you see in this image",
+                "sorry, we just need to make sure you're not a robot",
+                "captcha",
+                "bot check"
+            ]
+            
+            # 如果页面源码中包含任何验证码特征文本，则认为是验证码页面
+            for text in captcha_texts:
+                if text in page_source:
+                    logger.warning("检测到验证码页面 - 包含文本: '{}'", text)
+                    return True
+            
+            # 检查是否存在验证码输入框
+            captcha_inputs = self.driver.find_elements(By.ID, "captchacharacters")
+            if captcha_inputs:
+                logger.warning("检测到验证码页面 - 存在ID为'captchacharacters'的输入框")
+                return True
+            
+            # 检查是否存在验证码图片
+            captcha_images = self.driver.find_elements(By.XPATH, "//img[contains(@src, 'captcha')]")
+            if captcha_images:
+                logger.warning("检测到验证码页面 - 存在包含'captcha'的图片URL")
+                return True
+            
+            # 检查页面标题
+            title = self.driver.title.lower()
+            if "robot" in title or "captcha" in title or "bot check" in title:
+                logger.warning("检测到验证码页面 - 页面标题包含验证相关词汇")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.warning("检测验证码页面时出错: {}", e)
+            # 发生错误时保守处理，返回False
+            return False
+
     @track_performance  # 使用装饰器记录函数执行时间
     def process_product(self, product: Product) -> bool:
         """
@@ -715,6 +860,34 @@ class CouponScraperWorker:
             logger.debug("等待页面加载: {:.1f}秒", wait_time)
             time.sleep(wait_time)
             
+            # 检查是否是验证码页面
+            if self._is_captcha_page():
+                # 更新验证码统计
+                self.stats.increment('captcha_count')
+                logger.warning("商品 {} 遇到验证码页面，将放回队列尾部稍后重试", product.asin)
+                
+                # 获取当前ASIN的重试次数
+                retry_count = self._retry_counter.get(product.asin, 0) + 1
+                self._retry_counter[product.asin] = retry_count
+                
+                # 如果重试次数超过最大值，则放弃
+                if retry_count > self.max_retries:
+                    logger.error("商品 {} 已达到最大重试次数 {}，放弃处理", product.asin, self.max_retries)
+                    self.stats.increment('max_retry_exceeded')
+                    return False
+                
+                # 更新重试次数统计
+                self.stats.increment('retry_count')
+                
+                # 等待较长时间再重试
+                delay = random.uniform(30, 60)  # 等待30-60秒
+                logger.info("等待 {:.0f} 秒后将重新尝试...", delay)
+                time.sleep(delay)
+                
+                # 将任务重新加入队列
+                self.task_queue.put(product.asin)
+                return True  # 返回True表示任务已重新加入队列
+            
             # 提取优惠券信息
             logger.debug("提取优惠券信息...")
             coupon_type, coupon_value, expiration_date, terms = self._extract_coupon_info()
@@ -736,6 +909,11 @@ class CouponScraperWorker:
             
             self.db_session.commit()
             logger.info("商品优惠券信息更新成功")
+            
+            # 清除该ASIN的重试计数
+            if product.asin in self._retry_counter:
+                del self._retry_counter[product.asin]
+                
             return True
             
         except Exception as e:
@@ -1128,10 +1306,141 @@ class CouponScraperMT:
                 logger.info(f"更新的优惠券值数量: {stats['updated_fields']['coupon_value']}")
                 logger.info(f"新建的优惠券历史记录数: {stats['coupon_history']['created']}")
                 logger.info(f"更新的优惠券历史记录数: {stats['coupon_history']['updated']}")
+                
+                # 添加验证码统计信息
+                logger.info(f"遇到验证码次数: {stats['captcha_count']}")
+                logger.info(f"任务重试次数: {stats['retry_count']}")
+                logger.info(f"超过最大重试次数的任务: {stats['max_retry_exceeded']}")
+                
                 logger.info("=====================================================")
                 
                 # 关闭数据库连接
                 self.db.close()
+
+def check_and_scrape_coupon_details(asins=None, batch_size=50, num_threads=2, headless=True, 
+                                    min_delay=2.0, max_delay=4.0, debug=False):
+    """
+    检查优惠券商品是否有到期日期和条款信息，如果没有则执行抓取
+    
+    Args:
+        asins: 要检查的ASIN列表，如果为None则从数据库中获取所有需要检查的商品
+        batch_size: 批处理大小
+        num_threads: 抓取线程数
+        headless: 是否使用无头模式
+        min_delay: 最小请求延迟(秒)
+        max_delay: 最大请求延迟(秒)
+        debug: 是否启用调试模式
+        
+    Returns:
+        tuple: (已处理商品数, 更新成功数)
+    """
+    # 初始化日志
+    global logger
+    if not logger:
+        logger = init_logger(
+            log_level='DEBUG' if debug else 'INFO',
+            log_to_console=True
+        )
+    
+    # 创建数据库会话
+    db = next(get_db())
+    
+    try:
+        logger.info("开始检查优惠券商品的到期日期和条款信息")
+        
+        # 确定要处理的ASIN列表
+        asins_to_process = []
+        
+        if asins:
+            # 如果提供了具体的ASIN列表，就使用它
+            logger.info(f"使用提供的{len(asins)}个ASIN进行检查")
+            # 过滤出数据库中存在且有优惠券的ASIN
+            existing_products = db.query(Product.asin).join(Offer).filter(
+                Product.asin.in_(asins),
+                Product.source == 'coupon',  # 添加来源筛选条件
+        
+            ).all()
+            asins_to_process = [p.asin for p in existing_products]
+            logger.info(f"过滤后剩余{len(asins_to_process)}个有效的优惠券商品ASIN")
+        else:
+            # 从数据库查询有优惠券但缺少到期日期或条款信息的商品
+            logger.info("从数据库查询需要完善信息的优惠券商品")
+            
+            # 查询所有有优惠券信息的商品ASIN，添加source='coupon'条件
+            products_with_coupons = db.query(Product.asin).join(Offer).filter(
+                Product.source == 'coupon',  # 添加来源筛选条件
+           
+            ).all()
+            
+            coupon_asins = [p.asin for p in products_with_coupons]
+            logger.info(f"找到{len(coupon_asins)}个有优惠券的商品")
+            
+            if not coupon_asins:
+                logger.warning("没有找到任何有优惠券的商品，任务结束")
+                return 0, 0
+            
+            # 查询已有完整优惠券历史(有到期日期或条款)的商品ASIN
+            complete_history_asins = db.query(CouponHistory.product_id).filter(
+                CouponHistory.product_id.in_(coupon_asins),
+                (CouponHistory.expiration_date != None) | (CouponHistory.terms != None)
+            ).distinct().all()
+            
+            complete_asins = [h.product_id for h in complete_history_asins]
+            logger.info(f"其中{len(complete_asins)}个商品已有完整的优惠券历史信息")
+            
+            # 筛选出需要抓取的ASIN(有优惠券但缺少历史详情的商品)
+            asins_to_process = [asin for asin in coupon_asins if asin not in complete_asins]
+            logger.info(f"需要抓取补充信息的商品数量: {len(asins_to_process)}")
+        
+        # 如果没有需要处理的商品，直接返回
+        if not asins_to_process:
+            logger.info("没有需要补充优惠券详情的商品，任务结束")
+            return 0, 0
+        
+        # 限制处理数量
+        if len(asins_to_process) > batch_size:
+            logger.info(f"商品数量超过批处理大小，限制为{batch_size}个")
+            asins_to_process = asins_to_process[:batch_size]
+        
+        # 使用CouponScraperMT执行抓取
+        logger.info(f"开始抓取{len(asins_to_process)}个商品的优惠券详情")
+        scraper = CouponScraperMT(
+            num_threads=num_threads,
+            batch_size=len(asins_to_process),
+            headless=headless,
+            min_delay=min_delay,
+            max_delay=max_delay,
+            specific_asins=asins_to_process,
+            debug=debug,
+            verbose=debug,
+            force_update=True  # 强制更新，忽略时间间隔检查
+        )
+        
+        # 运行抓取器
+        scraper.run()
+        
+        # 获取处理结果统计
+        stats = scraper.stats.get()
+        processed_count = stats['processed_count']
+        success_count = stats['success_count']
+        
+        # 查询结果验证 - 检查有多少商品成功获取到了到期日期或条款信息
+        updated_asins = db.query(CouponHistory.product_id).filter(
+            CouponHistory.product_id.in_(asins_to_process),
+            (CouponHistory.expiration_date != None) | (CouponHistory.terms != None)
+        ).distinct().all()
+        
+        updated_count = len(updated_asins)
+        logger.info(f"任务完成，共处理{processed_count}个商品，成功获取{updated_count}个商品的优惠券详情")
+        
+        return processed_count, updated_count
+        
+    except Exception as e:
+        logger.exception(f"检查和抓取优惠券详情过程中发生错误: {e}")
+        return 0, 0
+    finally:
+        # 关闭数据库连接
+        db.close()
 
 def main():
     """主函数"""
@@ -1151,43 +1460,58 @@ def main():
     elif args.asin_list:
         specific_asins = [asin.strip() for asin in args.asin_list.split(',')]
 
-    # 初始化爬虫
-    with LogContext(component="Startup"):
-        logger.info("初始化多线程优惠券抓取器")
-        scraper = CouponScraperMT(
-            num_threads=args.threads,
+    # 根据参数决定执行模式
+    if args.check_details:
+        # 执行优惠券详情检查和抓取
+        logger.info("启动优惠券详情检查和抓取功能")
+        processed_count, updated_count = check_and_scrape_coupon_details(
+            asins=specific_asins,
             batch_size=args.batch_size,
+            num_threads=args.threads,
             headless=not args.no_headless,
             min_delay=args.min_delay,
             max_delay=args.max_delay,
-            specific_asins=specific_asins,
-            debug=args.debug,
-            verbose=args.verbose,
-            update_interval=args.update_interval,
-            force_update=args.force_update
+            debug=args.debug
         )
-    
-    try:
-        # 输出调试信息
-        if args.debug:
-            logger.debug("===== 启动参数 =====", extra={
-                "threads": args.threads,
-                "batch_size": args.batch_size,
-                "headless": not args.no_headless,
-                "min_delay": args.min_delay,
-                "max_delay": args.max_delay,
-                "specific_asins": specific_asins,
-                "debug": args.debug,
-                "verbose": args.verbose,
-                "log_level": args.log_level or ('DEBUG' if args.debug else 'INFO'),
-                "update_interval": args.update_interval,
-                "force_update": args.force_update
-            })
+        logger.info(f"完成优惠券详情抓取，处理了{processed_count}个商品，成功更新{updated_count}个")
+    else:
+        # 初始化常规优惠券抓取
+        with LogContext(component="Startup"):
+            logger.info("初始化多线程优惠券抓取器")
+            scraper = CouponScraperMT(
+                num_threads=args.threads,
+                batch_size=args.batch_size,
+                headless=not args.no_headless,
+                min_delay=args.min_delay,
+                max_delay=args.max_delay,
+                specific_asins=specific_asins,
+                debug=args.debug,
+                verbose=args.verbose,
+                update_interval=args.update_interval,
+                force_update=args.force_update
+            )
         
-        # 运行爬虫
-        scraper.run()
-    except KeyboardInterrupt:
-        logger.info("收到中断信号，正在停止爬虫...")
+        try:
+            # 输出调试信息
+            if args.debug:
+                logger.debug("===== 启动参数 =====", extra={
+                    "threads": args.threads,
+                    "batch_size": args.batch_size,
+                    "headless": not args.no_headless,
+                    "min_delay": args.min_delay,
+                    "max_delay": args.max_delay,
+                    "specific_asins": specific_asins,
+                    "debug": args.debug,
+                    "verbose": args.verbose,
+                    "log_level": args.log_level or ('DEBUG' if args.debug else 'INFO'),
+                    "update_interval": args.update_interval,
+                    "force_update": args.force_update
+                })
+            
+            # 运行爬虫
+            scraper.run()
+        except KeyboardInterrupt:
+            logger.info("收到中断信号，正在停止爬虫...")
 
 if __name__ == "__main__":
     main() 

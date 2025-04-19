@@ -1076,7 +1076,7 @@ async def add_job(job_config: JobConfig):
             raise ValueError(f"不支持的任务类型: {job_type}")
             
         # 检查crawler_type
-        valid_crawler_types = ["bestseller", "coupon", "all", "update", "discount", "cj"]
+        valid_crawler_types = ["bestseller", "coupon", "all", "update", "discount", "cj", "coupon_details"]
         if crawler_type not in valid_crawler_types:
             raise ValueError(f"不支持的爬虫类型: {crawler_type}")
             

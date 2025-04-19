@@ -207,6 +207,7 @@ TRANSLATIONS = {
         "crawler_update": "商品更新",
         "crawler_cj": "CJ商品",
         "crawler_discount": "优惠券更新",
+        "crawler_coupon_details": "优惠券详情",
         
         # 调度器相关
         "start_time": "开始时间",
@@ -584,6 +585,7 @@ TRANSLATIONS = {
         "crawler_update": "Product Update",
         "crawler_cj": "CJ Products",
         "crawler_discount": "Coupon Update",
+        "crawler_coupon_details": "Coupon Details",
         
         # Scheduler Related
         "start_time": "Start Time",
