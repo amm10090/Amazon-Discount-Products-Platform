@@ -1125,6 +1125,7 @@ class CJProductsCrawler:
         skip_existing: bool = True,
         use_persistent_cursor: bool = True,  # 默认使用持久化游标
         filter_similar_variants: bool = True,  # 是否过滤优惠相同的变体
+        cursor: str = None,  # 显式接收cursor参数，避免与kwargs冲突
         **kwargs
     ) -> Tuple[int, int, int, int, int]:
         """
@@ -1137,13 +1138,23 @@ class CJProductsCrawler:
             skip_existing: 是否跳过已存在的商品
             use_persistent_cursor: 是否使用持久化游标
             filter_similar_variants: 是否过滤优惠相同的变体
+            cursor: 初始游标
             **kwargs: 传递给fetch_and_save_products的参数
             
         Returns:
             Tuple: (成功数, 失败数, 变体数, 优惠券商品数, 折扣商品数)
         """
         with LogContext(max_items=max_items):
-            self.logger.info(f"开始批量获取商品，最大数量: {max_items}，使用随机游标: {use_random_cursor}，使用持久化游标: {use_persistent_cursor}，跳过已存在: {skip_existing}，过滤相似变体: {filter_similar_variants}，参数: {kwargs}")
+            # 完全避免在日志中使用大括号
+            self.logger.info("开始批量获取商品，最大数量: " + str(max_items) + 
+                             "，使用随机游标: " + str(use_random_cursor) + 
+                             "，使用持久化游标: " + str(use_persistent_cursor) + 
+                             "，跳过已存在: " + str(skip_existing) + 
+                             "，过滤相似变体: " + str(filter_similar_variants) + 
+                             "，参数: 见下方")
+            
+            # 单独记录参数，避免格式化问题
+            self.logger.debug("查询参数: " + str(kwargs))
             
             limit = min(kwargs.pop("limit", 50), 50)  # 单次获取数量，最大50
             
@@ -1155,13 +1166,11 @@ class CJProductsCrawler:
             total_discount = 0
             
             # 根据设置决定游标策略
-            if use_persistent_cursor:
-                # 使用持久化游标策略
-                cursor = self._select_cursor()
-                self.logger.info(f"使用持久化游标策略，初始游标: {cursor[:30] if cursor else '空'}")
-            else:
-                # 使用旧的随机游标策略或空游标
-                cursor = ""
+            current_cursor = cursor  # 使用传入的游标参数
+            if use_persistent_cursor and not current_cursor:
+                # 仅当未提供游标时使用持久化游标策略
+                current_cursor = self._select_cursor()
+                self.logger.info(f"使用持久化游标策略，初始游标: {current_cursor[:30] if current_cursor else '空'}")
             
             # 临时存储本次执行的游标历史，用于随机游标策略
             temp_cursor_history = {}
@@ -1171,8 +1180,8 @@ class CJProductsCrawler:
             while total_success + total_fail < max_items:
                 # 使用随机游标策略（仅当启用且非持久化模式时）
                 if use_random_cursor and not use_persistent_cursor and temp_cursor_history and empty_count > 0:
-                    cursor = self._get_random_cursor(temp_cursor_history)
-                    self.logger.debug(f"使用临时随机游标: {cursor[:10] if cursor else '无'}...")
+                    current_cursor = self._get_random_cursor(temp_cursor_history)
+                    self.logger.debug(f"使用临时随机游标: {current_cursor[:10] if current_cursor else '无'}...")
                 
                 # 计算单次获取数量
                 remaining = max_items - (total_success + total_fail)
@@ -1181,7 +1190,7 @@ class CJProductsCrawler:
                 # 获取一批商品
                 success, fail, variants, coupon, discount, next_cursor, asins = await self.fetch_and_save_products(
                     db=db,
-                    cursor=cursor,
+                    cursor=current_cursor if current_cursor else "",
                     limit=batch_limit,
                     skip_existing=skip_existing,
                     filter_similar_variants=filter_similar_variants,
@@ -1189,9 +1198,9 @@ class CJProductsCrawler:
                 )
                 
                 # 记录当前游标获取到的ASIN
-                if cursor not in temp_cursor_history:
-                    temp_cursor_history[cursor] = []
-                temp_cursor_history[cursor].extend(asins)
+                if current_cursor not in temp_cursor_history:
+                    temp_cursor_history[current_cursor] = []
+                temp_cursor_history[current_cursor].extend(asins)
                 
                 # 更新计数器
                 total_success += success
@@ -1202,7 +1211,7 @@ class CJProductsCrawler:
                 
                 # 如果使用持久化游标，更新游标历史
                 if use_persistent_cursor:
-                    self._update_cursor_history(cursor, asins, success)
+                    self._update_cursor_history(current_cursor, asins, success)
                 
                 self.logger.info(f"当前进度: 已获取 {total_success + total_fail}/{max_items} 个商品")
                 
@@ -1212,7 +1221,7 @@ class CJProductsCrawler:
                     self.logger.warning(f"连续 {empty_count} 次未获取到新商品")
                     
                     # 检查游标是否相同，如果相同则可能存在循环问题
-                    if cursor == next_cursor:
+                    if current_cursor == next_cursor:
                         self.logger.warning("当前游标与下一页游标相同，退出循环以避免无限循环!")
                         break
                         
@@ -1227,12 +1236,17 @@ class CJProductsCrawler:
                     empty_count = 0  # 获取到新商品，重置计数器
                 
                 # 详细记录分页参数
-                self.logger.info(f"进入下一页分页 - 当前游标: [{cursor[:30]}{'...' if len(cursor) > 30 else ''}], 下一页游标: [{next_cursor[:30]}{'...' if len(next_cursor) > 30 else ''}]")
-                if cursor == next_cursor:
+                curr_cursor_log = current_cursor[:30] if current_cursor else "空"
+                next_cursor_log = next_cursor[:30] if next_cursor else "空"
+                curr_tail = "..." if current_cursor and len(current_cursor) > 30 else ""
+                next_tail = "..." if next_cursor and len(next_cursor) > 30 else ""
+                self.logger.info(f"进入下一页分页 - 当前游标: [{curr_cursor_log}{curr_tail}], 下一页游标: [{next_cursor_log}{next_tail}]")
+                
+                if current_cursor == next_cursor:
                     self.logger.warning("警告: 当前游标与下一页游标相同，可能会导致重复数据!")
                 
                 # 更新游标
-                cursor = next_cursor
+                current_cursor = next_cursor
                 
                 # 等待一段时间，避免API限流
                 await asyncio.sleep(0.5)
@@ -1284,22 +1298,27 @@ class CJProductsCrawler:
                 nonlocal total_success, total_fail, total_variants, total_coupon, total_discount
                 
                 # 为这个工作进程选择游标
-                cursor = self._select_cursor()
-                self.logger.info(f"工作进程 {worker_id} 使用游标: {cursor[:30] if cursor else '空'}")
+                worker_cursor = self._select_cursor()
+                self.logger.info(f"工作进程 {worker_id} 使用游标: {worker_cursor[:30] if worker_cursor else '空'}")
                 
                 # 为这个工作进程设置单独的数据库会话
                 from models.database import SessionLocal
                 worker_db = SessionLocal()
                 
                 try:
-                    # 调用现有的抓取方法
+                    # 确保kwargs中没有cursor参数
+                    worker_kwargs = kwargs.copy()
+                    if 'cursor' in worker_kwargs:
+                        worker_kwargs.pop('cursor')
+                        
+                    # 调用现有的抓取方法，显式传递cursor参数，避免与kwargs冲突
                     success, fail, variants, coupon, discount = await self.fetch_all_products(
                         db=worker_db,
                         max_items=items_per_worker,
-                        cursor=cursor,
                         skip_existing=skip_existing,
                         filter_similar_variants=filter_similar_variants,
-                        **kwargs
+                        cursor=worker_cursor,  # 显式传递cursor，不通过kwargs
+                        **worker_kwargs  # 其他参数通过worker_kwargs传递，确保没有重复参数
                     )
                     
                     # 获取锁，更新共享计数器
@@ -1386,6 +1405,33 @@ class CJProductsCrawler:
             return cursor[:10]
             
         return "default"
+
+    # 为所有工作进程创建一个辅助方法来安全记录日志
+    def _safe_log(self, level, message, **kwargs):
+        """安全记录日志，处理可能包含花括号的消息
+        
+        Args:
+            level: 日志级别('info', 'debug', 'warning', 'error', 'success')
+            message: 日志消息文本
+            **kwargs: 要格式化到消息中的参数
+        """
+        try:
+            # 获取对应的日志方法
+            log_method = getattr(self.logger, level)
+            
+            # 如果没有格式化参数，直接记录
+            if not kwargs:
+                log_method(message)
+                return
+            
+            # 安全格式化
+            safe_message = message.format(**{k: (str(v)[:30] + '...' if isinstance(v, str) and len(str(v)) > 30 else v) 
+                                          for k, v in kwargs.items()})
+            log_method(safe_message)
+        except Exception as e:
+            # 如果格式化失败，使用更安全的方式
+            self.logger.error(f"日志格式化失败: {str(e)}")
+            self.logger.info(f"原始消息: {message}, 参数: {str(kwargs)}")
 
 @log_function_call
 async def main():
