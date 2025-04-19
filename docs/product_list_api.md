@@ -129,7 +129,8 @@ GET /api/products/list
 | coupon_terms | 字符串/null | 优惠券使用条款说明 |
 | created_at | 字符串 | 创建时间(ISO格式) |
 | updated_at | 字符串 | 更新时间(ISO格式) |
-| source | 字符串 | 数据来源 |
+| source | 字符串 | 数据来源类型：bestseller/coupon/discount |
+| api_provider | 字符串 | API提供者：pa-api/cj-api |
 | commission_rate | 整数 | 佣金比例(%) |
 
 ### 商品报价(ProductOffer)字段说明

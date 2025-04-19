@@ -175,6 +175,7 @@ class ProductService:
                 brand=product.brand,
                 main_image=product.main_image,
                 timestamp=product.timestamp or datetime.utcnow(),
+                source=product.source,  # 添加数据来源字段
                 offers=[
                     ProductOffer(
                         condition=o.condition or "New",  # 提供默认值
@@ -382,6 +383,7 @@ class ProductService:
                 features=features,
                 cj_url=product.cj_url if product.api_provider == "cj-api" else None,
                 api_provider=product.api_provider,
+                source=product.source,  # 添加数据来源字段
                 offers=[
                     ProductOffer(
                         condition=o.condition or "New",
@@ -876,6 +878,7 @@ class ProductService:
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
                         api_provider=product.api_provider,
+                        source=product.source,  # 添加数据来源字段
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -1287,6 +1290,7 @@ class ProductService:
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
                         api_provider=product.api_provider,
+                        source=product.source,  # 添加数据来源字段
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -1445,6 +1449,7 @@ class ProductService:
                         features=features,
                         cj_url=product.cj_url if product.api_provider == "cj-api" else None,
                         api_provider=product.api_provider,
+                        source=product.source,  # 添加数据来源字段
                         offers=[
                             ProductOffer(
                                 condition=offer.condition or "New",
@@ -1845,7 +1850,8 @@ class ProductService:
                             browse_nodes=browse_nodes,
                             features=features,
                             cj_url=product.cj_url,
-                            api_provider=product.api_provider
+                            api_provider=product.api_provider,
+                            source=product.source  # 添加数据来源字段
                         )
                         
                         return {
@@ -2016,6 +2022,7 @@ class ProductService:
                         features=features,
                         cj_url=product.cj_url,
                         api_provider=product.api_provider,
+                        source=product.source,  # 添加数据来源字段
                         offers=product_offers
                     )
                     

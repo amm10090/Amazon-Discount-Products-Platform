@@ -58,6 +58,7 @@ class ProductInfo(BaseModel):
     features: Optional[List[str]] = []  # 添加商品特性列表
     cj_url: Optional[str] = None  # CJ推广链接
     api_provider: Optional[str] = "pa-api"  # API提供者，默认为pa-api
+    source: Optional[str] = None  # 数据来源：bestseller/coupon/discount等
     raw_data: Optional[Dict] = None  # 原始数据，用于存储元数据
     coupon_expiration_date: Optional[datetime] = None  # 优惠券过期日期
     coupon_terms: Optional[str] = None  # 优惠券条款
@@ -100,6 +101,7 @@ class ProductInfo(BaseModel):
             "offers": [offer.dict() for offer in self.offers],
             "timestamp": self.timestamp.isoformat(),
             "cj_url": self.cj_url,
+            "source": self.source,
             "coupon_expiration_date": self.coupon_expiration_date.isoformat() if self.coupon_expiration_date else None,
             "coupon_terms": self.coupon_terms
         } 
