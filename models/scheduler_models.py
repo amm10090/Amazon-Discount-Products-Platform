@@ -6,7 +6,7 @@ class JobConfig(BaseModel):
     """定时任务配置模型"""
     id: str = Field(..., description="任务ID")
     type: str = Field(..., description="任务类型：cron或interval")
-    crawler_type: str = Field(..., description="爬虫类型：bestseller、coupon或all")
+    crawler_type: str = Field(..., description="爬虫类型：bestseller、coupon、all、update、cj、coupon_details")
     max_items: int = Field(..., ge=10, le=1000, description="最大采集数量")
     hour: Optional[str] = Field(None, description="Cron任务的小时设置")
     minute: Optional[str] = Field(None, description="Cron任务的分钟设置")
@@ -15,6 +15,8 @@ class JobConfig(BaseModel):
     # 折扣爬虫配置参数
     updater_config: Optional[dict] = Field(None, description="更新器配置参数")
     discount_config: Optional[dict] = Field(None, description="折扣爬虫配置参数")
+    # 优惠券详情配置参数
+    coupon_details_config: Optional[dict] = Field(None, description="优惠券详情爬虫配置参数")
     # 直接支持的折扣爬虫参数
     num_threads: Optional[int] = Field(None, description="爬虫线程数")
     update_interval: Optional[int] = Field(None, description="更新间隔(小时)")
@@ -43,7 +45,7 @@ class JobStatus(BaseModel):
     """任务状态模型"""
     id: str = Field(..., description="任务ID")
     type: str = Field(..., description="任务类型")
-    crawler_type: str = Field(..., description="爬虫类型")
+    crawler_type: str = Field(..., description="爬虫类型：bestseller、coupon、all、update、cj、coupon_details")
     max_items: int = Field(..., description="最大采集数量")
     next_run_time: float = Field(..., description="下次执行时间戳")
     paused: bool = Field(..., description="是否暂停")
@@ -54,6 +56,8 @@ class JobStatus(BaseModel):
     # 折扣爬虫配置参数
     updater_config: Optional[dict] = Field(None, description="更新器配置参数")
     discount_config: Optional[dict] = Field(None, description="折扣爬虫配置参数")
+    # 优惠券详情配置参数
+    coupon_details_config: Optional[dict] = Field(None, description="优惠券详情爬虫配置参数")
     # 直接支持的折扣爬虫参数
     num_threads: Optional[int] = Field(None, description="爬虫线程数")
     update_interval: Optional[int] = Field(None, description="更新间隔(小时)")

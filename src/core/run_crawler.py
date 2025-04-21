@@ -10,6 +10,14 @@
 
 使用方法：
 python -m src.core.run_crawler --job-id <任务ID> --crawler-type <爬虫类型> --max-items <最大采集数量> [--config-file <配置文件路径>]
+
+支持的爬虫类型：
+- bestseller: 畅销商品爬虫
+- coupon: 优惠券商品爬虫
+- all: 同时执行畅销商品和优惠券商品爬虫
+- update: 商品信息更新任务
+- cj: CJ商品数据爬虫
+- coupon_details: 优惠券详情抓取任务
 """
 
 import os
@@ -34,7 +42,7 @@ def parse_arguments():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='爬虫任务执行脚本')
     parser.add_argument('--job-id', type=str, required=True, help='任务ID')
-    parser.add_argument('--crawler-type', type=str, required=True, help='爬虫类型：bestseller/coupon/all/update/cj')
+    parser.add_argument('--crawler-type', type=str, required=True, help='爬虫类型：bestseller/coupon/all/update/cj/coupon_details')
     parser.add_argument('--max-items', type=int, required=True, help='最大采集数量')
     parser.add_argument('--config-file', type=str, help='配置文件路径')
     return parser.parse_args()
@@ -91,6 +99,42 @@ async def execute_task(job_id: str, crawler_type: str, max_items: int, config: O
         
         logger.success(f"商品更新任务完成，成功更新 {success_count}/{success_count + failed_count} 个商品，删除 {deleted_count} 个商品")
         return success_count
+    
+    elif crawler_type == "coupon_details":
+        # 执行优惠券详情抓取任务
+        from src.core.discount_scraper_mt import check_and_scrape_coupon_details
+        
+        # 检查是否有自定义配置
+        num_threads = 2  # 默认使用较少线程，避免触发Amazon反爬
+        headless = True
+        min_delay = 2.0
+        max_delay = 4.0
+        debug = False
+        
+        if config and "coupon_details_config" in config:
+            coupon_details_config = config.get("coupon_details_config", {})
+            logger.info(f"使用自定义优惠券详情抓取配置: {coupon_details_config}")
+            num_threads = coupon_details_config.get("num_threads", int(os.getenv("DISCOUNT_SCRAPER_THREADS", "2")))
+            headless = coupon_details_config.get("headless", os.getenv("CRAWLER_HEADLESS", "true").lower() == "true")
+            min_delay = coupon_details_config.get("min_delay", float(os.getenv("DISCOUNT_SCRAPER_MIN_DELAY", "2.0")))
+            max_delay = coupon_details_config.get("max_delay", float(os.getenv("DISCOUNT_SCRAPER_MAX_DELAY", "4.0")))
+            debug = coupon_details_config.get("debug", os.getenv("DISCOUNT_SCRAPER_DEBUG", "false").lower() == "true")
+        else:
+            logger.info("使用默认优惠券详情抓取配置")
+        
+        # 运行优惠券详情抓取
+        processed_count, updated_count = check_and_scrape_coupon_details(
+            asins=None,  # 从数据库自动获取需要检查的商品
+            batch_size=max_items,
+            num_threads=num_threads,
+            headless=headless,
+            min_delay=min_delay,
+            max_delay=max_delay,
+            debug=debug
+        )
+        
+        logger.success(f"优惠券详情抓取完成，处理: {processed_count}，成功更新: {updated_count}")
+        return updated_count
     
     elif crawler_type == "cj":
         # 执行CJ爬虫任务

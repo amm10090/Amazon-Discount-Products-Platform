@@ -412,6 +412,25 @@ class SchedulerManager:
                         cmd.append("--debug")
                     if "log_to_console" in dc and dc["log_to_console"]:
                         cmd.append("--log-to-console")
+            elif crawler_type == "coupon_details":
+                # 直接调用折扣爬虫脚本的check-details功能
+                cmd.extend(["-m", "src.core.discount_scraper_mt",
+                           "--check-details",
+                           "--batch-size", str(max_items)])
+                
+                # 添加配置参数
+                if config_params and "coupon_details_config" in config_params:
+                    cdc = config_params["coupon_details_config"]
+                    if "num_threads" in cdc:
+                        cmd.extend(["--threads", str(cdc["num_threads"])])
+                    if "headless" in cdc and not cdc["headless"]:
+                        cmd.append("--no-headless")
+                    if "min_delay" in cdc:
+                        cmd.extend(["--min-delay", str(cdc["min_delay"])])
+                    if "max_delay" in cdc:
+                        cmd.extend(["--max-delay", str(cdc["max_delay"])])
+                    if "debug" in cdc and cdc["debug"]:
+                        cmd.append("--debug")
             else:
                 # 对于其他爬虫类型，调用通用爬虫执行脚本
                 cmd.extend(["-m", "src.core.run_crawler", 
@@ -583,6 +602,13 @@ class SchedulerManager:
                     extra_config["updater_config"] = {}
                 extra_config["updater_config"]["discount_config"] = job_config["discount_config"]
                 self._logger.info(f"任务 {job_id} 的updater_config中添加了discount_config")
+
+        # 处理优惠券详情爬虫配置
+        if "coupon_details_config" in job_config:
+            if job_config["crawler_type"] == "coupon_details":
+                # 如果是coupon_details爬虫，把coupon_details_config作为单独参数
+                extra_config["coupon_details_config"] = job_config["coupon_details_config"]
+                self._logger.info(f"任务 {job_id} 包含coupon_details_config: {job_config['coupon_details_config']}")
         
         # 将所有配置合并为一个参数传递
         args.append(extra_config if extra_config else None)
@@ -626,6 +652,11 @@ class SchedulerManager:
                     if job_info["crawler_type"] == "discount" and isinstance(config_params, dict):
                         if "discount_config" in config_params:
                             job_info["discount_config"] = config_params["discount_config"]
+                    
+                    # 添加优惠券详情爬虫配置
+                    if job_info["crawler_type"] == "coupon_details" and isinstance(config_params, dict):
+                        if "coupon_details_config" in config_params:
+                            job_info["coupon_details_config"] = config_params["coupon_details_config"]
                 
                 # 添加触发器特定的信息
                 if isinstance(job.trigger, CronTrigger):
@@ -872,6 +903,25 @@ class SchedulerManager:
                         cmd.append("--debug")
                     if "log_to_console" in dc and dc["log_to_console"]:
                         cmd.append("--log-to-console")
+            elif crawler_type == "coupon_details":
+                # 直接调用折扣爬虫脚本的check-details功能
+                cmd.extend(["-m", "src.core.discount_scraper_mt",
+                           "--check-details",
+                           "--batch-size", str(max_items)])
+                
+                # 添加配置参数
+                if config_params and "coupon_details_config" in config_params:
+                    cdc = config_params["coupon_details_config"]
+                    if "num_threads" in cdc:
+                        cmd.extend(["--threads", str(cdc["num_threads"])])
+                    if "headless" in cdc and not cdc["headless"]:
+                        cmd.append("--no-headless")
+                    if "min_delay" in cdc:
+                        cmd.extend(["--min-delay", str(cdc["min_delay"])])
+                    if "max_delay" in cdc:
+                        cmd.extend(["--max-delay", str(cdc["max_delay"])])
+                    if "debug" in cdc and cdc["debug"]:
+                        cmd.append("--debug")
             else:
                 # 对于其他爬虫类型，调用通用爬虫执行脚本
                 cmd.extend(["-m", "src.core.run_crawler", 
