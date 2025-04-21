@@ -24,6 +24,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from tqdm import tqdm
 import concurrent.futures
 from dateutil import parser as date_parser
+from sqlalchemy import or_  # 添加缺失的or_函数导入
 
 # 添加项目根目录到Python路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
