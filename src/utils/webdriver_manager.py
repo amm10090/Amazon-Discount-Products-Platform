@@ -118,6 +118,21 @@ class WebDriverConfig:
             # 6. 添加美国地区的语言请求头
             options.add_argument(f'--accept-language=en-US,en;q=0.9')
             
+            # 内存优化参数
+            options.add_argument('--disable-extensions')  # 禁用扩展
+            options.add_argument('--disable-popup-blocking')  # 禁用弹窗
+            options.add_argument('--disable-infobars')  # 禁用信息栏
+            options.add_argument('--js-flags=--expose-gc')  # 允许JavaScript垃圾回收
+            options.add_argument('--disable-web-security')  # 禁用网页安全功能（谨慎使用）
+            options.add_argument('--single-process')  # 单进程模式（大幅减少内存占用）
+            options.add_argument('--disable-application-cache')  # 禁用应用缓存
+            options.add_argument('--disable-default-apps')  # 禁用默认应用
+            options.add_argument('--process-per-site')  # 每个站点一个进程
+            options.add_argument('--aggressive-cache-discard')  # 积极丢弃缓存
+            options.add_argument('--disable-component-extensions-with-background-pages')  # 禁用带后台页面的组件扩展
+            options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')  # 禁用特定功能
+            options.add_argument('--disable-site-isolation-trials')  # 禁用站点隔离试验
+            
             return options
             
         except Exception as e:

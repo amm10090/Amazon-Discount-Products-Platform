@@ -139,7 +139,9 @@ class ThreadSafeStats:
             'success_count': 0,
             'failure_count': 0,
             'captcha_count': 0,        # 遇到验证码的次数
+            'refresh_success_count': 0, # 通过刷新成功解决验证码的次数
             'retry_count': 0,          # 重试的次数
+            'delayed_count': 0,        # 因等待期而被延迟处理的次数
             'max_retry_exceeded': 0,   # 超过最大重试次数的任务数
             'updated_fields': {
                 'coupon_type': 0,
@@ -209,7 +211,7 @@ class CouponScraperWorker:
         # 已处理的商品集合，避免重复处理
         self._processed_asins = set()
         
-        # 重试计数器，用于跟踪每个ASIN的重试次数
+        # 重试计数器和时间戳，用于跟踪每个ASIN的重试次数和下次可处理的时间点
         self._retry_counter = {}
         # 最大重试次数
         self.max_retries = 3
@@ -266,12 +268,40 @@ class CouponScraperWorker:
         if self.driver:
             try:
                 self.driver.quit()
+                logger.debug("WebDriver已关闭")
             except Exception as e:
-                logger.warning("关闭WebDriver异常: {}", e)
-            finally:
-                self.driver = None
-                logger.info("WebDriver已关闭")
-    
+                logger.warning("关闭WebDriver时出错: {}", e)
+            self.driver = None
+            
+    def _safe_refresh_page(self) -> bool:
+        """
+        安全地刷新当前页面
+        
+        Returns:
+            bool: 刷新是否成功
+        """
+        try:
+            logger.debug("尝试刷新页面...")
+            self.driver.refresh()
+            
+            # 等待页面加载完成
+            wait_time = random.uniform(3, 5)
+            logger.debug("等待页面加载: {:.1f}秒", wait_time)
+            time.sleep(wait_time)
+            
+            # 检查浏览器是否仍然响应
+            try:
+                self.driver.execute_script("return document.readyState")
+                logger.debug("页面刷新成功")
+                return True
+            except Exception as e:
+                logger.warning("检查页面状态失败: {}", e)
+                return False
+                
+        except Exception as e:
+            logger.warning("刷新页面时出错: {}", e)
+            return False
+            
     def _extract_coupon_info(self) -> Tuple[Optional[str], Optional[float], Optional[datetime], Optional[str]]:
         """
         从页面提取优惠券信息
@@ -816,6 +846,51 @@ class CouponScraperWorker:
             # 发生错误时保守处理，返回False
             return False
 
+    def _try_different_image(self) -> bool:
+        """
+        尝试在验证码页面点击"Try different image"链接
+        
+        Returns:
+            bool: 是否成功点击了链接
+        """
+        try:
+            logger.info("尝试点击'Try different image'链接...")
+            
+            # 尝试查找"Try different image"链接的多种方式
+            selectors = [
+                "//a[contains(text(), 'Try different image')]", 
+                "//div[contains(@class, 'a-column') and contains(@class, 'a-span6')]//a[contains(text(), 'Try different image')]",
+                "//div[contains(@class, 'a-column') and contains(@class, 'a-span6') and contains(@class, 'a-span-last')]//a",
+                "//a[contains(@onclick, 'window.location.reload()')]"
+            ]
+            
+            for selector in selectors:
+                elements = self.driver.find_elements(By.XPATH, selector)
+                for element in elements:
+                    if element.is_displayed() and element.is_enabled():
+                        logger.info("找到'Try different image'链接，尝试点击")
+                        
+                        try:
+                            # 尝试使用JavaScript点击
+                            self.driver.execute_script("arguments[0].click();", element)
+                            
+                            # 等待一段时间让页面重新加载验证码图片
+                            wait_time = random.uniform(2, 4)
+                            logger.debug("等待页面加载新验证码图片: {:.1f}秒", wait_time)
+                            time.sleep(wait_time)
+                            
+                            logger.info("成功点击'Try different image'链接")
+                            return True
+                        except Exception as e:
+                            logger.warning("点击'Try different image'链接时出错: {}", e)
+            
+            logger.warning("未找到'Try different image'链接或点击失败")
+            return False
+                
+        except Exception as e:
+            logger.warning("尝试点击'Try different image'链接时出错: {}", e)
+            return False
+    
     @track_performance  # 使用装饰器记录函数执行时间
     def process_product(self, product: Product) -> bool:
         """
@@ -862,31 +937,65 @@ class CouponScraperWorker:
             
             # 检查是否是验证码页面
             if self._is_captcha_page():
-                # 更新验证码统计
-                self.stats.increment('captcha_count')
-                logger.warning("商品 {} 遇到验证码页面，将放回队列尾部稍后重试", product.asin)
+                # 首先尝试点击"Try different image"链接
+                logger.warning("检测到验证码页面，尝试点击'Try different image'链接...")
+                try_different_success = self._try_different_image()
                 
-                # 获取当前ASIN的重试次数
-                retry_count = self._retry_counter.get(product.asin, 0) + 1
-                self._retry_counter[product.asin] = retry_count
+                # 如果点击"Try different image"失败，再尝试刷新页面
+                if not try_different_success:
+                    logger.warning("点击'Try different image'链接失败，等待10秒后尝试刷新页面...")
+                    time.sleep(10)  # 等待10秒
+                    
+                    # 尝试刷新页面
+                    refresh_success = self._safe_refresh_page()
+                    
+                    if not refresh_success:
+                        logger.warning("刷新页面失败，将商品 {} 放回队列尾部", product.asin)
+                        self.stats.increment('captcha_count')
+                        self.stats.increment('retry_count')
+                        self.task_queue.put(product.asin)
+                        return True
                 
-                # 如果重试次数超过最大值，则放弃
-                if retry_count > self.max_retries:
-                    logger.error("商品 {} 已达到最大重试次数 {}，放弃处理", product.asin, self.max_retries)
-                    self.stats.increment('max_retry_exceeded')
-                    return False
-                
-                # 更新重试次数统计
-                self.stats.increment('retry_count')
-                
-                # 等待较长时间再重试
-                delay = random.uniform(30, 60)  # 等待30-60秒
-                logger.info("等待 {:.0f} 秒后将重新尝试...", delay)
-                time.sleep(delay)
-                
-                # 将任务重新加入队列
-                self.task_queue.put(product.asin)
-                return True  # 返回True表示任务已重新加入队列
+                # 再次检查是否还是验证码页面
+                if self._is_captcha_page():
+                    # 刷新后仍是验证码页面，更新验证码统计
+                    self.stats.increment('captcha_count')
+                    logger.warning("尝试后仍然是验证码页面，商品 {} 将放回队列尾部稍后重试", product.asin)
+                    
+                    # 获取当前ASIN的重试信息
+                    retry_info = self._retry_counter.get(product.asin, (0, 0))
+                    # 如果是旧格式（整数），则转换为元组格式
+                    if isinstance(retry_info, int):
+                        retry_count = retry_info + 1
+                    else:
+                        # 如果已经是元组格式，取出重试次数并增加
+                        retry_count = retry_info[0] + 1
+                    
+                    # 如果重试次数超过最大值，则放弃
+                    if retry_count > self.max_retries:
+                        logger.error("商品 {} 已达到最大重试次数 {}，放弃处理", product.asin, self.max_retries)
+                        self.stats.increment('max_retry_exceeded')
+                        return False
+                    
+                    # 更新重试次数统计
+                    self.stats.increment('retry_count')
+                    
+                    # 计算下次处理时间（当前时间 + 延迟）
+                    delay = random.uniform(50, 70)  # 等待50-70秒
+                    next_process_time = time.time() + delay
+                    
+                    # 创建一个包含时间戳的元组 (retry_count, next_process_time)
+                    self._retry_counter[product.asin] = (retry_count, next_process_time)
+                    
+                    logger.info("商品 {} 将在 {:.0f} 秒后可再次处理", product.asin, delay)
+                    
+                    # 将任务重新加入队列，但不等待
+                    self.task_queue.put(product.asin)
+                    return True  # 返回True表示任务已重新加入队列
+                else:
+                    # 操作成功解决了验证码问题
+                    logger.info("操作成功，验证码已消失，继续处理")
+                    self.stats.increment('refresh_success_count')
             
             # 提取优惠券信息
             logger.debug("提取优惠券信息...")
@@ -931,10 +1040,33 @@ class CouponScraperWorker:
         Returns:
             bool: 处理是否成功
         """
-        # 检查是否已经处理过此商品
-        if asin in self._processed_asins:
-            logger.debug("商品已处理过: {}", asin)
-            return True
+        # 检查商品是否在等待重试的状态
+        if asin in self._retry_counter:
+            retry_info = self._retry_counter[asin]
+            # 如果是元组格式 (retry_count, next_process_time)
+            if isinstance(retry_info, tuple) and len(retry_info) == 2:
+                retry_count, next_process_time = retry_info
+                current_time = time.time()
+                # 如果当前时间未到允许处理的时间点
+                if current_time < next_process_time:
+                    remaining_time = next_process_time - current_time
+                    logger.info("商品 {} 尚在等待期，还需等待 {:.1f} 秒，重新放回队列", 
+                              asin, remaining_time)
+                    # 更新延迟处理的计数
+                    self.stats.increment('delayed_count')
+                    # 重新放回队列并跳过处理
+                    self.task_queue.put(asin)
+                    return True
+        
+        # 检查是否是首次处理此ASIN
+        is_first_attempt = asin not in self._processed_asins
+        
+        # 将ASIN加入已处理集合，无论是否成功
+        self._processed_asins.add(asin)
+        
+        # 仅在首次处理时增加processed_count计数
+        if is_first_attempt:
+            self.stats.increment('processed_count')
         
         # 尝试从数据库获取商品
         logger.info("查询数据库中的商品信息")
@@ -960,10 +1092,6 @@ class CouponScraperWorker:
         # 处理商品优惠券信息
         success = self.process_product(product)
         
-        # 如果处理成功，将商品ASIN添加到已处理集合中
-        if success:
-            self._processed_asins.add(asin)
-            
         return success
     
     def run(self):
@@ -996,7 +1124,7 @@ class CouponScraperWorker:
                     logger.info("处理商品 ASIN: {}", asin)
                     
                     # 使用当前线程的会话处理ASIN
-                    self.stats.increment('processed_count')
+                    # 注意：processed_count统计已移至process_asin方法中
                     success = self.process_asin(asin)
                     
                     if success:
@@ -1028,7 +1156,12 @@ class CouponScraperWorker:
                 logger.info("工作线程已关闭")
 
 class CouponScraperMT:
-    """多线程优惠券信息抓取器主类"""
+    """
+    多线程优惠券信息抓取器主类
+    
+    本类专门用于处理数据库中source='coupon'来源的商品，抓取其优惠券详情。
+    注意：非'coupon'来源的商品将被跳过处理。
+    """
     
     def __init__(self, num_threads: int = 4, batch_size: int = 50, headless: bool = True,
                  min_delay: float = 2.0, max_delay: float = 4.0, specific_asins: list = None,
@@ -1146,6 +1279,7 @@ class CouponScraperMT:
             from datetime import timedelta
             update_threshold = datetime.now(UTC) - timedelta(hours=self.update_interval)
             current_time = datetime.now(UTC)
+            one_day_future = current_time + timedelta(days=1)  # 一天后的时间点
             
             # 增加关于force_update的日志
             if self.force_update:
@@ -1155,63 +1289,132 @@ class CouponScraperMT:
                           self.update_interval, update_threshold.strftime("%Y-%m-%d %H:%M:%S"))
             
             with LogContext(operation="db_query", component="QueuePopulation"):
-                if self.force_update:
-                    # 强制更新模式 - 获取所有source为'coupon'的商品
-                    logger.info("强制更新模式 - 获取所有source为'coupon'的商品")
-                    products = self.db.query(Product).filter(
-                        Product.source == 'coupon'
-                    ).order_by(Product.created_at).limit(self.batch_size).all()
-                    logger.info("强制更新模式 - 获取到 {} 个商品", len(products))
-                else:
-                    # 智能更新模式 - 使用改进的查询逻辑
-                    logger.info("智能更新模式 - 过滤需要更新的商品 (更新间隔: {}小时)", self.update_interval)
+                # 优先处理的商品列表
+                priority_products = []
+                
+                # 高优先级条件1: 查找优惠券没有有效期或条款的商品
+                # 获取所有至少有一个优惠券历史记录的商品ASIN
+                history_asins_query = self.db.query(CouponHistory.product_id).distinct()
+                history_asins = [asin[0] for asin in history_asins_query.all()]
+                
+                # 查找在products表中存在，但在最新的优惠券记录中没有expiration_date或terms的商品
+                logger.info("查找优惠券缺失有效期或条款的商品")
+                missing_info_products = []
+                for asin in history_asins:
+                    # 获取该商品最新的优惠券记录
+                    latest_coupon = self.db.query(CouponHistory).filter(
+                        CouponHistory.product_id == asin
+                    ).order_by(CouponHistory.created_at.desc()).first()
                     
-                    # 修改查询逻辑: 查询所有source='coupon'的商品
-                    all_coupon_products = self.db.query(Product).filter(
-                        Product.source == 'coupon'
-                    ).all()
-                    
-                    # 查询所有已有历史记录的商品ASIN
-                    history_asins_query = self.db.query(CouponHistory.product_id).distinct()
-                    history_asins = [asin[0] for asin in history_asins_query.all()]
-                    
-                    # 筛选需要更新的商品
-                    products_to_update = []
-                    
-                    # 处理没有历史记录的商品（直接添加）
-                    new_products = [p for p in all_coupon_products if p.asin not in history_asins]
-                    logger.info("找到 {} 个没有历史记录的新商品", len(new_products))
-                    products_to_update.extend(new_products)
-                    
-                    # 如果新商品数量不足批处理大小，再处理有历史记录但需要更新的商品
-                    if len(products_to_update) < self.batch_size and history_asins:
-                        # 使用updated_at或discount_updated_at字段查询需要更新的商品（满足任一条件）
-                        from sqlalchemy import or_
-                        products_need_update = self.db.query(Product).filter(
-                            Product.source == 'coupon',
-                            Product.asin.in_(history_asins),
-                            or_(
-                                Product.updated_at < update_threshold,
-                                Product.discount_updated_at < update_threshold
-                            )
-                        ).order_by(Product.updated_at).limit(self.batch_size - len(products_to_update)).all()
+                    if latest_coupon and (latest_coupon.expiration_date is None or latest_coupon.terms is None):
+                        # 查找对应的产品
+                        product = self.db.query(Product).filter(Product.asin == asin).first()
+                        if product:
+                            missing_info_products.append(product)
+                
+                logger.info("找到 {} 个优惠券缺失有效期或条款的商品", len(missing_info_products))
+                priority_products.extend(missing_info_products)
+                
+                # 高优先级条件2: 查找优惠券即将到期（一天内）或已过期的商品
+                logger.info("查找优惠券即将到期或已过期的商品")
+                expiring_products_query = self.db.query(Product).join(
+                    CouponHistory, Product.asin == CouponHistory.product_id
+                ).filter(
+                    # 有效期不为空
+                    CouponHistory.expiration_date.isnot(None),
+                    # 已过期或一天内到期
+                    or_(
+                        CouponHistory.expiration_date <= current_time,  # 已过期
+                        CouponHistory.expiration_date <= one_day_future  # 一天内到期
+                    )
+                ).distinct()
+                
+                expiring_products = expiring_products_query.all()
+                logger.info("找到 {} 个优惠券即将到期或已过期的商品", len(expiring_products))
+                
+                # 添加到优先队列，避免重复
+                for product in expiring_products:
+                    if product.asin not in [p.asin for p in priority_products]:
+                        priority_products.append(product)
+                
+                # 正常的产品选择逻辑，如果优先队列不足批处理大小
+                remaining_slots = self.batch_size - len(priority_products)
+                regular_products = []
+                
+                if remaining_slots > 0:
+                    if self.force_update:
+                        # 强制更新模式 - 获取所有source为'coupon'的商品
+                        logger.info("强制更新模式 - 获取所有source为'coupon'的商品")
+                        products_query = self.db.query(Product).filter(
+                            Product.source == 'coupon'  # 重要：仅处理coupon来源的商品
+                        ).order_by(Product.created_at)
                         
-                        logger.info("找到 {} 个需要更新的已有历史记录的商品", len(products_need_update))
-                        products_to_update.extend(products_need_update)
-                    
-                    # 使用最终筛选出的商品列表
-                    products = products_to_update
-                    
-                    # 根据创建时间排序
-                    products.sort(key=lambda p: p.created_at if p.created_at else datetime.min)
-                    
-                    # 限制数量
-                    products = products[:self.batch_size]
+                        # 排除已在优先队列中的商品
+                        priority_asins = [p.asin for p in priority_products]
+                        products_query = products_query.filter(~Product.asin.in_(priority_asins))
+                        
+                        regular_products = products_query.limit(remaining_slots).all()
+                        logger.info("强制更新模式 - 获取到 {} 个常规商品", len(regular_products))
+                    else:
+                        # 智能更新模式 - 使用改进的查询逻辑
+                        logger.info("智能更新模式 - 过滤需要更新的商品 (更新间隔: {}小时)", self.update_interval)
+                        
+                        # 修改查询逻辑: 查询所有source='coupon'的商品
+                        all_coupon_products = self.db.query(Product).filter(
+                            Product.source == 'coupon'
+                        ).all()
+                        
+                        # 筛选需要更新的商品
+                        products_to_update = []
+                        
+                        # 排除已在优先队列中的商品
+                        priority_asins = [p.asin for p in priority_products]
+                        
+                        # 处理没有历史记录的商品（直接添加）
+                        new_products = [p for p in all_coupon_products if p.asin not in history_asins and p.asin not in priority_asins]
+                        logger.info("找到 {} 个没有历史记录的新商品", len(new_products))
+                        products_to_update.extend(new_products)
+                        
+                        # 如果新商品数量不足剩余槽位，再处理有历史记录但需要更新的商品
+                        if len(products_to_update) < remaining_slots and history_asins:
+                            # 使用updated_at或discount_updated_at字段查询需要更新的商品（满足任一条件）
+                            from sqlalchemy import or_
+                            products_need_update = self.db.query(Product).filter(
+                                Product.source == 'coupon',
+                                Product.asin.in_(history_asins),
+                                ~Product.asin.in_(priority_asins),  # 排除优先队列中的商品
+                                or_(
+                                    Product.updated_at < update_threshold,
+                                    Product.discount_updated_at < update_threshold
+                                )
+                            ).order_by(Product.updated_at).limit(remaining_slots - len(products_to_update)).all()
+                            
+                            logger.info("找到 {} 个需要更新的已有历史记录的商品", len(products_need_update))
+                            products_to_update.extend(products_need_update)
+                        
+                        # 使用最终筛选出的商品列表
+                        regular_products = products_to_update
+                        
+                        # 根据创建时间排序
+                        regular_products.sort(key=lambda p: p.created_at if p.created_at else datetime.min)
+                        
+                        # 限制数量
+                        regular_products = regular_products[:remaining_slots]
+                
+                # 合并优先和常规商品列表
+                products = priority_products + regular_products
+                
+                # 限制总数量
+                products = products[:self.batch_size]
+                
+                logger.info("最终选择商品数量: 总计 {}, 其中优先商品 {}, 常规商品 {}", 
+                          len(products), len(priority_products), len(regular_products))
             
-            asins_to_process = [p.asin for p in products]
-            logger.info("获取到 {} 个待处理商品 (其中新商品: {})",
+                asins_to_process = [p.asin for p in products]
+            
+            logger.info("获取到 {} 个待处理商品 (其中优先商品: {})",
                        len(asins_to_process),
-                       len(new_products) if 'new_products' in locals() else "未知")
+                       len(priority_products))
         
         # 填充队列
         for asin in asins_to_process:
@@ -1298,6 +1501,9 @@ class CouponScraperMT:
                 logger.info(f"线程数: {self.num_threads}")
                 logger.info(f"总耗时: {duration:.1f}秒")
                 logger.info(f"处理商品数: {stats['processed_count']}")
+                # 如果处理过程中存在重试，添加独立商品数的计数说明
+                if stats['retry_count'] > 0:
+                    logger.info(f"不重复商品数: {len(self.specific_asins) if self.specific_asins else self.batch_size}")
                 logger.info(f"成功数: {stats['success_count']}")
                 logger.info(f"失败数: {stats['failure_count']}")
                 logger.info(f"成功率: {(stats['success_count']/stats['processed_count']*100) if stats['processed_count'] > 0 else 0:.1f}%")
@@ -1309,7 +1515,9 @@ class CouponScraperMT:
                 
                 # 添加验证码统计信息
                 logger.info(f"遇到验证码次数: {stats['captcha_count']}")
+                logger.info(f"刷新成功解决验证码次数: {stats['refresh_success_count']}")
                 logger.info(f"任务重试次数: {stats['retry_count']}")
+                logger.info(f"等待期延迟处理次数: {stats['delayed_count']}")
                 logger.info(f"超过最大重试次数的任务: {stats['max_retry_exceeded']}")
                 
                 logger.info("=====================================================")
@@ -1320,126 +1528,157 @@ class CouponScraperMT:
 def check_and_scrape_coupon_details(asins=None, batch_size=50, num_threads=2, headless=True, 
                                     min_delay=2.0, max_delay=4.0, debug=False):
     """
-    检查优惠券商品是否有到期日期和条款信息，如果没有则执行抓取
+    检查并抓取优惠券商品详情
+    
+    注意：此函数仅处理来源(source)为'coupon'的商品，其他来源的商品将被跳过。
+    如果提供了asins参数，会检查每个ASIN对应的商品来源，并跳过非'coupon'来源的商品。
     
     Args:
-        asins: 要检查的ASIN列表，如果为None则从数据库中获取所有需要检查的商品
-        batch_size: 批处理大小
-        num_threads: 抓取线程数
-        headless: 是否使用无头模式
-        min_delay: 最小请求延迟(秒)
-        max_delay: 最大请求延迟(秒)
-        debug: 是否启用调试模式
+        asins: 指定的ASIN列表，如果为None则从数据库中获取
+        batch_size: 每批处理的商品数量
+        num_threads: 并发线程数
+        headless: 是否使用无头浏览器
+        min_delay: 最小延迟时间
+        max_delay: 最大延迟时间
+        debug: 是否开启调试模式
         
     Returns:
-        tuple: (已处理商品数, 更新成功数)
+        tuple: (处理商品数量, 更新商品数量)
     """
     # 初始化日志
-    global logger
-    if not logger:
-        logger = init_logger(
-            log_level='DEBUG' if debug else 'INFO',
-            log_to_console=True
-        )
+    logger = init_logger()
+    logger.info(f"开始执行优惠券详情抓取任务，批次大小: {batch_size}, 线程数: {num_threads}")
     
-    # 创建数据库会话
-    db = next(get_db())
+    # 初始化数据库会话
+    from models.database import SessionLocal
+    db = SessionLocal()
     
     try:
-        logger.info("开始检查优惠券商品的到期日期和条款信息")
-        
-        # 确定要处理的ASIN列表
-        asins_to_process = []
-        
-        if asins:
-            # 如果提供了具体的ASIN列表，就使用它
-            logger.info(f"使用提供的{len(asins)}个ASIN进行检查")
-            # 过滤出数据库中存在且有优惠券的ASIN
-            existing_products = db.query(Product.asin).join(Offer).filter(
-                Product.asin.in_(asins),
-                Product.source == 'coupon',  # 添加来源筛选条件
-        
-            ).all()
-            asins_to_process = [p.asin for p in existing_products]
-            logger.info(f"过滤后剩余{len(asins_to_process)}个有效的优惠券商品ASIN")
-        else:
-            # 从数据库查询有优惠券但缺少到期日期或条款信息的商品
-            logger.info("从数据库查询需要完善信息的优惠券商品")
+        # 获取需要处理的商品列表
+        if asins is None:
+            from models.database import Product
+            from sqlalchemy import or_, func, desc, and_
+            from datetime import datetime, timedelta
             
-            # 查询所有有优惠券信息的商品ASIN，添加source='coupon'条件
-            products_with_coupons = db.query(Product.asin).join(Offer).filter(
-                Product.source == 'coupon',  # 添加来源筛选条件
-           
-            ).all()
+            # 优化查询策略：采用多种策略选择商品
+            current_time = datetime.now()
+            cutoff_time = current_time - timedelta(hours=24)  # 24小时前
             
-            coupon_asins = [p.asin for p in products_with_coupons]
-            logger.info(f"找到{len(coupon_asins)}个有优惠券的商品")
+            # 创建基础查询
+            from models.database import Offer
             
-            if not coupon_asins:
-                logger.warning("没有找到任何有优惠券的商品，任务结束")
+            # 检查输入的商品类型
+            logger.info("仅选择source='coupon'来源的商品进行处理")
+            
+            # 两种策略：直接筛选有优惠券的商品和有折扣的商品
+            coupon_products_query = db.query(Product).join(Offer).filter(
+                Offer.coupon_type.isnot(None),
+                Product.source == 'coupon'  # 重要：仅处理coupon来源的商品
+            ).distinct()
+            
+            discount_products_query = db.query(Product).filter(
+                or_(
+                    Product.deal_type == "Coupon",
+                    Product.savings_percentage > 0
+                ),
+                Product.source == 'coupon'  # 重要：仅处理coupon来源的商品
+            )
+            
+            # 合并两个查询
+            coupon_products = coupon_products_query.all()
+            discount_products = discount_products_query.all()
+            
+            # 合并去重
+            all_products = {}
+            for product in coupon_products + discount_products:
+                all_products[product.asin] = product
+            
+            base_products = list(all_products.values())
+            logger.info(f"找到 {len(base_products)} 个有优惠券或折扣的商品")
+            
+            # 如果没有找到任何符合条件的商品，直接返回
+            if not base_products:
+                logger.info("没有找到任何有优惠券或折扣的商品")
                 return 0, 0
             
-            # 查询已有完整优惠券历史(有到期日期或条款)的商品ASIN
-            complete_history_asins = db.query(CouponHistory.product_id).filter(
-                CouponHistory.product_id.in_(coupon_asins),
-                (CouponHistory.expiration_date != None) | (CouponHistory.terms != None)
-            ).distinct().all()
+            # 将所有找到的商品按照更新时间进行排序
+            sorted_products = sorted(base_products, key=lambda p: p.updated_at or datetime.min)
             
-            complete_asins = [h.product_id for h in complete_history_asins]
-            logger.info(f"其中{len(complete_asins)}个商品已有完整的优惠券历史信息")
+            # 策略1: 选取30%最早更新的商品
+            earliest_count = int(batch_size * 0.3)
+            earliest_products = sorted_products[:earliest_count]
             
-            # 筛选出需要抓取的ASIN(有优惠券但缺少历史详情的商品)
-            asins_to_process = [asin for asin in coupon_asins if asin not in complete_asins]
-            logger.info(f"需要抓取补充信息的商品数量: {len(asins_to_process)}")
+            # 策略2: 随机选择40%的商品
+            import random
+            remaining_products = sorted_products[earliest_count:]
+            random_count = int(batch_size * 0.4)
+            if len(remaining_products) > random_count:
+                random_products = random.sample(remaining_products, random_count)
+            else:
+                random_products = remaining_products
+            
+            # 策略3: 选择30%最近添加的商品（可能是新商品）
+            sorted_by_creation = sorted(base_products, key=lambda p: p.created_at or datetime.min, reverse=True)
+            newest_count = batch_size - len(earliest_products) - len(random_products)
+            newest_products = sorted_by_creation[:newest_count]
+            
+            # 合并所有选择的商品
+            selected_products = {}
+            for product in earliest_products + random_products + newest_products:
+                selected_products[product.asin] = product
+            
+            # 获取最终的商品列表
+            products = list(selected_products.values())[:batch_size]
+            
+            # 获取ASIN列表
+            asins = [product.asin for product in products]
+            logger.info(f"从数据库获取了 {len(asins)} 个商品进行优惠券详情抓取")
+            
+            # 打印选择的商品类型分布
+            logger.info(f"商品选择分布: 最早更新 {len(earliest_products)}, 随机选择 {len(random_products)}, 最新添加 {len(newest_products)}")
+            
+            # 如果没有符合条件的商品，记录并返回
+            if not asins:
+                logger.info("没有找到需要抓取优惠券详情的商品")
+                return 0, 0
+        else:
+            # 使用指定的ASIN列表
+            logger.info(f"使用指定的 {len(asins)} 个ASIN进行优惠券详情抓取")
         
-        # 如果没有需要处理的商品，直接返回
-        if not asins_to_process:
-            logger.info("没有需要补充优惠券详情的商品，任务结束")
-            return 0, 0
+        # 如果批次大小大于实际商品数量，调整批次大小
+        if batch_size > len(asins):
+            batch_size = len(asins)
+            logger.info(f"调整批次大小为实际商品数量: {batch_size}")
         
-        # 限制处理数量
-        if len(asins_to_process) > batch_size:
-            logger.info(f"商品数量超过批处理大小，限制为{batch_size}个")
-            asins_to_process = asins_to_process[:batch_size]
-        
-        # 使用CouponScraperMT执行抓取
-        logger.info(f"开始抓取{len(asins_to_process)}个商品的优惠券详情")
+        # 创建爬虫实例
+        stats = ThreadSafeStats()
         scraper = CouponScraperMT(
             num_threads=num_threads,
-            batch_size=len(asins_to_process),
+            batch_size=batch_size,
+            specific_asins=asins[:batch_size],  # 限制处理数量
             headless=headless,
             min_delay=min_delay,
             max_delay=max_delay,
-            specific_asins=asins_to_process,
-            debug=debug,
-            verbose=debug,
-            force_update=True  # 强制更新，忽略时间间隔检查
+            debug=debug
         )
         
-        # 运行抓取器
+        # 运行爬虫
         scraper.run()
         
-        # 获取处理结果统计
-        stats = scraper.stats.get()
-        processed_count = stats['processed_count']
-        success_count = stats['success_count']
+        # 获取统计数据
+        stats_data = scraper.stats.get()
+        processed_count = stats_data.get('processed_count', 0)
+        updated_count = stats_data.get('success_count', 0)
         
-        # 查询结果验证 - 检查有多少商品成功获取到了到期日期或条款信息
-        updated_asins = db.query(CouponHistory.product_id).filter(
-            CouponHistory.product_id.in_(asins_to_process),
-            (CouponHistory.expiration_date != None) | (CouponHistory.terms != None)
-        ).distinct().all()
-        
-        updated_count = len(updated_asins)
-        logger.info(f"任务完成，共处理{processed_count}个商品，成功获取{updated_count}个商品的优惠券详情")
-        
+        logger.success(f"优惠券详情抓取完成，处理: {processed_count}，更新: {updated_count}")
         return processed_count, updated_count
         
     except Exception as e:
-        logger.exception(f"检查和抓取优惠券详情过程中发生错误: {e}")
+        logger.error(f"优惠券详情抓取失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return 0, 0
     finally:
-        # 关闭数据库连接
         db.close()
 
 def main():

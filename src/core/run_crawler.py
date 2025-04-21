@@ -124,7 +124,7 @@ async def execute_task(job_id: str, crawler_type: str, max_items: int, config: O
         
         # 运行优惠券详情抓取
         processed_count, updated_count = check_and_scrape_coupon_details(
-            asins=None,  # 从数据库自动获取需要检查的商品
+            asins=None,  # 使用优化的商品选择逻辑
             batch_size=max_items,
             num_threads=num_threads,
             headless=headless,

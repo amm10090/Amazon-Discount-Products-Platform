@@ -6,6 +6,7 @@
 该脚本用于清理coupon_history表中的无效记录：
 - 检查coupon_history表中的product_id字段
 - 如果在products表中找不到对应的asin，则删除该记录
+- 为每个商品只保留最新的三条优惠券历史记录，删除更早的记录
 """
 
 import os
@@ -14,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from loguru import logger
 from sqlalchemy import text
+from collections import defaultdict
 
 # 添加项目根目录到系统路径
 current_dir = Path(__file__).parent
@@ -49,8 +51,8 @@ def setup_logging():
         colorize=False
     )
 
-def clean_coupon_history():
-    """清理优惠券历史记录中的无效记录"""
+def clean_invalid_records():
+    """清理优惠券历史记录中的无效记录（没有对应产品的记录）"""
     db = SessionLocal()
     try:
         # 获取products表中所有asin
@@ -76,36 +78,122 @@ def clean_coupon_history():
             logger.success(f"成功删除 {len(invalid_records)} 条无效的优惠券历史记录")
         else:
             logger.info("没有发现无效的优惠券历史记录")
-            
-        # 执行数据库优化（SQLite特有）
-        db.execute(text("VACUUM"))
-        db.commit()
-        logger.info("数据库优化完成")
         
         return len(invalid_records), total_records
     except Exception as e:
         db.rollback()
-        logger.error(f"清理优惠券历史记录失败: {str(e)}")
+        logger.error(f"清理无效优惠券历史记录失败: {str(e)}")
         raise
     finally:
         db.close()
 
+def clean_old_records(keep_records=3):
+    """为每个商品只保留最新的N条记录，删除旧记录"""
+    db = SessionLocal()
+    try:
+        # 获取所有商品ID
+        product_ids = [pid[0] for pid in db.query(CouponHistory.product_id).distinct().all()]
+        logger.info(f"在优惠券历史中发现 {len(product_ids)} 个不同的商品ASIN")
+        
+        # 统计数据
+        total_deleted = 0
+        affected_products = 0
+        
+        # 为每个商品处理历史记录
+        for product_id in product_ids:
+            # 获取该商品的所有历史记录，按创建时间降序排列
+            records = db.query(CouponHistory).filter(
+                CouponHistory.product_id == product_id
+            ).order_by(CouponHistory.created_at.desc()).all()
+            
+            # 如果记录数超过保留数量，删除旧记录
+            if len(records) > keep_records:
+                # 保留的记录
+                keep = records[:keep_records]
+                # 要删除的记录
+                to_delete = records[keep_records:]
+                
+                # 删除旧记录
+                for record in to_delete:
+                    db.delete(record)
+                
+                total_deleted += len(to_delete)
+                affected_products += 1
+                
+                logger.debug(f"商品 {product_id}: 保留 {len(keep)} 条记录，删除 {len(to_delete)} 条旧记录")
+        
+        # 提交更改
+        if total_deleted > 0:
+            db.commit()
+            logger.success(f"成功为 {affected_products} 个商品删除 {total_deleted} 条旧的优惠券历史记录")
+        else:
+            logger.info("没有需要删除的旧优惠券历史记录")
+        
+        return total_deleted, affected_products
+    except Exception as e:
+        db.rollback()
+        logger.error(f"清理旧优惠券历史记录失败: {str(e)}")
+        raise
+    finally:
+        db.close()
+
+def optimize_database():
+    """执行数据库优化"""
+    db = SessionLocal()
+    try:
+        # 执行数据库优化（SQLite特有）
+        db.execute(text("VACUUM"))
+        db.commit()
+        logger.info("数据库优化完成")
+    except Exception as e:
+        logger.error(f"数据库优化失败: {str(e)}")
+    finally:
+        db.close()
+
+def clean_coupon_history():
+    """清理优惠券历史记录"""
+    # 第一步：清理无效记录（没有对应商品的记录）
+    invalid_deleted, total_before = clean_invalid_records()
+    
+    # 第二步：清理旧记录（只保留最新的三条）
+    old_deleted, affected_products = clean_old_records(keep_records=3)
+    
+    # 第三步：优化数据库
+    optimize_database()
+    
+    # 获取清理后的记录总数
+    db = SessionLocal()
+    try:
+        total_after = db.query(CouponHistory).count()
+    finally:
+        db.close()
+    
+    return {
+        'total_before': total_before,
+        'invalid_deleted': invalid_deleted,
+        'old_deleted': old_deleted,
+        'affected_products': affected_products,
+        'total_after': total_after
+    }
+
 def main():
     """主函数"""
     setup_logging()
-    logger.info("开始清理无效的优惠券历史记录")
+    logger.info("开始清理优惠券历史记录")
     start_time = datetime.now()
     
     try:
-        deleted_count, total_count = clean_coupon_history()
+        results = clean_coupon_history()
         
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
         logger.success(
             f"清理完成! "
-            f"总记录数: {total_count}, "
-            f"删除记录数: {deleted_count}, "
+            f"总记录数(清理前): {results['total_before']}, "
+            f"删除无效记录数: {results['invalid_deleted']}, "
+            f"删除旧记录数: {results['old_deleted']} (影响商品数: {results['affected_products']}), "
+            f"总记录数(清理后): {results['total_after']}, "
             f"耗时: {duration:.2f}秒"
         )
     except Exception as e:
