@@ -6,6 +6,7 @@
 该脚本用于清理coupon_history表中的无效记录：
 - 检查coupon_history表中的product_id字段
 - 如果在products表中找不到对应的asin，则删除该记录
+- 删除coupon_history表中product_id对应products表中source为discount的商品的记录
 - 为每个商品只保留最新的三条优惠券历史记录，删除更早的记录
 """
 
@@ -87,6 +88,45 @@ def clean_invalid_records():
     finally:
         db.close()
 
+def clean_discount_source_records():
+    """删除coupon_history表中product_id对应products表中source为discount的商品的记录"""
+    db = SessionLocal()
+    try:
+        # 查询source为discount的商品ASIN列表
+        discount_asins = {product.asin for product in db.query(Product.asin).filter(Product.source == 'discount').all()}
+        logger.info(f"数据库中source为discount的商品ASIN数量: {len(discount_asins)}")
+        
+        if not discount_asins:
+            logger.info("没有找到source为discount的商品")
+            return 0, 0
+        
+        # 查询在coupon_history中存在的discount来源的商品记录数
+        discount_records = db.query(CouponHistory).filter(
+            CouponHistory.product_id.in_(discount_asins)
+        ).all()
+        
+        deleted_count = len(discount_records)
+        
+        # 删除这些记录
+        if discount_records:
+            for record in discount_records:
+                db.delete(record)
+            db.commit()
+            logger.success(f"成功删除 {deleted_count} 条source为discount的商品的优惠券历史记录")
+        else:
+            logger.info("没有找到需要删除的source为discount的商品的优惠券历史记录")
+        
+        # 返回删除的记录数和受影响的商品数
+        affected_products = len(set(record.product_id for record in discount_records))
+        return deleted_count, affected_products
+    
+    except Exception as e:
+        db.rollback()
+        logger.error(f"清理source为discount的商品的优惠券历史记录失败: {str(e)}")
+        raise
+    finally:
+        db.close()
+
 def clean_old_records(keep_records=3):
     """为每个商品只保留最新的N条记录，删除旧记录"""
     db = SessionLocal()
@@ -155,10 +195,13 @@ def clean_coupon_history():
     # 第一步：清理无效记录（没有对应商品的记录）
     invalid_deleted, total_before = clean_invalid_records()
     
-    # 第二步：清理旧记录（只保留最新的三条）
+    # 第二步：清理source为discount的商品的记录
+    discount_deleted, discount_affected = clean_discount_source_records()
+    
+    # 第三步：清理旧记录（只保留最新的三条）
     old_deleted, affected_products = clean_old_records(keep_records=3)
     
-    # 第三步：优化数据库
+    # 第四步：优化数据库
     optimize_database()
     
     # 获取清理后的记录总数
@@ -171,6 +214,8 @@ def clean_coupon_history():
     return {
         'total_before': total_before,
         'invalid_deleted': invalid_deleted,
+        'discount_deleted': discount_deleted,
+        'discount_affected': discount_affected,
         'old_deleted': old_deleted,
         'affected_products': affected_products,
         'total_after': total_after
@@ -192,6 +237,7 @@ def main():
             f"清理完成! "
             f"总记录数(清理前): {results['total_before']}, "
             f"删除无效记录数: {results['invalid_deleted']}, "
+            f"删除discount来源记录数: {results['discount_deleted']} (影响商品数: {results['discount_affected']}), "
             f"删除旧记录数: {results['old_deleted']} (影响商品数: {results['affected_products']}), "
             f"总记录数(清理后): {results['total_after']}, "
             f"耗时: {duration:.2f}秒"
