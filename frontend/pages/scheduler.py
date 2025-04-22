@@ -973,7 +973,7 @@ def main():
     
     # 应用排序
     if sort_by == "next_run":
-        jobs.sort(key=lambda x: x.get('next_run_time', float('inf')), reverse=True)
+        jobs.sort(key=lambda x: float('inf') if x.get('next_run_time') is None else x.get('next_run_time'), reverse=True)
     elif sort_by == "name":
         jobs.sort(key=lambda x: x['id'])
     elif sort_by == "type":
