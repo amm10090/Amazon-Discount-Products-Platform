@@ -41,7 +41,7 @@ import logging
 from contextlib import asynccontextmanager
 from loguru import logger
 from logging.config import dictConfig
-from starlette.status import HTTP_400_BAD_REQUEST
+from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT, HTTP_201_CREATED
 
 # 添加项目根目录到Python路径
 project_root = PathLib(__file__).parent.parent.parent.parent
@@ -905,6 +905,31 @@ async def get_product(
         raise HTTPException(
             status_code=500,
             detail=f"获取产品信息失败: {str(e)}"
+        )
+
+@app.post("/api/products/manual", response_model=ProductInfo, status_code=HTTP_201_CREATED)
+async def manual_add_product(
+    product_info: ProductInfo,
+    db: Session = Depends(get_db)
+):
+    """手动添加新商品
+    
+    接收一个ProductInfo对象，并在数据库中创建相应的记录。
+    如果ASIN已存在，将返回409冲突错误。
+    """
+    try:
+        created_product = ProductService.manual_create_product(db, product_info)
+        return created_product
+    except ValueError as ve: # 处理ASIN已存在或数据验证错误
+        raise HTTPException(
+            status_code=HTTP_409_CONFLICT if "已存在" in str(ve) else HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"手动添加商品 {product_info.asin} 失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"手动添加商品失败: {str(e)}"
         )
 
 @app.post("/api/products/query", response_model=Union[ProductInfo, List[Optional[ProductInfo]]])

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # 导入 timezone
 from .database import Product, Offer, CouponHistory
 from .product import ProductInfo, ProductOffer
 from functools import lru_cache
@@ -74,6 +74,162 @@ class ProductService:
         db.commit()
         db.refresh(db_product)
         return db_product
+    
+    @staticmethod
+    def manual_create_product(db: Session, product_info: ProductInfo) -> ProductInfo:
+        """
+        手动创建新商品记录
+        
+        Args:
+            db: 数据库会话
+            product_info: 用户提供的完整商品信息
+            
+        Returns:
+            ProductInfo: 创建成功的商品信息
+            
+        Raises:
+            ValueError: 如果ASIN已存在或缺少必要信息
+            Exception: 如果数据库操作失败
+        """
+        # 检查ASIN是否已存在
+        existing_product = db.query(Product).filter(Product.asin == product_info.asin).first()
+        if existing_product:
+            raise ValueError(f"ASIN {product_info.asin} 已存在，无法手动创建。")
+            
+        # 检查是否有offers信息
+        if not product_info.offers:
+            raise ValueError("必须至少提供一个商品优惠信息 (offer)。")
+            
+        try:
+            current_time = datetime.now(timezone.utc) # 使用 timezone.utc
+            best_offer = product_info.offers[0] # 取第一个offer作为主要信息来源
+
+            # 序列化列表和字典类型的字段
+            features = json.dumps(product_info.features or [])
+            categories = json.dumps(product_info.categories or [])
+            browse_nodes = json.dumps(product_info.browse_nodes or [])
+            # raw_data可以由用户提供，或基于输入信息生成
+            raw_data = json.dumps(product_info.raw_data or product_info.dict(exclude={'raw_data'})) # 优先用用户提供的
+
+            # 创建 Product 对象
+            db_product = Product(
+                asin=product_info.asin,
+                title=product_info.title,
+                url=product_info.url,
+                brand=product_info.brand,
+                main_image=product_info.main_image,
+                
+                cj_url=product_info.cj_url,
+                
+                # 使用第一个offer的信息填充主要价格字段
+                current_price=best_offer.price,
+                original_price=best_offer.original_price, # 使用offer中的原始价格
+                currency=best_offer.currency,
+                savings_amount=best_offer.savings,
+                savings_percentage=best_offer.savings_percentage,
+                
+                is_prime=best_offer.is_prime,
+                is_prime_exclusive=False, # 手动添加时默认为False，或允许用户在ProductInfo中指定？(模型暂无)
+
+                condition=best_offer.condition,
+                availability=best_offer.availability,
+                merchant_name=best_offer.merchant_name,
+                is_buybox_winner=best_offer.is_buybox_winner,
+                
+                binding=product_info.binding,
+                product_group=product_info.product_group,
+                categories=categories,
+                browse_nodes=browse_nodes,
+                
+                deal_type=best_offer.deal_type,
+                features=features,
+                
+                # 时间戳 - timestamp由用户提供，created/updated自动生成
+                created_at=current_time,
+                updated_at=current_time,
+                discount_updated_at=current_time, # 折扣更新时间设为当前
+                timestamp=product_info.timestamp or current_time, # 优先使用用户提供的时间戳
+                
+                source=product_info.source or "manual", # 默认为 manual
+                api_provider=product_info.api_provider or "manual", # 默认为 manual
+                raw_data=raw_data
+            )
+            
+            db.add(db_product)
+            
+            # 创建 Offer 对象
+            for offer_info in product_info.offers:
+                offer = Offer(
+                    product_id=db_product.asin,
+                    condition=offer_info.condition,
+                    price=offer_info.price,
+                    currency=offer_info.currency,
+                    savings=offer_info.savings,
+                    savings_percentage=offer_info.savings_percentage,
+                    is_prime=offer_info.is_prime,
+                    is_amazon_fulfilled=offer_info.is_amazon_fulfilled,
+                    is_free_shipping_eligible=offer_info.is_free_shipping_eligible,
+                    availability=offer_info.availability,
+                    merchant_name=offer_info.merchant_name,
+                    is_buybox_winner=offer_info.is_buybox_winner,
+                    deal_type=offer_info.deal_type,
+                    coupon_type=offer_info.coupon_type,
+                    coupon_value=offer_info.coupon_value,
+                    commission=offer_info.commission,
+                    created_at=current_time,
+                    updated_at=current_time
+                )
+                db.add(offer)
+
+            # 创建 CouponHistory 记录 (如果提供了相关信息)
+            # 使用第一个offer的优惠券信息以及ProductInfo中的过期时间和条款
+            if offer_info := next((o for o in product_info.offers if o.coupon_type and o.coupon_value), None):
+                 if product_info.coupon_expiration_date or product_info.coupon_terms or offer_info:
+                    coupon_history = CouponHistory(
+                        product_id=db_product.asin,
+                        coupon_type=offer_info.coupon_type,
+                        coupon_value=offer_info.coupon_value,
+                        expiration_date=product_info.coupon_expiration_date,
+                        terms=product_info.coupon_terms,
+                        created_at=current_time,
+                        updated_at=current_time
+                    )
+                    db.add(coupon_history)
+            elif product_info.coupon_expiration_date or product_info.coupon_terms:
+                 # 即使offer没有优惠券，但productInfo有日期或条款，也记录
+                 coupon_history = CouponHistory(
+                     product_id=db_product.asin,
+                     coupon_type=None, # 未知类型
+                     coupon_value=None, # 未知值
+                     expiration_date=product_info.coupon_expiration_date,
+                     terms=product_info.coupon_terms,
+                     created_at=current_time,
+                     updated_at=current_time
+                 )
+                 db.add(coupon_history)
+
+            db.commit()
+            db.refresh(db_product)
+            
+            # 从数据库重新加载并返回完整的ProductInfo
+            # 使用现有的get_product_details_by_asin获取完整信息
+            created_product_info = ProductService.get_product_details_by_asin(db, product_info.asin)
+            if not created_product_info:
+                 # 如果查询失败，构造一个基本的 ProductInfo 返回
+                 # 这不应该发生，但作为后备
+                 logger.warning(f"手动创建商品 {product_info.asin} 后未能从数据库重新检索，返回原始输入。")
+                 return product_info
+                 
+            return created_product_info
+
+        except ValueError as ve:
+            db.rollback()
+            logger.error(f"手动创建商品 {product_info.asin} 失败 (验证错误): {str(ve)}")
+            raise ve
+        except Exception as e:
+            db.rollback()
+            logger.error(f"手动创建商品 {product_info.asin} 数据库操作失败: {str(e)}")
+            raise Exception(f"数据库操作失败: {str(e)}")
     
     @staticmethod
     def update_product(db: Session, product_info: ProductInfo, source: str = "update") -> Optional[Product]:
@@ -496,7 +652,7 @@ class ProductService:
     ) -> List[ProductInfo]:
         """批量创建或更新商品信息"""
         saved_products = []
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc) # 使用 timezone.utc
         
         for product_info in products:
             try:
@@ -1088,10 +1244,10 @@ class ProductService:
             # 构建时间条件
             time_conditions = []
             if min_days_old > 0:
-                min_date = datetime.now() - timedelta(days=min_days_old)
+                min_date = datetime.now(timezone.utc) - timedelta(days=min_days_old)
                 time_conditions.append(Product.created_at <= min_date)
             if max_days_old is not None and max_days_old > 0:
-                max_date = datetime.now() - timedelta(days=max_days_old)
+                max_date = datetime.now(timezone.utc) - timedelta(days=max_days_old)
                 time_conditions.append(Product.created_at >= max_date)
             
             # 构建价格条件
