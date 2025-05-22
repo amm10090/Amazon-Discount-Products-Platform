@@ -1,16 +1,18 @@
-# 手动添加商品 API
+# 商品管理 API
 
-本文档详细介绍了用于手动向数据库添加新商品的 API 端点。
+本文档详细介绍了用于手动管理商品的 API 端点，包括添加和编辑功能。
 
-## 端点
+## 1. 手动添加商品
+
+### 端点
 
 `POST /api/products/manual`
 
-## 描述
+### 描述
 
 此 API 允许用户通过提供完整的商品信息（遵循 `ProductInfo` 模型）来手动创建一条新的商品记录。这对于添加来自非标准来源或需要手动校正的数据非常有用。
 
-## 请求体
+### 请求体
 
 请求体必须是一个有效的 JSON 对象，其结构符合 `models.product.ProductInfo` 模型。
 
@@ -85,7 +87,7 @@
 }
 ```
 
-## 成功响应
+### 成功响应
 
 *   **状态码:** `201 Created`
 *   **响应体:** 返回一个与请求体结构相同的 `ProductInfo` JSON 对象，包含已创建商品的所有信息（可能包含由服务器生成的默认值或时间戳）。
@@ -108,30 +110,30 @@
       "savings": 30.00,
       "savings_percentage": 23,
       "is_prime": true,
-      "is_amazon_fulfilled": false, // 默认值
-      "is_free_shipping_eligible": false, // 默认值
+      "is_amazon_fulfilled": false,
+      "is_free_shipping_eligible": false,
       "availability": "In Stock",
       "merchant_name": "Manual Seller",
       "is_buybox_winner": true,
       "deal_type": null,
       "coupon_type": "percentage",
       "coupon_value": 10,
-      "coupon_history": [ // 注意：此处可能返回历史记录
+      "coupon_history": [
         {
-          "id": 1, // 示例 ID
+          "id": 1,
           "product_id": "B0TESTMANUAL",
           "coupon_type": "percentage",
           "coupon_value": 10.0,
           "expiration_date": "2024-12-31T23:59:59+00:00",
           "terms": "满100可用",
-          "updated_at": "2024-10-28T12:34:56.789Z" // 示例时间戳
+          "updated_at": "2024-10-28T12:34:56.789Z"
         }
       ],
       "commission": null
     }
   ],
-  "timestamp": "2024-10-27T10:00:00+00:00", // 注意时区信息可能被添加
-  "coupon_info": null, // 此字段似乎已弃用或未使用
+  "timestamp": "2024-10-27T10:00:00+00:00",
+  "coupon_info": null,
   "binding": "Electronics",
   "product_group": "Test Products",
   "categories": ["Electronics", "Test Category"],
@@ -140,10 +142,10 @@
   "cj_url": null,
   "api_provider": "manual",
   "source": "manual_import",
-  "raw_data": "{\"asin\": \"B0TESTMANUAL\", ...}", // 原始数据的 JSON 字符串
+  "raw_data": "{\"asin\": \"B0TESTMANUAL\", ...}",
   "coupon_expiration_date": "2024-12-31T23:59:59+00:00",
   "coupon_terms": "满100可用",
-  "coupon_history": { // 注意：此处可能返回最新的历史记录
+  "coupon_history": {
       "id": 1,
       "product_id": "B0TESTMANUAL",
       "coupon_type": "percentage",
@@ -155,7 +157,7 @@
 }
 ```
 
-## 错误响应
+### 错误响应
 
 *   **状态码:** `400 Bad Request`
     *   **原因:** 请求体 JSON 格式无效，或 `ProductInfo` 模型验证失败（例如缺少必需字段 `asin`, `title`, `url`, `offers` 或 `offers` 为空数组）。
@@ -182,7 +184,7 @@
         }
         ```
 
-## 示例 CURL 请求
+### 示例 CURL 请求
 
 ```bash
 curl -X POST "http://your-server/api/products/manual" \
@@ -203,4 +205,188 @@ curl -X POST "http://your-server/api/products/manual" \
   ],
   "features": ["特性1", "特性2"]
 }'
-``` 
+```
+
+## 2. 编辑/更新商品
+
+### 端点
+
+`PUT /api/products/{asin}`
+
+### 描述
+
+此 API 允许用户更新已存在商品的信息。通过提供完整的商品信息（遵循 `ProductInfo` 模型）来更新指定 ASIN 的商品记录。
+
+### 路径参数
+
+*   `asin` (string, **必需**): 要更新的商品的 ASIN。必须为 10 个字符。
+
+### 请求体
+
+请求体必须是一个有效的 JSON 对象，其结构符合 `models.product.ProductInfo` 模型。所有字段的要求与添加商品 API 相同。
+
+**重要说明:**
+- 请求体中的 `asin` 必须与 URL 路径中的 `asin` 完全一致。
+- 所有字段都将被更新，即使请求中未提供某些可选字段，它们也会被更新为 null 或默认值。
+- 如果需要保留某些字段的现有值，请先获取商品当前信息，然后在请求中包含这些值。
+
+**请求示例:**
+
+```json
+{
+  "asin": "B0TESTMANUAL",
+  "title": "更新后的测试商品标题",
+  "url": "https://www.amazon.com/dp/B0TESTMANUAL",
+  "brand": "UpdatedBrand",
+  "main_image": "https://example.com/new-image.jpg",
+  "offers": [
+    {
+      "condition": "New",
+      "price": 89.99,
+      "original_price": 129.99,
+      "currency": "USD",
+      "savings": 40.00,
+      "savings_percentage": 31,
+      "is_prime": true,
+      "availability": "In Stock",
+      "merchant_name": "Updated Seller",
+      "is_buybox_winner": true,
+      "coupon_type": "fixed",
+      "coupon_value": 15
+    }
+  ],
+  "timestamp": "2024-10-28T15:00:00Z",
+  "binding": "Electronics",
+  "product_group": "Updated Products",
+  "categories": ["Electronics", "Updated Category"],
+  "browse_nodes": [{"id": "12345", "name": "Updated Node"}],
+  "features": ["更新的特性1", "更新的特性2", "新增特性"],
+  "source": "manual_update",
+  "api_provider": "manual",
+  "coupon_expiration_date": "2025-01-31T23:59:59Z",
+  "coupon_terms": "满80可用，新用户专享"
+}
+```
+
+### 成功响应
+
+*   **状态码:** `200 OK`
+*   **响应体:** 返回一个与请求体结构相同的 `ProductInfo` JSON 对象，包含已更新商品的所有信息。
+
+**响应示例:**
+
+```json
+{
+  "asin": "B0TESTMANUAL",
+  "title": "更新后的测试商品标题",
+  "url": "https://www.amazon.com/dp/B0TESTMANUAL",
+  "brand": "UpdatedBrand",
+  "main_image": "https://example.com/new-image.jpg",
+  "offers": [
+    {
+      "condition": "New",
+      "price": 89.99,
+      "original_price": 129.99,
+      "currency": "USD",
+      "savings": 40.00,
+      "savings_percentage": 31,
+      "is_prime": true,
+      "is_amazon_fulfilled": false,
+      "is_free_shipping_eligible": false,
+      "availability": "In Stock",
+      "merchant_name": "Updated Seller",
+      "is_buybox_winner": true,
+      "deal_type": null,
+      "coupon_type": "fixed",
+      "coupon_value": 15,
+      "commission": null
+    }
+  ],
+  "timestamp": "2024-10-28T15:00:00+00:00",
+  "coupon_info": null,
+  "binding": "Electronics",
+  "product_group": "Updated Products",
+  "categories": ["Electronics", "Updated Category"],
+  "browse_nodes": [{"id": "12345", "name": "Updated Node"}],
+  "features": ["更新的特性1", "更新的特性2", "新增特性"],
+  "cj_url": null,
+  "api_provider": "manual",
+  "source": "manual_update",
+  "raw_data": "{\"asin\": \"B0TESTMANUAL\", ...}",
+  "coupon_expiration_date": "2025-01-31T23:59:59+00:00",
+  "coupon_terms": "满80可用，新用户专享",
+  "coupon_history": {
+      "id": 2,
+      "product_id": "B0TESTMANUAL",
+      "coupon_type": "fixed",
+      "coupon_value": 15.0,
+      "expiration_date": "2025-01-31T23:59:59+00:00",
+      "terms": "满80可用，新用户专享",
+      "updated_at": "2024-10-28T15:00:00.000Z"
+  }
+}
+```
+
+### 错误响应
+
+*   **状态码:** `400 Bad Request`
+    *   **原因:** 
+        - 请求体 JSON 格式无效
+        - `ProductInfo` 模型验证失败
+        - 请求体中的 ASIN 与 URL 中的 ASIN 不一致
+    *   **响应体:**
+        ```json
+        {
+          "detail": "具体的验证错误信息"
+        }
+        ```
+*   **状态码:** `404 Not Found`
+    *   **原因:** 指定的 ASIN 不存在于数据库中。
+    *   **响应体:**
+        ```json
+        {
+          "detail": "未找到ASIN为 B0TESTMANUAL 的商品"
+        }
+        ```
+*   **状态码:** `500 Internal Server Error`
+    *   **原因:** 服务器在处理请求时发生内部错误（例如数据库操作失败）。
+    *   **响应体:**
+        ```json
+        {
+          "detail": "更新商品失败: 具体的错误信息"
+        }
+        ```
+
+### 示例 CURL 请求
+
+```bash
+curl -X PUT "http://your-server/api/products/B0TESTMANUAL" \
+-H "Content-Type: application/json" \
+-d '{
+  "asin": "B0TESTMANUAL",
+  "title": "价格调整后的商品",
+  "url": "https://www.amazon.com/dp/B0TESTMANUAL",
+  "brand": "UpdatedBrand",
+  "offers": [
+    {
+      "condition": "New",
+      "price": 79.99,
+      "original_price": 99.99,
+      "currency": "USD",
+      "savings": 20.00,
+      "savings_percentage": 20,
+      "availability": "Limited Stock",
+      "merchant_name": "Official Store"
+    }
+  ],
+  "features": ["更新特性1", "更新特性2"]
+}'
+```
+
+## 最佳实践
+
+1. **添加商品前检查**: 在添加新商品前，建议先使用查询 API 检查 ASIN 是否已存在。
+2. **完整更新**: 更新商品时，建议先获取商品当前的完整信息，修改需要更新的字段后再提交，以避免丢失其他字段的数据。
+3. **优惠券历史**: 系统会自动记录优惠券的变化历史。每次更新优惠券信息时，如果有变化，会创建新的历史记录。
+4. **时间戳**: 如果不提供 `timestamp` 字段，系统会自动使用当前时间。
+5. **数据验证**: 确保所有必需字段都有有效值，特别是 `offers` 数组至少要包含一个有效的优惠信息。 

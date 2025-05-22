@@ -932,6 +932,53 @@ async def manual_add_product(
             detail=f"手动添加商品失败: {str(e)}"
         )
 
+@app.put("/api/products/{asin}", response_model=ProductInfo)
+async def update_product(
+    asin: str = Path(title="Product ASIN", description="产品ASIN", min_length=10, max_length=10),
+    product_info: ProductInfo = None,
+    db: Session = Depends(get_db)
+):
+    """编辑/更新商品信息
+    
+    更新指定ASIN的商品信息。
+    如果商品不存在，将返回404错误。
+    
+    注意：ASIN必须与URL路径中的ASIN一致。
+    """
+    try:
+        # 检查商品是否存在
+        existing_product = db.query(Product).filter(Product.asin == asin).first()
+        if not existing_product:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到ASIN为 {asin} 的商品"
+            )
+        
+        # 验证ASIN一致性
+        if product_info.asin != asin:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail=f"请求体中的ASIN ({product_info.asin}) 与URL中的ASIN ({asin}) 不一致"
+            )
+        
+        # 调用服务层更新商品
+        updated_product = ProductService.manual_update_product(db, product_info)
+        return updated_product
+        
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"更新商品 {asin} 失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"更新商品失败: {str(e)}"
+        )
+
 @app.post("/api/products/query", response_model=Union[ProductInfo, List[Optional[ProductInfo]]])
 async def query_product(
     request: ProductQueryRequest,

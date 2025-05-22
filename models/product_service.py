@@ -232,6 +232,160 @@ class ProductService:
             raise Exception(f"数据库操作失败: {str(e)}")
     
     @staticmethod
+    def manual_update_product(db: Session, product_info: ProductInfo) -> ProductInfo:
+        """
+        手动更新商品记录
+        
+        Args:
+            db: 数据库会话
+            product_info: 用户提供的完整商品信息
+            
+        Returns:
+            ProductInfo: 更新成功的商品信息
+            
+        Raises:
+            ValueError: 如果商品不存在或数据验证失败
+            Exception: 如果数据库操作失败
+        """
+        # 检查商品是否存在
+        existing_product = db.query(Product).filter(Product.asin == product_info.asin).first()
+        if not existing_product:
+            raise ValueError(f"ASIN {product_info.asin} 不存在，无法更新。")
+            
+        # 检查是否有offers信息
+        if not product_info.offers:
+            raise ValueError("必须至少提供一个商品优惠信息 (offer)。")
+            
+        try:
+            current_time = datetime.now(timezone.utc)
+            best_offer = product_info.offers[0]  # 取第一个offer作为主要信息来源
+            
+            # 更新商品基本信息
+            existing_product.title = product_info.title
+            existing_product.url = product_info.url
+            existing_product.brand = product_info.brand
+            existing_product.main_image = product_info.main_image
+            existing_product.cj_url = product_info.cj_url
+            
+            # 更新价格信息（使用第一个offer的信息）
+            existing_product.current_price = best_offer.price
+            existing_product.original_price = best_offer.original_price
+            existing_product.currency = best_offer.currency
+            existing_product.savings_amount = best_offer.savings
+            existing_product.savings_percentage = best_offer.savings_percentage
+            
+            # 更新Prime信息
+            existing_product.is_prime = best_offer.is_prime
+            
+            # 更新商品状态
+            existing_product.condition = best_offer.condition
+            existing_product.availability = best_offer.availability
+            existing_product.merchant_name = best_offer.merchant_name
+            existing_product.is_buybox_winner = best_offer.is_buybox_winner
+            existing_product.deal_type = best_offer.deal_type
+            
+            # 更新分类信息
+            existing_product.binding = product_info.binding
+            existing_product.product_group = product_info.product_group
+            existing_product.categories = json.dumps(product_info.categories or [])
+            existing_product.browse_nodes = json.dumps(product_info.browse_nodes or [])
+            existing_product.features = json.dumps(product_info.features or [])
+            
+            # 更新时间戳和元数据
+            existing_product.updated_at = current_time
+            existing_product.discount_updated_at = current_time
+            # 如果用户提供了timestamp，使用用户的；否则使用当前时间
+            existing_product.timestamp = product_info.timestamp or current_time
+            
+            # 更新API提供者和来源（如果提供）
+            if product_info.api_provider:
+                existing_product.api_provider = product_info.api_provider
+            if product_info.source:
+                existing_product.source = product_info.source
+                
+            # 更新原始数据
+            existing_product.raw_data = json.dumps(product_info.dict(exclude={'raw_data'}) if not product_info.raw_data else product_info.raw_data)
+            
+            # 删除现有的offer记录
+            db.query(Offer).filter(Offer.product_id == existing_product.asin).delete()
+            
+            # 创建新的Offer记录
+            for offer_info in product_info.offers:
+                offer = Offer(
+                    product_id=existing_product.asin,
+                    condition=offer_info.condition,
+                    price=offer_info.price,
+                    currency=offer_info.currency,
+                    savings=offer_info.savings,
+                    savings_percentage=offer_info.savings_percentage,
+                    is_prime=offer_info.is_prime,
+                    is_amazon_fulfilled=offer_info.is_amazon_fulfilled,
+                    is_free_shipping_eligible=offer_info.is_free_shipping_eligible,
+                    availability=offer_info.availability,
+                    merchant_name=offer_info.merchant_name,
+                    is_buybox_winner=offer_info.is_buybox_winner,
+                    deal_type=offer_info.deal_type,
+                    coupon_type=offer_info.coupon_type,
+                    coupon_value=offer_info.coupon_value,
+                    commission=offer_info.commission,
+                    created_at=current_time,
+                    updated_at=current_time
+                )
+                db.add(offer)
+            
+            # 更新优惠券历史记录（如果提供了相关信息）
+            if offer_info := next((o for o in product_info.offers if o.coupon_type and o.coupon_value), None):
+                if product_info.coupon_expiration_date or product_info.coupon_terms or offer_info:
+                    # 查找是否已有优惠券历史记录
+                    existing_coupon = db.query(CouponHistory).filter(
+                        CouponHistory.product_id == existing_product.asin
+                    ).order_by(CouponHistory.updated_at.desc()).first()
+                    
+                    # 判断优惠券信息是否有变化
+                    coupon_changed = True
+                    if existing_coupon:
+                        coupon_changed = (
+                            existing_coupon.coupon_type != offer_info.coupon_type or
+                            existing_coupon.coupon_value != offer_info.coupon_value or
+                            existing_coupon.expiration_date != product_info.coupon_expiration_date or
+                            existing_coupon.terms != product_info.coupon_terms
+                        )
+                    
+                    # 如果有变化或是新的优惠券，创建新记录
+                    if coupon_changed:
+                        coupon_history = CouponHistory(
+                            product_id=existing_product.asin,
+                            coupon_type=offer_info.coupon_type,
+                            coupon_value=offer_info.coupon_value,
+                            expiration_date=product_info.coupon_expiration_date,
+                            terms=product_info.coupon_terms,
+                            created_at=current_time,
+                            updated_at=current_time
+                        )
+                        db.add(coupon_history)
+            
+            db.commit()
+            db.refresh(existing_product)
+            
+            # 从数据库重新加载并返回完整的ProductInfo
+            updated_product_info = ProductService.get_product_details_by_asin(db, product_info.asin)
+            if not updated_product_info:
+                # 如果查询失败，构造一个基本的 ProductInfo 返回
+                logger.warning(f"更新商品 {product_info.asin} 后未能从数据库重新检索，返回原始输入。")
+                return product_info
+                
+            return updated_product_info
+            
+        except ValueError as ve:
+            db.rollback()
+            logger.error(f"更新商品 {product_info.asin} 失败 (验证错误): {str(ve)}")
+            raise ve
+        except Exception as e:
+            db.rollback()
+            logger.error(f"更新商品 {product_info.asin} 数据库操作失败: {str(e)}")
+            raise Exception(f"数据库操作失败: {str(e)}")
+    
+    @staticmethod
     def update_product(db: Session, product_info: ProductInfo, source: str = "update") -> Optional[Product]:
         """
         更新商品信息
