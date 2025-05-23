@@ -469,14 +469,39 @@ class ProductService:
             if not product:
                 return None
             
+            # 解析JSON字符串
+            categories = json.loads(product.categories) if product.categories else []
+            browse_nodes = json.loads(product.browse_nodes) if product.browse_nodes else []
+            features = json.loads(product.features) if product.features else []
+            
+            # 确保解析后的数据是列表类型
+            if not isinstance(categories, list):
+                categories = []
+            if not isinstance(browse_nodes, list):
+                browse_nodes = []
+            if not isinstance(features, list):
+                features = []
+            
             # 获取商品的所有优惠信息
             offers = db.query(Offer).filter(Offer.product_id == product.asin).all()
-            print(f"Debug - 商品 {product.asin} 有 {len(offers)} 个优惠")
             
-            # 获取最新的优惠券历史记录
+            # 获取最新的优惠券历史记录，改用updated_at排序
             latest_coupon = db.query(CouponHistory).filter(
                 CouponHistory.product_id == product.asin
-            ).order_by(CouponHistory.created_at.desc()).first()
+            ).order_by(CouponHistory.updated_at.desc()).first()
+            
+            # 转换优惠券对象为字典
+            coupon_history = None
+            if latest_coupon:
+                coupon_history = {
+                    "id": latest_coupon.id,
+                    "product_id": latest_coupon.product_id,
+                    "coupon_type": latest_coupon.coupon_type,
+                    "coupon_value": latest_coupon.coupon_value,
+                    "expiration_date": latest_coupon.expiration_date.isoformat() if latest_coupon.expiration_date else None,
+                    "terms": latest_coupon.terms,
+                    "updated_at": latest_coupon.updated_at.isoformat() if latest_coupon.updated_at else None
+                }
                 
             return ProductInfo(
                 asin=product.asin,
@@ -485,6 +510,13 @@ class ProductService:
                 brand=product.brand,
                 main_image=product.main_image,
                 timestamp=product.timestamp or datetime.utcnow(),
+                binding=product.binding,
+                product_group=product.product_group,
+                categories=categories,
+                browse_nodes=browse_nodes,
+                features=features,
+                cj_url=product.cj_url if product.api_provider == "cj-api" else None,
+                api_provider=product.api_provider,
                 source=product.source,  # 添加数据来源字段
                 offers=[
                     ProductOffer(
@@ -499,16 +531,19 @@ class ProductService:
                         merchant_name=o.merchant_name or "Amazon",  # 提供默认值
                         is_buybox_winner=o.is_buybox_winner or False,
                         deal_type=o.deal_type,
-                        coupon_type=o.coupon_type if hasattr(o, 'coupon_type') else None,
-                        coupon_value=o.coupon_value if hasattr(o, 'coupon_value') else None
+                        coupon_type=getattr(o, 'coupon_type', None),
+                        coupon_value=getattr(o, 'coupon_value', None),
+                        commission=o.commission if product.api_provider == "cj-api" else None
                     ) for o in offers
                 ],
                 # 添加优惠券过期日期和条款
                 coupon_expiration_date=latest_coupon.expiration_date if latest_coupon else None,
-                coupon_terms=latest_coupon.terms if latest_coupon else None
+                coupon_terms=latest_coupon.terms if latest_coupon else None,
+                # 添加完整的优惠券历史信息
+                coupon_history=coupon_history
             )
         except Exception as e:
-            print(f"Debug - 获取商品 {asin} 详情时出错: {str(e)}")
+            logger.error(f"获取商品 {asin} 详情时出错: {str(e)}")
             raise e
     
     @staticmethod
@@ -601,11 +636,14 @@ class ProductService:
                         features = []
                     
                     # 如果提供了include_browse_nodes参数，进行筛选
-                    if include_browse_nodes:
-                        browse_nodes = [
+                    if include_browse_nodes and include_browse_nodes != ["string"]:  # 忽略默认的无效值
+                        filtered_nodes = [
                             node for node in browse_nodes 
                             if node.get('id') in include_browse_nodes
                         ]
+                        # 只有在找到匹配项时才使用筛选结果
+                        if filtered_nodes:
+                            browse_nodes = filtered_nodes
                     
                     # 获取商品的优惠信息
                     product_offers = offers_dict.get(asin, [])
@@ -701,11 +739,14 @@ class ProductService:
                 features = []
             
             # 如果提供了include_browse_nodes参数，进行筛选
-            if include_browse_nodes:
-                browse_nodes = [
+            if include_browse_nodes and include_browse_nodes != ["string"]:  # 忽略默认的无效值
+                filtered_nodes = [
                     node for node in browse_nodes 
                     if node.get('id') in include_browse_nodes
                 ]
+                # 只有在找到匹配项时才使用筛选结果
+                if filtered_nodes:
+                    browse_nodes = filtered_nodes
             
             # 获取商品的优惠信息
             offers = db.query(Offer).filter(Offer.product_id == product.asin).all()

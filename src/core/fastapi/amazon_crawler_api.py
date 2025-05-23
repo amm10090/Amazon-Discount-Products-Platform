@@ -998,12 +998,21 @@ async def query_product(
         HTTPException: 当查询失败时抛出
     """
     try:
-        products = ProductService.get_product_details_by_asin(
-            db, 
-            request.asins,
-            include_metadata=request.include_metadata,
-            include_browse_nodes=request.include_browse_nodes
-        )
+        # 如果是单个ASIN，传递字符串；否则传递列表
+        if len(request.asins) == 1:
+            products = ProductService.get_product_details_by_asin(
+                db, 
+                request.asins[0],  # 传递单个ASIN字符串
+                include_metadata=request.include_metadata,
+                include_browse_nodes=request.include_browse_nodes
+            )
+        else:
+            products = ProductService.get_product_details_by_asin(
+                db, 
+                request.asins,  # 传递ASIN列表
+                include_metadata=request.include_metadata,
+                include_browse_nodes=request.include_browse_nodes
+            )
         
         if not products:
             raise HTTPException(
@@ -1012,16 +1021,16 @@ async def query_product(
             )
             
         # 如果是单个ASIN的查询，直接返回结果
-        if isinstance(request.asins, str):
+        if len(request.asins) == 1:
             if products is None:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"未找到ASIN为 {request.asins} 的商品"
+                    detail=f"未找到ASIN为 {request.asins[0]} 的商品"
                 )
             
             # 确保使用products表中的current_price和original_price
             if products.offers and len(products.offers) > 0:
-                db_product = db.query(Product).filter(Product.asin == request.asins).first()
+                db_product = db.query(Product).filter(Product.asin == request.asins[0]).first()
                 if db_product and db_product.current_price is not None:
                     products.offers[0].price = db_product.current_price
                     # 确保original_price字段有值
